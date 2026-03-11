@@ -1,0 +1,1625 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import api from '../api.js';
+import MoveModal from './MoveModal.jsx';
+
+const CATEGORIES = [
+  { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
+  { value: 'location', label: 'Location',         color: '#3a8fc4' },
+  { value: 'faction',  label: 'Faction / Org',    color: '#8b2035' },
+  { value: 'item',     label: 'Item / Artifact',   color: '#6b3ac4' },
+  { value: 'event',    label: 'Quest / Event',     color: '#3ac48b' },
+  { value: 'lore',     label: 'Lore / History',    color: '#9a8535' },
+  { value: 'general',  label: 'General',           color: '#4a5568' },
+];
+
+export function getCategoryColor(cat) {
+  return CATEGORIES.find(c => c.value === cat)?.color || '#4a5568';
+}
+
+const S = {
+  wrap: {
+    display: 'flex', flexDirection: 'column', height: '100%',
+    background: '#0a0c14', position: 'relative', overflow: 'hidden',
+  },
+  header: {
+    padding: '20px 24px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
+    paddingBottom: '16px', flexShrink: 0,
+  },
+  titleRow: { display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '12px' },
+  titleInput: {
+    flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
+    fontFamily: 'Cinzel', fontSize: '20px', color: '#e2d5bb', fontWeight: '500',
+    padding: '4px 0', width: '100%',
+  },
+  metaRow: {
+    display: 'flex', gap: '12px', alignItems: 'center',
+    overflowX: 'auto', flexWrap: 'nowrap',
+    scrollbarWidth: 'none', // Firefox
+    msOverflowStyle: 'none', // IE
+  },
+  select: {
+    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '3px', color: '#e2d5bb', fontSize: '13px',
+    fontFamily: 'Cinzel', padding: '5px 10px', outline: 'none', cursor: 'pointer',
+  },
+  toggleShared: (shared) => ({
+    padding: '5px 12px', borderRadius: '3px', cursor: 'pointer',
+    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em',
+    border: '1px solid',
+    background: shared ? 'rgba(200,148,58,0.15)' : 'transparent',
+    borderColor: shared ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)',
+    color: shared ? '#c8943a' : 'rgba(226,213,187,0.4)',
+    transition: 'all 0.2s',
+  }),
+  saveBtn: (dirty) => ({
+    marginLeft: 'auto', padding: '5px 16px',
+    background: dirty ? 'linear-gradient(135deg, #c8943a, #a07030)' : 'transparent',
+    border: `1px solid ${dirty ? 'transparent' : 'rgba(226,213,187,0.2)'}`,
+    borderRadius: '3px', cursor: 'pointer',
+    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em',
+    color: dirty ? '#07080e' : 'rgba(226,213,187,0.6)',
+    transition: 'all 0.2s',
+  }),
+  viewToggle: {
+    display: 'flex', gap: '4px', padding: '2px',
+    background: 'rgba(255,255,255,0.04)', borderRadius: '4px',
+  },
+  viewBtn: (active) => ({
+    padding: '4px 10px', borderRadius: '3px', border: 'none', cursor: 'pointer',
+    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em',
+    background: active ? 'rgba(200,148,58,0.2)' : 'transparent',
+    color: active ? '#c8943a' : 'rgba(226,213,187,0.35)',
+    transition: 'all 0.2s',
+  }),
+  body: {
+    flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+  },
+  editor: {
+    flex: 1, width: '100%', background: 'transparent',
+    border: 'none', outline: 'none', resize: 'none',
+    color: '#e2d5bb', fontSize: '16px', fontFamily: 'Crimson Pro, serif',
+    lineHeight: '1.8', padding: '20px 24px',
+    overflowY: 'auto',
+  },
+  preview: {
+    flex: 1, overflowY: 'auto', padding: '20px 24px',
+    fontFamily: 'Crimson Pro, serif', fontSize: '16px',
+    lineHeight: '1.8', color: '#e2d5bb',
+  },
+  connections: {
+    borderTop: '1px solid rgba(255,255,255,0.05)',
+    padding: '14px 24px', flexShrink: 0,
+    background: 'rgba(0,0,0,0.2)',
+  },
+  connLabel: {
+    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em',
+    color: 'rgba(200,148,58,0.5)', marginBottom: '10px', textTransform: 'uppercase',
+  },
+  connList: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' },
+  connTag: (color) => ({
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    padding: '3px 10px', borderRadius: '20px',
+    background: `${color}18`, border: `1px solid ${color}50`,
+    fontSize: '13px', fontFamily: 'Crimson Pro, serif', color: '#e2d5bb',
+  }),
+  connRemove: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: 'rgba(226,213,187,0.3)', fontSize: '14px', padding: '0',
+    lineHeight: '1',
+  },
+  connSearch: {
+    position: 'relative', display: 'inline-block',
+  },
+  connInput: {
+    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '3px', color: '#e2d5bb', fontSize: '13px',
+    fontFamily: 'Crimson Pro, serif', padding: '4px 10px', outline: 'none',
+    width: '200px',
+  },
+  dropdown: {
+    position: 'absolute', bottom: '100%', left: 0, marginBottom: '4px',
+    background: '#141820', border: '1px solid rgba(200,148,58,0.25)',
+    borderRadius: '3px', minWidth: '200px', zIndex: 100,
+    maxHeight: '160px', overflowY: 'auto',
+    boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
+  },
+  dropItem: {
+    padding: '8px 12px', cursor: 'pointer', fontSize: '14px',
+    fontFamily: 'Crimson Pro, serif', color: '#e2d5bb',
+    display: 'flex', alignItems: 'center', gap: '8px',
+  },
+};
+
+export default function NoteEditor({ note, notes, connections, currentUser, dmCampaignIds, simulatedRole, onSave, onDelete, isMobile, onBackToList }) {
+  const [title, setTitle] = useState(note?.title || '');
+  const [content, setContent] = useState(note?.content || '');
+  const [category, setCategory] = useState(note?.category || 'general');
+  const [significance, setSignificance] = useState(note?.significance || 'standard');
+  const [narrativeWeight, setNarrativeWeight] = useState(note?.narrative_weight || 'node');
+  const [isShared, setIsShared] = useState(!!note?.is_shared);
+  const [dirty, setDirty] = useState(false);
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('chronicler_viewMode') || 'view');
+  const setAndPersistViewMode = (m) => { setViewMode(m); localStorage.setItem('chronicler_viewMode', m); };
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [connSearch, setConnSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showMove, setShowMove] = useState(false);
+  // Bottom drawer
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState('connections'); // 'connections'|'tags'|'images'|'permissions'
+  // Tags
+  const [tags, setTags] = useState(note?.tags || []);
+  const [tagInput, setTagInput] = useState('');
+  const [allTags, setAllTags] = useState([]);
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+  // Images
+  const [images, setImages] = useState([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showMdHelp, setShowMdHelp] = useState(false);
+  const imageInputRef = useRef(null);
+  const titleInputRef = useRef(null);
+  // Permissions
+  const [noteVisibility, setNoteVisibility] = useState(note?.visibility || 'hidden');
+  const [grantedUsers, setGrantedUsers] = useState(note?.granted_users || []);
+  const [allUsers, setAllUsers] = useState([]);
+  const [cascadeChildren, setCascadeChildren] = useState(false);
+  // DM Only flag
+  const [isDmOnly, setIsDmOnly] = useState(!!note?.is_dm_only);
+  // Campaign member management (root folder only)
+  const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [allSystemUsers, setAllSystemUsers] = useState([]); // all users for add-member dropdown
+  // In-session undo/redo
+  const undoStack = useRef([]); // [{title, content}]
+  const redoStack = useRef([]);
+  const skipUndoPush = useRef(false);
+  // Server version tracking for conflict detection
+  const serverUpdatedAt = useRef(note?.updated_at || null);
+  // Conflict state
+  const [conflict, setConflict] = useState(null); // { serverTitle, serverContent, serverUpdatedAt, myTitle, myContent }
+  // Refs to always-current handler functions (avoids stale closure in keydown listener)
+  const handleUndoRef = useRef(null);
+  const handleRedoRef = useRef(null);
+  const isAdminUser = simulatedRole ? false : !!currentUser.is_admin;
+  const isOwner     = simulatedRole === 'owner' ? true
+    : simulatedRole ? false
+    : (!note || note.user_id === currentUser.id);
+  const isGranted   = simulatedRole === 'granted' ? true
+    : simulatedRole ? false
+    : (!isOwner && !isAdminUser && (note?.granted_users || []).includes(currentUser.id));
+
+  // Check if current user is DM of this note's campaign
+  const isDM = (() => {
+    if (isAdminUser) return true;
+    if (!note || !dmCampaignIds || dmCampaignIds.length === 0) return false;
+    const notesById = new Map((notes || []).map(n => [n.id, n]));
+    let current = note;
+    while (current.parent_id) {
+      current = notesById.get(current.parent_id);
+      if (!current) return false;
+    }
+    return dmCampaignIds.includes(current.id);
+  })();
+
+  const isRootFolder = !!note?.is_folder && !note?.parent_id;
+  const canFullEdit = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isGranted);
+  const canManage   = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isDM); // rename, delete, move, perms
+  const canAppend   = isDM && !isOwner && !isGranted && !isAdminUser; // DM on someone else's note
+  const canEdit     = canFullEdit; // kept for backward compat with existing refs
+  const autoSaveTimer = useRef(null);
+  const [appendContent, setAppendContent] = useState('');
+  const [appendSaving, setAppendSaving] = useState(false);
+
+  // Refs for beforeunload (need current values without stale closures)
+  const titleRef = useRef(title);
+  const contentRef = useRef(content);
+  const categoryRef = useRef(category);
+  const significanceRef = useRef(significance);
+  const narrativeWeightRef = useRef(narrativeWeight);
+  const dirtyRef = useRef(dirty);
+  const noteIdRef = useRef(note?.id);
+  titleRef.current = title;
+  contentRef.current = content;
+  categoryRef.current = category;
+  significanceRef.current = significance;
+  narrativeWeightRef.current = narrativeWeight;
+  dirtyRef.current = dirty;
+  noteIdRef.current = note?.id;
+
+  // Note connections
+  const myConns = connections.filter(c =>
+    c.source_note_id === note?.id || c.target_note_id === note?.id
+  );
+
+  const connectedNoteIds = new Set(myConns.map(c =>
+    c.source_note_id === note?.id ? c.target_note_id : c.source_note_id
+  ));
+
+  // Reset state when note changes
+  useEffect(() => {
+    setTitle(note?.title || '');
+    setContent(note?.content || '');
+    setCategory(note?.category || 'general');
+    setSignificance(note?.significance || 'standard');
+    setNarrativeWeight(note?.narrative_weight || 'node');
+    setIsShared(note?.visibility === 'shared');
+    setNoteVisibility(note?.visibility || 'hidden');
+    setGrantedUsers(note?.granted_users || []);
+    setTags(note?.tags || []);
+    setIsDmOnly(!!note?.is_dm_only);
+    setTagInput('');
+    setDirty(false);
+    setSavedAt(null);
+    setViewMode(localStorage.getItem('chronicler_viewMode') || 'view');
+    setDrawerOpen(false);
+    setDrawerTab('connections');
+    setAddMemberSearch('');
+    undoStack.current = [];
+    redoStack.current = [];
+    serverUpdatedAt.current = note?.updated_at || null;
+    setConflict(null);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+  }, [note?.id]);
+
+  // Sync tags + permissions when server data updates
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setTags(note?.tags || []); }, [JSON.stringify(note?.tags)]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setNoteVisibility(note?.visibility || 'hidden');
+    setGrantedUsers(note?.granted_users || []);
+  }, [note?.visibility, JSON.stringify(note?.granted_users)]);
+
+  // Sync title/content from server when note updates externally (e.g. WS push from another user)
+  // Only applies when editor is clean — never overwrite unsaved local changes
+  useEffect(() => {
+    if (dirty) return;
+    setTitle(note?.title || '');
+    setContent(note?.content || '');
+    serverUpdatedAt.current = note?.updated_at || serverUpdatedAt.current;
+  }, [note?.title, note?.content]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load images for this note
+  useEffect(() => {
+    if (!note?.id) return;
+    api.get(`/images/note/${note.id}`).then(r => setImages(r.data)).catch(() => {});
+  }, [note?.id]);
+
+  // Load all tags for autocomplete (once)
+  useEffect(() => {
+    api.get('/notes/meta/tags').then(r => setAllTags(r.data.map(t => t.tag))).catch(() => {});
+  }, []);
+
+  // Load users for permissions panel — scoped to campaign members if inside a campaign
+  useEffect(() => {
+    if (!canManage) return;
+    if (isRootFolder) {
+      // We ARE the root — fetch this campaign's members directly
+      api.get('/notes/meta/users', { params: { campaign_id: note.id } }).then(r => setAllUsers(r.data)).catch(() => {});
+    } else {
+      // Walk up to find root campaign folder id
+      const notesById = new Map((notes || []).map(n => [n.id, n]));
+      let current = note;
+      while (current?.parent_id) current = notesById.get(current.parent_id);
+      const rootId = current?.id;
+      const params = rootId ? { campaign_id: rootId } : {};
+      api.get('/notes/meta/users', { params }).then(r => setAllUsers(r.data)).catch(() => {});
+    }
+  }, [note?.id, isRootFolder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load all system users for add-member dropdown (root folders only)
+  useEffect(() => {
+    if (!isRootFolder || !canManage) return;
+    api.get('/notes/meta/users').then(r => setAllSystemUsers(r.data)).catch(() => {});
+  }, [isRootFolder, note?.id]);
+
+
+  // Keyboard undo/redo (Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y)
+  // Uses refs so the listener never goes stale
+  useEffect(() => {
+    const handler = (e) => {
+      if (!canEdit) return;
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (isCtrl && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndoRef.current?.();
+      } else if (isCtrl && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedoRef.current?.();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canEdit]); // only re-registers if canEdit changes
+
+  // Save on page close / tab unload
+  useEffect(() => {
+    const handleUnload = () => {
+      if (!dirtyRef.current || !noteIdRef.current || !canEdit) return;
+      const body = JSON.stringify({
+        title: titleRef.current,
+        content: contentRef.current,
+        category: categoryRef.current,
+      });
+      navigator.sendBeacon
+        ? navigator.sendBeacon(`/api/notes/${noteIdRef.current}`, new Blob([body], { type: 'application/json' }))
+        : api.put(`/notes/${noteIdRef.current}`, JSON.parse(body)).catch(() => {});
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [isOwner]);
+
+  const doSave = useCallback(async (overrides = {}) => {
+    if (!noteIdRef.current || !canEdit) return;
+    const payload = {
+      title: titleRef.current,
+      content: contentRef.current,
+      category: categoryRef.current,
+      significance: significanceRef.current,
+      narrative_weight: narrativeWeightRef.current,
+      client_updated_at: serverUpdatedAt.current,
+      ...overrides,
+    };
+    if (!payload.title?.trim()) return;
+    setSaving(true);
+    try {
+      const res = await api.put(`/notes/${noteIdRef.current}`, payload);
+      // Update our tracked server timestamp so next save has the right baseline
+      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+      setDirty(false);
+      setSavedAt(new Date());
+      if (onSave) onSave(res.data);
+    } catch (err) {
+      if (err.response?.status === 409) {
+        const d = err.response.data;
+        setConflict({
+          serverTitle:      d.server_title,
+          serverContent:    d.server_content,
+          serverUpdatedAt:  d.server_updated_at,
+          serverUpdatedBy:  d.server_updated_by,
+          myTitle:          titleRef.current,
+          myContent:        contentRef.current,
+        });
+      } else {
+        console.error('Save failed', err);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [isOwner, onSave]);
+
+  const markDirty = () => {
+    setDirty(true);
+    if (!skipUndoPush.current) {
+      undoStack.current = [...undoStack.current.slice(-49), { title, content }];
+      redoStack.current = [];
+    }
+    skipUndoPush.current = false;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSave(), 1500);
+  };
+
+  const handleUndo = () => {
+    if (undoStack.current.length === 0) return;
+    const prev = undoStack.current[undoStack.current.length - 1];
+    undoStack.current = undoStack.current.slice(0, -1);
+    redoStack.current = [...redoStack.current, { title, content }];
+    skipUndoPush.current = true;
+    setTitle(prev.title);
+    setContent(prev.content);
+    setDirty(true);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSave(), 1500);
+  };
+  handleUndoRef.current = handleUndo;
+
+  const handleRedo = () => {
+    if (redoStack.current.length === 0) return;
+    const next = redoStack.current[redoStack.current.length - 1];
+    redoStack.current = redoStack.current.slice(0, -1);
+    undoStack.current = [...undoStack.current, { title, content }];
+    skipUndoPush.current = true;
+    setTitle(next.title);
+    setContent(next.content);
+    setDirty(true);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSave(), 1500);
+  };
+  handleRedoRef.current = handleRedo;
+
+
+
+  const handleSave = () => doSave();
+
+  const handleAddConnection = async (targetNote) => {
+    if (!note?.id) return;
+    try {
+      await api.post('/connections', {
+        source_note_id: note.id,
+        target_note_id: targetNote.id,
+      });
+      onSave(null); // trigger parent refresh
+    } catch (err) {
+      console.error(err);
+    }
+    setConnSearch('');
+    setShowDropdown(false);
+  };
+
+  const handleRemoveConnection = async (connId) => {
+    try {
+      await api.delete(`/connections/${connId}`);
+      onSave(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const saveTagsDirectly = async (newTags) => {
+    if (!note?.id) return;
+    await onSave({ tags: newTags });
+  };
+
+  const handleAddTag = (tag) => {
+    const clean = tag.replace(/^#/, '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!clean || tags.includes(clean)) return;
+    const next = [...tags, clean];
+    setTags(next);
+    setTagInput('');
+    setShowTagSuggestions(false);
+    saveTagsDirectly(next);
+  };
+
+  const handleRemoveTag = (tag) => {
+    const next = tags.filter(t => t !== tag);
+    setTags(next);
+    saveTagsDirectly(next);
+  };
+
+  const handleTagKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); handleAddTag(tagInput); }
+    if (e.key === 'Backspace' && !tagInput && tags.length) handleRemoveTag(tags[tags.length - 1]);
+    if (e.key === 'Escape') { setShowTagSuggestions(false); setTagInput(''); }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    const formData = new FormData();
+    formData.append('image', file);
+    try {
+      const res = await api.post(`/images/upload/${note.id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setImages(prev => [...prev, res.data]);
+    } catch (err) { console.error('Upload failed', err); }
+    setUploadingImage(false);
+    e.target.value = '';
+  };
+
+  const handleDeleteImage = async (imgId) => {
+    try {
+      await api.delete(`/images/${imgId}`);
+      setImages(prev => prev.filter(i => i.id !== imgId));
+    } catch (err) { console.error(err); }
+  };
+
+  const insertImageMarkdown = (img) => {
+    const md = `\n![${img.original_name}](${img.url})\n`;
+    setContent(prev => prev + md);
+    markDirty();
+  };
+
+  const savePermissions = async (newVisibility, newGranted, cascade = false) => {
+    if (!note?.id) return;
+    await onSave({ visibility: newVisibility, granted_users: newGranted, cascade_children: cascade });
+  };
+
+  const handleVisibilityChange = (newVis) => {
+    if (newVis === 'shared') {
+      // "Party Shared" = grant every current party member individually, keep visibility hidden
+      // Never use visibility='shared' which leaks to all users system-wide
+      const allPartyIds = allUsers.map(u => u.id);
+      setNoteVisibility('hidden');
+      setIsShared(false);
+      setGrantedUsers(allPartyIds);
+      savePermissions('hidden', allPartyIds, cascadeChildren);
+    } else {
+      // "Hidden" = clear all grants
+      setNoteVisibility('hidden');
+      setIsShared(false);
+      setGrantedUsers([]);
+      savePermissions('hidden', [], cascadeChildren);
+    }
+  };
+
+  const handleGrantToggle = (userId) => {
+    const next = grantedUsers.includes(userId)
+      ? grantedUsers.filter(id => id !== userId)
+      : [...grantedUsers, userId];
+    setGrantedUsers(next);
+    savePermissions(noteVisibility, next, cascadeChildren);
+  };
+
+  const handleDmOnlyToggle = async () => {
+    const next = !isDmOnly;
+    setIsDmOnly(next);
+    try {
+      await api.put(`/notes/${note.id}`, { is_dm_only: next ? 1 : 0 });
+      if (onSave) onSave();
+    } catch (err) {
+      setIsDmOnly(!next); // revert
+      console.error(err);
+    }
+  };
+
+  const handleAddMember = async (userId) => {
+    if (!note?.id) return;
+    const user = allSystemUsers.find(u => u.id === userId);
+    if (!user) return;
+    // Optimistic add
+    setAllUsers(prev => [...prev, { ...user, is_dm: 0 }]);
+    setAddMemberSearch('');
+    setShowAddMember(false);
+    try {
+      await api.put(`/notes/${note.id}/members`, { add_user_id: userId });
+    } catch (err) {
+      // Revert on failure
+      setAllUsers(prev => prev.filter(u => u.id !== userId));
+      console.error(err);
+    }
+  };
+
+  const handleRemoveMember = async (userId) => {
+    if (!note?.id) return;
+    const prev = allUsers;
+    // Optimistic remove
+    setAllUsers(p => p.filter(u => u.id !== userId));
+    try {
+      await api.put(`/notes/${note.id}/members`, { remove_user_id: userId });
+    } catch (err) {
+      setAllUsers(prev);
+      console.error(err);
+    }
+  };
+
+  const handleToggleDM = async (userId, currentlyDM) => {
+    if (!note?.id) return;
+    // Optimistic flip
+    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, is_dm: currentlyDM ? 0 : 1 } : u));
+    try {
+      await api.put(`/notes/${note.id}/members`, { set_dm: { user_id: userId, is_dm: !currentlyDM } });
+    } catch (err) {
+      // Revert on failure
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, is_dm: currentlyDM ? 1 : 0 } : u));
+      console.error(err);
+    }
+  };
+
+  const tagSuggestions = allTags.filter(t => t.includes(tagInput.toLowerCase()) && !tags.includes(t)).slice(0, 6);
+
+  const filteredNotes = notes.filter(n =>
+    n.id !== note?.id &&
+    !connectedNoteIds.has(n.id) &&
+    n.title.toLowerCase().includes(connSearch.toLowerCase())
+  ).slice(0, 8);
+
+  if (!note) {
+    return (
+      <div style={{ ...S.wrap, alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', opacity: 0.3 }}>
+          <div style={{ fontFamily: 'Cinzel', fontSize: '14px', letterSpacing: '0.2em', marginBottom: '8px', color: '#c8943a' }}>
+            SELECT A NOTE
+          </div>
+          <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', marginBottom: isMobile ? '20px' : 0 }}>
+            or create a new one from the sidebar
+          </div>
+          {isMobile && (
+            <button
+              onClick={onBackToList}
+              style={{ marginTop: '16px', padding: '12px 28px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em', color: '#c8943a', opacity: 1 }}
+            >
+              BROWSE NOTES
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const handleEditorKeyDown = (e) => {
+    if (!canEdit) return;
+    const ta   = e.target;
+    const val  = ta.value;
+    const ss   = ta.selectionStart;
+    const se   = ta.selectionEnd;
+    const sel  = val.slice(ss, se);
+    const meta = e.ctrlKey || e.metaKey;
+
+    const wrap = (before, after = before) => {
+      e.preventDefault();
+      const newVal = val.slice(0, ss) + before + sel + after + val.slice(se);
+      setContent(newVal); markDirty();
+      requestAnimationFrame(() => {
+        ta.selectionStart = ss + before.length;
+        ta.selectionEnd   = se + before.length;
+        ta.focus();
+      });
+    };
+
+    const prefixLines = (prefix) => {
+      e.preventDefault();
+      const lineStart = val.lastIndexOf('\n', ss - 1) + 1;
+      const lineEnd   = val.indexOf('\n', se);
+      const end       = lineEnd === -1 ? val.length : lineEnd;
+      const lines     = val.slice(lineStart, end).split('\n');
+      const toggled   = lines.map(l => l.startsWith(prefix) ? l.slice(prefix.length) : prefix + l);
+      setContent(val.slice(0, lineStart) + toggled.join('\n') + val.slice(end)); markDirty();
+      requestAnimationFrame(() => ta.focus());
+    };
+
+    // Tab / Shift+Tab — indent or outdent bullet lines
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const lineStart = val.lastIndexOf('\n', ss - 1) + 1;
+      const lineEnd   = val.indexOf('\n', se);
+      const end       = lineEnd === -1 ? val.length : lineEnd;
+      const lines     = val.slice(lineStart, end).split('\n');
+
+      const indented = lines.map(line => {
+        if (e.shiftKey) {
+          // Outdent: remove up to 2 leading spaces
+          return line.startsWith('  ') ? line.slice(2) : line.startsWith(' ') ? line.slice(1) : line;
+        } else {
+          // Indent: if not a list item yet, make it one; otherwise add 2 spaces
+          const isList = /^\s*(-|\*|\d+\.) /.test(line);
+          return isList ? '  ' + line : '- ' + line;
+        }
+      });
+
+      const newVal = val.slice(0, lineStart) + indented.join('\n') + val.slice(end);
+      const cursorShift = e.shiftKey
+        ? -Math.min(2, lines[0].match(/^  /) ? 2 : lines[0].match(/^ /) ? 1 : 0)
+        : (lines[0].match(/^\s*(-|\*|\d+\.) /) ? 2 : 2);
+      setContent(newVal); markDirty();
+      requestAnimationFrame(() => {
+        ta.selectionStart = Math.max(lineStart, ss + cursorShift);
+        ta.selectionEnd   = Math.max(lineStart, se + cursorShift);
+        ta.focus();
+      });
+      return;
+    }
+
+    // Enter — continue bullet/numbered list on next line, or break out on empty bullet
+    if (e.key === 'Enter') {
+      const lineStart  = val.lastIndexOf('\n', ss - 1) + 1;
+      const currentLine = val.slice(lineStart, ss);
+      const bulletMatch = currentLine.match(/^(\s*)(- \[[ x]\] |- |\* |\d+\. )/);
+      if (bulletMatch) {
+        e.preventDefault();
+        const indent = bulletMatch[1];
+        const marker = bulletMatch[2];
+        const lineContent = currentLine.slice(indent.length + marker.length);
+        if (!lineContent.trim()) {
+          // Empty bullet — break out: remove the prefix
+          const newVal = val.slice(0, lineStart) + indent + val.slice(ss);
+          setContent(newVal); markDirty();
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = lineStart + indent.length;
+            ta.focus();
+          });
+        } else {
+          // Continue the list
+          const nextMarker = marker.match(/^(\d+)\. /)
+            ? (parseInt(marker) + 1) + '. '
+            : marker.replace(/\[[ x]\] /, '[ ] '); // reset checkbox
+          const insertion = '\n' + indent + nextMarker;
+          const newVal = val.slice(0, ss) + insertion + val.slice(se);
+          setContent(newVal); markDirty();
+          requestAnimationFrame(() => {
+            ta.selectionStart = ta.selectionEnd = ss + insertion.length;
+            ta.focus();
+          });
+        }
+        return;
+      }
+    }
+
+    if (!meta) return;
+    if (e.key === 'b' || e.key === 'B') return wrap('**');
+    if (e.key === 'i' || e.key === 'I') return wrap('*');
+    if (e.key === '`')                   return wrap('`');
+    if (e.key === 'k' || e.key === 'K') {
+      e.preventDefault();
+      const link = '[' + (sel || 'text') + '](url)';
+      const newVal = val.slice(0, ss) + link + val.slice(se);
+      setContent(newVal); markDirty();
+      requestAnimationFrame(() => {
+        const urlStart = ss + (sel || 'text').length + 3;
+        ta.selectionStart = urlStart; ta.selectionEnd = urlStart + 3; ta.focus();
+      });
+      return;
+    }
+    if (e.shiftKey) {
+      if (e.key === 'X' || e.key === 'x') return wrap('~~');
+      if (e.key === '.' || e.key === '>')  return prefixLines('> ');
+      if (e.key === 'U' || e.key === 'u')  return prefixLines('- ');
+      if (e.key === '1' || e.key === '!')   return prefixLines('# ');
+      if (e.key === '2' || e.key === '@')   return prefixLines('## ');
+      if (e.key === '3' || e.key === '#')   return prefixLines('### ');
+    }
+  };
+
+  return (
+    <div style={S.wrap}>
+      {showMove && (
+        <MoveModal
+          note={note}
+          notes={notes}
+          onMove={async (newParentId) => {
+            await onSave({ parent_id: newParentId === undefined ? note.parent_id : newParentId });
+            setShowMove(false);
+          }}
+          onClose={() => setShowMove(false)}
+        />
+      )}
+      <div style={S.header}>
+        {isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', marginLeft: '-8px' }}>
+            <button
+              onClick={onBackToList}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#c8943a', fontSize: '22px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+              title="Back to notes"
+            >←</button>
+            <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)' }}>NOTES</span>
+          </div>
+        )}
+        <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } : S.titleRow}>
+          <input
+            ref={titleInputRef}
+            style={S.titleInput}
+            value={title}
+            onChange={(e) => { setTitle(e.target.value); markDirty(); }}
+            placeholder="Note title..."
+            disabled={!canEdit}
+          />
+          {canEdit && (
+            <div style={isMobile ? { display: 'flex', gap: '8px', flexWrap: 'wrap' } : { display: 'contents' }}>
+              {isMobile && (
+                <button
+                  style={{ ...S.saveBtn(false), marginLeft: 0, color: 'rgba(200,148,58,0.7)', borderColor: 'rgba(200,148,58,0.2)', flexShrink: 0, minHeight: '40px', padding: '8px 16px' }}
+                  onClick={() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); }}
+                  title="Rename this note"
+                >
+                  Rename
+                </button>
+              )}
+              <button
+                style={{ ...S.saveBtn(false), marginLeft: 0, color: 'rgba(200,148,58,0.7)', borderColor: 'rgba(200,148,58,0.35)', flexShrink: 0, ...(isMobile ? { minHeight: '40px', padding: '8px 16px' } : {}) }}
+                onClick={() => setShowMove(true)}
+                title="Move to a different folder"
+              >
+                Move
+              </button>
+              <button
+                style={{ ...S.saveBtn(false), marginLeft: 0, color: 'rgba(224,112,112,0.75)', borderColor: 'rgba(224,112,112,0.3)', flexShrink: 0, ...(isMobile ? { minHeight: '40px', padding: '8px 16px' } : {}) }}
+                onClick={() => onDelete(note.id, note.title, false)}
+                title="Delete this note"
+              >
+                Delete
+              </button>
+              {!!note?.recovered && (
+                <button
+                  style={{ ...S.saveBtn(false), marginLeft: 0, color: 'rgba(139,196,226,0.5)', borderColor: 'rgba(139,196,226,0.2)', flexShrink: 0, ...(isMobile ? { minHeight: '40px', padding: '8px 16px' } : {}) }}
+                  onClick={async () => {
+                    await api.put(`/notes/${note.id}/clear-recovered`);
+                    onSave(null);
+                  }}
+                  title="Remove the (Recovered) label and mark as original"
+                >
+                  ↩ Clear Recovered
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={{ ...S.metaRow, WebkitOverflowScrolling: 'touch' }} className="toolbar-scroll">
+          {!note?.is_folder && <select
+            style={{ ...S.select, borderColor: `${getCategoryColor(category)}50`, color: getCategoryColor(category), ...(isMobile ? { minHeight: '44px', fontSize: '14px' } : {}) }}
+            value={category}
+            onChange={(e) => { setCategory(e.target.value); markDirty(); }}
+            disabled={!canEdit}
+          >
+            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>}
+
+          {/* Significance tier */}
+          {!note?.is_folder && <select
+            style={{ ...S.select, maxWidth: '120px',
+              borderColor: significance === 'major' ? 'rgba(200,148,58,0.5)' : significance === 'minor' ? 'rgba(100,100,100,0.4)' : 'rgba(226,213,187,0.15)',
+              color: significance === 'major' ? '#c8943a' : significance === 'minor' ? 'rgba(226,213,187,0.35)' : 'rgba(226,213,187,0.55)',
+            }}
+            value={significance}
+            onChange={(e) => { setSignificance(e.target.value); markDirty(); }}
+            disabled={!canEdit}
+            title="Node significance — affects size in graph view"
+          >
+            <option value="major">★ Major</option>
+            <option value="standard">◆ Standard</option>
+            <option value="minor">◇ Minor</option>
+          </select>}
+
+          {/* Narrative weight */}
+          {!note?.is_folder && <select
+            style={{ ...S.select, maxWidth: '130px',
+              borderColor: narrativeWeight === 'landmark' ? 'rgba(139,196,226,0.5)' : narrativeWeight === 'detail' ? 'rgba(100,100,100,0.3)' : 'rgba(226,213,187,0.15)',
+              color: narrativeWeight === 'landmark' ? 'rgba(139,196,226,0.85)' : narrativeWeight === 'detail' ? 'rgba(226,213,187,0.3)' : 'rgba(226,213,187,0.55)',
+            }}
+            value={narrativeWeight}
+            onChange={(e) => { setNarrativeWeight(e.target.value); markDirty(); }}
+            disabled={!canEdit}
+            title="Narrative weight — affects graph rendering"
+          >
+            <option value="landmark">⬡ Landmark</option>
+            <option value="node">● Node</option>
+            <option value="detail">○ Detail</option>
+          </select>}
+
+          {/* DM Only badge — visible in toolbar when flag is set */}
+          {isDmOnly && (
+            <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.8)', padding: '4px 8px', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', background: 'rgba(200,148,58,0.08)', flexShrink: 0 }}>⚔ DM ONLY</span>
+          )}
+
+          {/* Permissions button — owner or admin can manage */}
+          {canManage && (
+            <button
+              style={{ ...S.toggleShared(noteVisibility === 'shared'), position: 'relative' }}
+              onClick={() => { setDrawerTab('permissions'); setDrawerOpen(true); }}
+              title="Manage access"
+            >
+              {noteVisibility === 'shared' ? '⚔ Party Shared' : '🔒 Hidden'}
+              {grantedUsers.length > 0 && noteVisibility === 'hidden' && (
+                <span style={{ marginLeft: '5px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.6)' }}>+{grantedUsers.length}</span>
+              )}
+            </button>
+          )}
+          {!canManage && !canFullEdit && !canAppend && (
+            <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.25)', padding: '4px 8px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px' }}>
+              {note?.visibility === 'shared' ? '⚔ Shared' : '👁 Granted'}
+            </span>
+          )}
+
+          {/* Who can see this — eyeball hover tooltip */}
+          <WhoCanSee note={note} allUsers={allUsers} currentUser={currentUser} />
+
+          {/* Undo / Redo */}
+          {canEdit && (
+            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+              <button
+                onClick={handleUndo}
+                disabled={undoStack.current.length === 0}
+                title="Undo (Ctrl+Z)"
+                style={{ ...S.viewBtn(false), opacity: undoStack.current.length === 0 ? 0.25 : 0.7, fontSize: '13px', padding: '3px 7px' }}
+              >↩</button>
+              <button
+                onClick={handleRedo}
+                disabled={redoStack.current.length === 0}
+                title="Redo (Ctrl+Shift+Z)"
+                style={{ ...S.viewBtn(false), opacity: redoStack.current.length === 0 ? 0.25 : 0.7, fontSize: '13px', padding: '3px 7px' }}
+              >↪</button>
+            </div>
+          )}
+
+          <div style={S.viewToggle}>
+            <button style={S.viewBtn(viewMode === 'view')} onClick={() => setAndPersistViewMode('view')}>View</button>
+            <button style={S.viewBtn(viewMode === 'edit')} onClick={() => setAndPersistViewMode('edit')}>Edit</button>
+          </div>
+          <button
+            onClick={() => setShowMdHelp(v => !v)}
+            style={{ ...S.viewBtn(showMdHelp), marginLeft: '2px', fontSize: '11px', padding: '4px 8px' }}
+            title="Markdown reference"
+          >?</button>
+
+          {canEdit && dirty && (
+            <button style={S.saveBtn(true)} onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          )}
+
+          {canEdit && !dirty && savedAt && (
+            <span style={{ marginLeft: 'auto', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.4)' }}>
+              ✓ Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+
+        </div>
+      </div>
+
+      <div style={S.body}>
+        {viewMode === 'edit' ? (
+          <textarea
+            style={S.editor}
+            value={content}
+            onChange={(e) => { setContent(e.target.value); markDirty(); }}
+            onKeyDown={handleEditorKeyDown}
+            placeholder={canEdit ? "Write your notes here... Markdown is supported." : canAppend ? "This note belongs to another party member. You can append a DM addition below." : "This is a read-only shared note."}
+            readOnly={!canEdit}
+            spellCheck={false}
+          />
+        ) : (
+          <div style={S.preview} className="md-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || '*No content yet.*'}</ReactMarkdown>
+            <style>{`
+              .md-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
+              .md-content h1, .md-content h2, .md-content h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 16px 0 6px; }
+              .md-content p { margin: 0 0 10px; }
+              .md-content ul, .md-content ol { padding-left: 20px; margin: 0 0 10px; }
+              .md-content blockquote { border-left: 2px solid rgba(200,148,58,0.3); margin: 0 0 10px; padding: 4px 12px; color: rgba(226,213,187,0.6); font-style: italic; }
+              .md-content code { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 5px; font-size: 14px; font-family: monospace; }
+              .md-content strong { color: #e2d5bb; } .md-content em { color: rgba(226,213,187,0.75); }
+              .md-content hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 14px 0; }
+              .md-content a { color: #c8943a; }
+            `}</style>
+          </div>
+        )}
+
+        {/* DM Append section — shown when DM is viewing someone else's note */}
+        {canAppend && (
+          <div style={{ borderTop: '1px solid rgba(200,148,58,0.2)', padding: '12px 20px', background: 'rgba(200,148,58,0.04)' }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '8px' }}>
+              ⚔ DM ADDITION — appended with your name and date
+            </div>
+            <textarea
+              style={{
+                width: '100%', minHeight: '80px', background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px',
+                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif',
+                padding: '8px 12px', resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+              }}
+              placeholder="Write your DM addition here... It will be permanently appended to this note."
+              value={appendContent}
+              onChange={e => setAppendContent(e.target.value)}
+            />
+            <button
+              style={{
+                marginTop: '8px', padding: '5px 16px',
+                background: appendContent.trim() ? 'linear-gradient(135deg, #c8943a, #a07030)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${appendContent.trim() ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
+                borderRadius: '3px', cursor: appendContent.trim() ? 'pointer' : 'not-allowed',
+                fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+                color: appendContent.trim() ? '#07080e' : 'rgba(226,213,187,0.3)',
+              }}
+              disabled={!appendContent.trim() || appendSaving}
+              onClick={async () => {
+                if (!appendContent.trim() || !note?.id) return;
+                setAppendSaving(true);
+                try {
+                  await api.put(`/notes/${note.id}`, { append_content: appendContent });
+                  setAppendContent('');
+                  if (onSave) onSave();
+                } catch (err) {
+                  console.error('Append failed', err);
+                } finally {
+                  setAppendSaving(false);
+                }
+              }}
+            >
+              {appendSaving ? 'APPENDING...' : '⚔ APPEND TO NOTE'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom Drawer: handle bar ── */}
+      <div style={{
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+        background: 'rgba(7,8,14,0.6)',
+        display: 'flex', alignItems: 'center',
+        padding: '0 16px',
+        flexShrink: 0,
+        userSelect: 'none',
+      }}>
+        {/* Tabs */}
+        {[
+          { id: 'connections', label: `Connections${myConns.length ? ` (${myConns.length})` : ''}` },
+          { id: 'tags',        label: `Tags${tags.length ? ` (${tags.length})` : ''}` },
+          { id: 'images',      label: `Images${images.length ? ` (${images.length})` : ''}` },
+          ...(canManage ? [{ id: 'permissions', label: noteVisibility === 'shared' ? '⚔ Party Shared' : '🔒 Access' }] : []),
+        ].map(tab => (
+          <button key={tab.id}
+            onClick={() => { setDrawerTab(tab.id); setDrawerOpen(o => drawerTab === tab.id ? !o : true); }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+              color: drawerOpen && drawerTab === tab.id ? '#c8943a' : 'rgba(226,213,187,0.3)',
+              padding: isMobile ? '12px 14px' : '8px 12px',
+              minHeight: isMobile ? '44px' : 'auto',
+              borderBottom: drawerOpen && drawerTab === tab.id ? '2px solid rgba(200,148,58,0.6)' : '2px solid transparent',
+              transition: 'all 0.15s',
+            }}
+          >{tab.label}</button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => setDrawerOpen(o => !o)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.25)', fontSize: '14px', padding: '6px 8px', lineHeight: 1, transition: 'transform 0.2s', transform: drawerOpen ? 'rotate(180deg)' : 'none' }}
+          title={drawerOpen ? 'Collapse' : 'Expand'}
+        >⌃</button>
+      </div>
+
+      {/* ── Bottom Drawer: panel ── */}
+      <div style={{
+        overflow: 'hidden',
+        maxHeight: drawerOpen ? (isMobile ? '40vh' : '280px') : '0',
+        transition: 'max-height 0.22s ease',
+        flexShrink: 0,
+        background: 'rgba(0,0,0,0.25)',
+        borderTop: drawerOpen ? '1px solid rgba(255,255,255,0.05)' : 'none',
+      }}>
+        <div style={{ padding: '14px 24px', overflowY: 'auto', maxHeight: isMobile ? '40vh' : '280px' }}>
+
+          {/* Connections tab */}
+          {drawerTab === 'connections' && (
+            <div>
+              {myConns.length > 0 && (
+                <div style={S.connList}>
+                  {myConns.map(conn => {
+                    const linkedId = conn.source_note_id === note.id ? conn.target_note_id : conn.source_note_id;
+                    const linkedNote = notes.find(n => n.id === linkedId);
+                    if (!linkedNote) return null;
+                    const color = getCategoryColor(linkedNote.category);
+                    return (
+                      <span key={conn.id} style={S.connTag(color)}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, flexShrink: 0 }} />
+                        {linkedNote.title}
+                        <button style={S.connRemove} onClick={() => handleRemoveConnection(conn.id)}>×</button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={S.connSearch}>
+                <input
+                  style={S.connInput}
+                  value={connSearch}
+                  onChange={(e) => { setConnSearch(e.target.value); setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                  placeholder="+ Link another note..."
+                />
+                {showDropdown && connSearch && filteredNotes.length > 0 && (
+                  <div style={{ ...S.dropdown, bottom: 'auto', top: '100%', marginTop: '4px', marginBottom: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.6)' }}>
+                    {filteredNotes.map(n => (
+                      <div key={n.id} style={S.dropItem}
+                        onMouseDown={() => handleAddConnection(n)}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(200,148,58,0.08)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: getCategoryColor(n.category), flexShrink: 0 }} />
+                        {n.title}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tags tab */}
+          {drawerTab === 'tags' && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' }}>
+              {tags.map(tag => (
+                <span key={tag} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '4px',
+                  padding: '2px 8px', borderRadius: '10px', fontSize: '11px',
+                  background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.25)',
+                  color: '#c8943a', fontFamily: 'Cinzel', letterSpacing: '0.05em',
+                }}>
+                  #{tag}
+                  {canEdit && <button onClick={() => handleRemoveTag(tag)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(200,148,58,0.5)', padding: '0 0 0 2px', fontSize: '12px', lineHeight: 1 }}>×</button>}
+                </span>
+              ))}
+              {canEdit && (
+                <div style={{ position: 'relative' }}>
+                  <input
+                    style={{ ...S.connInput, width: '120px', paddingLeft: '8px' }}
+                    value={tagInput}
+                    onChange={e => { setTagInput(e.target.value); setShowTagSuggestions(true); }}
+                    onKeyDown={handleTagKeyDown}
+                    onFocus={() => setShowTagSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowTagSuggestions(false), 150)}
+                    placeholder="+ add tag..."
+                  />
+                  {showTagSuggestions && tagSuggestions.length > 0 && (
+                    <div style={{ ...S.dropdown, bottom: 'auto', top: '100%', marginTop: '4px', minWidth: '140px' }}>
+                      {tagSuggestions.map(t => (
+                        <div key={t} style={S.dropItem}
+                          onMouseDown={() => handleAddTag(t)}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,148,58,0.08)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >#{t}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {tags.length === 0 && !canEdit && <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.25)', fontStyle: 'italic' }}>No tags.</span>}
+            </div>
+          )}
+
+          {/* Images tab */}
+          {drawerTab === 'images' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: images.length ? '10px' : 0 }}>
+                {canEdit && (
+                  <>
+                    <input ref={imageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+                    <button
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={uploadingImage}
+                      style={{ padding: '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)' }}
+                    >{uploadingImage ? 'UPLOADING...' : '+ UPLOAD IMAGE'}</button>
+                  </>
+                )}
+              </div>
+              {images.length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {images.map(img => (
+                    <div key={img.id} style={{ position: 'relative' }}>
+                      <img
+                        src={img.url} alt={img.original_name}
+                        style={{ width: '72px', height: '72px', objectFit: 'cover', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}
+                        onClick={() => insertImageMarkdown(img)}
+                        title={`Click to insert: ${img.original_name}`}
+                      />
+                      {canEdit && (
+                        <button onClick={() => handleDeleteImage(img.id)}
+                          style={{ position: 'absolute', top: '2px', right: '2px', background: 'rgba(0,0,0,0.7)', border: 'none', borderRadius: '50%', width: '16px', height: '16px', cursor: 'pointer', color: 'rgba(226,213,187,0.7)', fontSize: '10px', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >×</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.25)', fontStyle: 'italic' }}>No images attached.</span>
+              )}
+            </div>
+          )}
+
+          {/* Permissions tab */}
+          {drawerTab === 'permissions' && canManage && (
+            <div>
+              {/* DM Only toggle — available on any note/folder for DMs and admins */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px', marginBottom: '14px', borderRadius: '3px', background: isDmOnly ? 'rgba(200,148,58,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${isDmOnly ? 'rgba(200,148,58,0.25)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}
+                onClick={handleDmOnlyToggle}
+              >
+                <button
+                  style={{
+                    width: '32px', height: '18px', borderRadius: '9px', cursor: 'pointer',
+                    border: 'none', position: 'relative', flexShrink: 0,
+                    background: isDmOnly ? 'rgba(200,148,58,0.6)' : 'rgba(255,255,255,0.1)',
+                    transition: 'background 0.2s',
+                  }}
+                  onClick={e => { e.stopPropagation(); handleDmOnlyToggle(); }}
+                >
+                  <span style={{ position: 'absolute', top: '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.15s', left: isDmOnly ? '16px' : '2px' }} />
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: isDmOnly ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>⚔ DM ONLY</div>
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', fontStyle: 'italic', marginTop: '2px' }}>
+                    {isDmOnly ? 'Hidden from party members — visible to DMs and admins only' : 'Visible to all party members with access'}
+                  </div>
+                </div>
+              </div>
+              {/* Root folder: campaign member + DM management */}
+              {isRootFolder ? (
+                <div>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '10px' }}>PARTY MEMBERS</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' }}>
+                    {allUsers.map(u => (
+                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 10px', borderRadius: '3px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.85)', flex: 1 }}>
+                          {u.username}
+                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                        </span>
+                        {/* DM label + toggle */}
+                        <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: u.is_dm ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.18)' }}>DM</span>
+                        <button
+                          onClick={() => handleToggleDM(u.id, !!u.is_dm)}
+                          title={u.is_dm ? 'Remove DM role' : 'Assign as DM'}
+                          style={{
+                            width: '30px', height: '16px', borderRadius: '8px', cursor: 'pointer',
+                            border: 'none', position: 'relative', flexShrink: 0,
+                            background: u.is_dm ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.1)',
+                            transition: 'background 0.2s',
+                          }}
+                        >
+                          <span style={{ position: 'absolute', top: '2px', width: '12px', height: '12px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.15s', left: u.is_dm ? '16px' : '2px' }} />
+                        </button>
+                        {/* Remove from party */}
+                        <button
+                          onClick={() => handleRemoveMember(u.id)}
+                          title="Remove from party"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.35)', fontSize: '14px', padding: '0 2px', lineHeight: 1, flexShrink: 0, transition: 'color 0.15s' }}
+                          onMouseEnter={e => e.currentTarget.style.color = 'rgba(224,112,112,0.75)'}
+                          onMouseLeave={e => e.currentTarget.style.color = 'rgba(224,112,112,0.35)'}
+                        >×</button>
+                      </div>
+                    ))}
+                    {allUsers.length === 0 && (
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.25)', fontStyle: 'italic' }}>No other party members yet.</div>
+                    )}
+                  </div>
+
+                  {/* Add member — button + inline popover */}
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <button
+                      onClick={() => { setShowAddMember(v => !v); setAddMemberSearch(''); }}
+                      style={{
+                        padding: '5px 14px', borderRadius: '3px', cursor: 'pointer',
+                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+                        background: showAddMember ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
+                        border: `1px solid ${showAddMember ? 'rgba(200,148,58,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                        color: showAddMember ? '#c8943a' : 'rgba(226,213,187,0.45)',
+                        transition: 'all 0.15s',
+                      }}
+                    >⊕ ADD TO PARTY</button>
+
+                    {showAddMember && (() => {
+                      const existing = new Set(allUsers.map(u => u.id));
+                      const available = allSystemUsers.filter(u =>
+                        !existing.has(u.id) &&
+                        (!addMemberSearch || u.username.toLowerCase().includes(addMemberSearch.toLowerCase()))
+                      );
+                      return (
+                        <div style={{
+                          position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 50,
+                          background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+                          borderRadius: '4px', minWidth: '200px', maxHeight: '220px',
+                          boxShadow: '0 6px 24px rgba(0,0,0,0.6)', overflow: 'hidden',
+                          display: 'flex', flexDirection: 'column',
+                        }}>
+                          <div style={{ padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
+                            <input
+                              autoFocus
+                              style={{ ...S.connInput, width: '100%', boxSizing: 'border-box', fontSize: '12px', padding: '4px 8px' }}
+                              value={addMemberSearch}
+                              onChange={e => setAddMemberSearch(e.target.value)}
+                              placeholder="Filter users..."
+                            />
+                          </div>
+                          <div style={{ overflowY: 'auto', flex: 1 }}>
+                            {available.length === 0 ? (
+                              <div style={{ padding: '10px 12px', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)', fontStyle: 'italic' }}>
+                                {allSystemUsers.length === 0 ? 'No other users in system.' : 'All users already in party.'}
+                              </div>
+                            ) : available.map(u => (
+                              <div key={u.id}
+                                onClick={() => handleAddMember(u.id)}
+                                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', transition: 'background 0.1s' }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,148,58,0.08)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.75)', flex: 1 }}>{u.username}</span>
+                                {!!u.is_admin && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.08em' }}>ADMIN</span>}
+                                <span style={{ color: 'rgba(58,196,139,0.5)', fontSize: '14px', lineHeight: 1 }}>+</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                /* Non-root note/folder */
+                <div>
+                  {isDmOnly ? (
+                    /* DM Only is on — show per-member grant toggles */
+                    <div>
+                      <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)', marginBottom: '10px' }}>
+                        ⚔ DM ONLY — GRANT INDIVIDUAL ACCESS
+                      </div>
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', fontStyle: 'italic', marginBottom: '12px' }}>
+                        DMs always have access. Toggle individual party members below.
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                        {allUsers.map(u => {
+                          const isDmMember = !!u.is_dm || !!u.is_admin;
+                          const granted = isDmMember || grantedUsers.includes(u.id);
+                          return (
+                            <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 8px', borderRadius: '3px', background: granted ? 'rgba(58,196,139,0.05)' : 'rgba(255,255,255,0.02)', border: `1px solid ${granted ? 'rgba(58,196,139,0.12)' : 'transparent'}` }}>
+                              <button
+                                disabled={isDmMember}
+                                onClick={() => !isDmMember && handleGrantToggle(u.id)}
+                                style={{ width: '32px', height: '18px', borderRadius: '9px', cursor: isDmMember ? 'default' : 'pointer', border: 'none', position: 'relative', flexShrink: 0, background: granted ? 'rgba(58,196,139,0.4)' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', opacity: isDmMember ? 0.5 : 1 }}
+                              >
+                                <span style={{ position: 'absolute', top: '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.2s', left: granted ? '16px' : '2px' }} />
+                              </button>
+                              <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: granted ? 'rgba(226,213,187,0.8)' : 'rgba(226,213,187,0.3)', flex: 1 }}>
+                                {u.username}
+                                {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                                {!u.is_admin && !!u.is_dm && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>DM</span>}
+                              </span>
+                              {isDmMember && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.4)', letterSpacing: '0.08em' }}>ALWAYS</span>}
+                              {!isDmMember && granted && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>GRANTED</span>}
+                            </div>
+                          );
+                        })}
+                        {allUsers.length === 0 && (
+                          <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.25)', fontStyle: 'italic' }}>No other party members.</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Normal mode — visibility + grant toggles */
+                    <div>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+                        {(() => {
+                          const allPartyGranted = allUsers.length > 0 && allUsers.every(u => grantedUsers.includes(u.id));
+                          return [
+                            { val: 'hidden', label: '🔒 Hidden',       desc: 'Only you (+ granted users)', active: !allPartyGranted },
+                            { val: 'shared', label: '⚔ Party Shared', desc: 'Grant access to all party',  active: allPartyGranted },
+                          ].map(({ val, label, desc, active }) => (
+                            <button key={val} onClick={() => handleVisibilityChange(val)} style={{
+                              flex: 1, padding: '8px 6px', borderRadius: '3px', cursor: 'pointer',
+                              fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em',
+                              background: active ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)',
+                              border: `1px solid ${active ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                              color: active ? '#c8943a' : 'rgba(226,213,187,0.35)',
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px',
+                            }}>
+                              <span>{label}</span>
+                              <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '10px', letterSpacing: '0', opacity: 0.6, textTransform: 'none' }}>{desc}</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                      {allUsers.length > 0 && (
+                        <>
+                          {(() => {
+                            const allPartyGranted = allUsers.every(u => grantedUsers.includes(u.id));
+                            return (
+                              <>
+                                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', marginBottom: '8px' }}>
+                                  {allPartyGranted ? 'ALL PARTY MEMBERS HAVE ACCESS' : 'GRANT ACCESS TO SPECIFIC USERS'}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                  {allUsers.map(u => {
+                                    const granted = grantedUsers.includes(u.id);
+                                    return (
+                                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 8px', borderRadius: '3px', background: granted ? 'rgba(58,196,139,0.05)' : 'rgba(255,255,255,0.02)', border: `1px solid ${granted ? 'rgba(58,196,139,0.12)' : 'transparent'}` }}>
+                                        <button onClick={() => handleGrantToggle(u.id)} style={{ width: '32px', height: '18px', borderRadius: '9px', cursor: 'pointer', border: 'none', position: 'relative', flexShrink: 0, background: granted ? 'rgba(58,196,139,0.4)' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s' }}>
+                                          <span style={{ position: 'absolute', top: '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.2s', left: granted ? '16px' : '2px' }} />
+                                        </button>
+                                        <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: granted ? 'rgba(226,213,187,0.8)' : 'rgba(226,213,187,0.3)', flex: 1 }}>
+                                          {u.username}
+                                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                                        </span>
+                                        {granted && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>CAN VIEW & EDIT</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {!!note?.is_folder && (
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => setCascadeChildren(c => !c)}>
+                      <div style={{ width: '16px', height: '16px', borderRadius: '3px', flexShrink: 0, border: `1px solid ${cascadeChildren ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.15)'}`, background: cascadeChildren ? 'rgba(200,148,58,0.2)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {cascadeChildren && <span style={{ color: '#c8943a', fontSize: '10px', lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: cascadeChildren ? 'rgba(226,213,187,0.7)' : 'rgba(226,213,187,0.35)' }}>Apply to all contents of this folder</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* Markdown help slide-out panel */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 20,
+        display: 'flex', pointerEvents: 'none',
+      }}>
+        {/* Sliding panel */}
+        <div style={{
+          pointerEvents: 'all',
+          background: 'rgba(7,8,14,0.97)', borderLeft: '1px solid rgba(200,148,58,0.25)',
+          width: showMdHelp ? '240px' : '0',
+          overflow: 'hidden',
+          transition: 'width 0.22s ease',
+          overflowY: showMdHelp ? 'auto' : 'hidden',
+        }}>
+          <div style={{ width: '220px', padding: '16px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)' }}>MARKDOWN REFERENCE</div>
+              <button
+                onClick={() => setShowMdHelp(false)}
+                style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,213,187,0.4)', fontSize: '12px', padding: '1px 6px', fontFamily: 'Cinzel', letterSpacing: '0.05em', lineHeight: 1.4 }}
+                title="Close"
+              >✕</button>
+            </div>
+            {[
+              { syntax: '# Heading 1',        shortcut: 'Ctrl+Shift+1' },
+              { syntax: '## Heading 2',        shortcut: 'Ctrl+Shift+2' },
+              { syntax: '### Heading 3',       shortcut: 'Ctrl+Shift+3' },
+              { syntax: '**bold**',            shortcut: 'Ctrl+B' },
+              { syntax: '*italic*',            shortcut: 'Ctrl+I' },
+              { syntax: '~~strikethrough~~',   shortcut: 'Ctrl+Shift+X' },
+              { syntax: '`inline code`',       shortcut: 'Ctrl+`' },
+              { syntax: '[text](url)',          shortcut: 'Ctrl+K' },
+              { syntax: '> blockquote',        shortcut: 'Ctrl+Shift+.' },
+              { syntax: '- bullet',            shortcut: 'Ctrl+Shift+U' },
+              { syntax: '1. numbered',         shortcut: null },
+              { syntax: '- [ ] / - [x] task', shortcut: null },
+              { syntax: '```\ncode block\n```',shortcut: null },
+              { syntax: '---  (divider)',       shortcut: null },
+              { syntax: '| col | col |',        shortcut: null },
+              { syntax: 'Tab / Shift+Tab',      shortcut: 'indent / outdent' },
+              { syntax: 'Enter in list',        shortcut: 'continue list' },
+            ].map(({ syntax, shortcut }) => (
+              <div key={syntax} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '6px', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'rgba(200,148,58,0.85)', whiteSpace: 'nowrap' }}>{syntax}</span>
+                {shortcut && (
+                  <span style={{ fontFamily: 'monospace', fontSize: '8px', color: 'rgba(200,148,58,0.55)', background: 'rgba(200,148,58,0.06)', padding: '1px 4px', borderRadius: '3px', border: '1px solid rgba(200,148,58,0.12)', whiteSpace: 'nowrap', flexShrink: 0 }}>{shortcut}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {conflict && (
+        <ConflictModal
+          conflict={conflict}
+          onKeepMine={() => {
+            serverUpdatedAt.current = conflict.serverUpdatedAt;
+            setConflict(null);
+            doSave();
+          }}
+          onKeepTheirs={() => {
+            setTitle(conflict.serverTitle);
+            setContent(conflict.serverContent);
+            serverUpdatedAt.current = conflict.serverUpdatedAt;
+            setConflict(null);
+            setDirty(false);
+          }}
+          onKeepBoth={() => {
+            const divider = `\n\n---\n*✏ My edits — ${new Date().toLocaleString()}:*\n`;
+            const merged = conflict.serverContent + divider + conflict.myContent;
+            setContent(merged);
+            serverUpdatedAt.current = conflict.serverUpdatedAt;
+            setConflict(null);
+            setDirty(true);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Eyeball tooltip — who can see this note
+function WhoCanSee({ note, allUsers, currentUser }) {
+  const [hovered, setHovered] = useState(false);
+  if (!note) return null;
+
+  const getViewers = () => {
+    if (note.visibility === 'shared') return ['Everyone'];
+    const names = [];
+    // Owner always sees it
+    const ownerName = note.author || 'You';
+    names.push(`${ownerName} (owner)`);
+    // Admins always see it
+    allUsers.filter(u => u.is_admin && u.id !== note.user_id).forEach(u => names.push(`${u.username} (admin)`));
+    // Granted users
+    (note.granted_users || []).forEach(uid => {
+      const u = allUsers.find(u => u.id === uid);
+      if (u && !u.is_admin) names.push(u.username);
+    });
+    return names;
+  };
+
+  const viewers = getViewers();
+
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}>
+      <span style={{ fontSize: '13px', cursor: 'default', opacity: 0.35, userSelect: 'none', lineHeight: 1 }} title="Who can see this">👁</span>
+      {hovered && (
+        <div style={{
+          position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
+          marginTop: '6px', zIndex: 100,
+          background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+          borderRadius: '4px', padding: '8px 12px', minWidth: '160px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>VISIBLE TO</div>
+          {viewers.map((v, i) => (
+            <div key={i} style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.7)', lineHeight: '1.6' }}>{v}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Conflict resolution modal
+function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
+  const overlay = {
+    position: 'fixed', inset: 0, zIndex: 2000,
+    background: 'rgba(7,8,14,0.88)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    backdropFilter: 'blur(2px)',
+  };
+  const modal = {
+    background: '#0e1020',
+    border: '1px solid rgba(224,112,112,0.35)',
+    borderRadius: '6px',
+    width: '640px', maxHeight: '80vh',
+    display: 'flex', flexDirection: 'column',
+    overflow: 'hidden',
+    boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+  };
+  const pane = {
+    overflowY: 'auto',
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    borderRadius: '3px',
+    fontFamily: 'Crimson Pro, serif',
+    fontSize: '13px',
+    color: 'rgba(226,213,187,0.7)',
+    whiteSpace: 'pre-wrap',
+    lineHeight: '1.5',
+    maxHeight: '180px',
+  };
+  const btnBase = {
+    borderRadius: '4px', padding: '8px 18px',
+    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+    cursor: 'pointer', border: '1px solid', transition: 'all 0.15s',
+  };
+  return (
+    <div style={overlay}>
+      <div style={modal}>
+        <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
+          <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.1em', color: 'rgba(224,112,112,0.9)', marginBottom: '4px' }}>
+            ⚔ EDIT CONFLICT
+          </div>
+          <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.5)', fontStyle: 'italic' }}>
+            {conflict.serverUpdatedBy
+              ? `${conflict.serverUpdatedBy} saved a newer version while you were writing.`
+              : 'A newer version was saved while you were writing.'}
+            {' '}Choose how to proceed.
+          </div>
+        </div>
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION (server)</div>
+            <div style={pane}>{conflict.serverContent || ''}</div>
+          </div>
+          <div>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION (unsaved)</div>
+            <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myContent || ''}</div>
+          </div>
+        </div>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button style={{ ...btnBase, background: 'transparent', borderColor: 'rgba(226,213,187,0.15)', color: 'rgba(226,213,187,0.4)' }} onClick={onKeepTheirs}>Keep Theirs</button>
+          <button style={{ ...btnBase, background: 'rgba(139,196,226,0.08)', borderColor: 'rgba(139,196,226,0.3)', color: 'rgba(139,196,226,0.8)' }} onClick={onKeepBoth}>Keep Both</button>
+          <button style={{ ...btnBase, background: 'rgba(200,148,58,0.12)', borderColor: 'rgba(200,148,58,0.4)', color: '#c8943a' }} onClick={onKeepMine}>Keep Mine</button>
+        </div>
+      </div>
+    </div>
+  );
+}

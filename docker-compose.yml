@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  chronicler:
+    build: .
+    container_name: dnd-chronicler
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - chronicler_data:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      # CHANGE THIS to a long random string before deploying!
+      - JWT_SECRET=de67kbMM6tjFj56kIsGprRzHNLPK5cElb6vwmLWF06M=
+
+volumes:
+  chronicler_data:
+    driver: local

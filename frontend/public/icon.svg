@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#07080e"/>
+  <!-- Decorative ring -->
+  <circle cx="256" cy="256" r="215" fill="none" stroke="#c8943a" stroke-width="2" opacity="0.25"/>
+  <!-- Feather body right side -->
+  <path d="M256 105 C310 95,375 148,382 222 C389 296,350 355,268 405 L258 382
+           C334 336,368 280,361 214 C354 148,300 108,256 105 Z"
+        fill="#c8943a" opacity="0.85"/>
+  <!-- Feather body left side (darker) -->
+  <path d="M256 105 C202 95,140 152,133 228 C126 303,166 357,248 405 L258 382
+           C180 335,144 284,151 216 C158 148,210 108,256 105 Z"
+        fill="#9a6c24" opacity="0.75"/>
+  <!-- Central spine -->
+  <path d="M256 105 Q263 253 256 405" fill="none" stroke="#f0d080" stroke-width="2.5" opacity="0.7"/>
+  <!-- Barb lines across feather -->
+  <line x1="196" y1="205" x2="316" y2="196" stroke="#f0d080" stroke-width="1" opacity="0.28"/>
+  <line x1="187" y1="240" x2="325" y2="232" stroke="#f0d080" stroke-width="1" opacity="0.25"/>
+  <line x1="182" y1="274" x2="330" y2="268" stroke="#f0d080" stroke-width="1" opacity="0.22"/>
+  <line x1="182" y1="308" x2="328" y2="304" stroke="#f0d080" stroke-width="1" opacity="0.18"/>
+  <line x1="188" y1="340" x2="322" y2="338" stroke="#f0d080" stroke-width="1" opacity="0.14"/>
+  <!-- Nib tip -->
+  <path d="M256 405 L246 436 L256 424 L266 436 Z" fill="#c8943a" opacity="0.9"/>
+  <!-- Writing lines -->
+  <line x1="160" y1="455" x2="285" y2="453" stroke="#c8943a" stroke-width="2.5" opacity="0.35"/>
+  <line x1="160" y1="470" x2="270" y2="469" stroke="#c8943a" stroke-width="2" opacity="0.22"/>
+</svg>

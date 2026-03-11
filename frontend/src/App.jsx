@@ -1,0 +1,56 @@
+import { useState, useEffect } from 'react';
+import Login from './components/Login.jsx';
+import Dashboard from './components/Dashboard.jsx';
+import api from './api.js';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+
+    if (token && savedUser) {
+      // Verify token is still valid before trusting it
+      api.get('/auth/me')
+        .then((res) => setUser(res.data.user))
+        .catch(() => {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleLogin = (userData, token) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+  };
+
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', background: '#07080e'
+      }}>
+        <div style={{ fontFamily: 'Cinzel', color: '#c8943a', letterSpacing: '0.2em', fontSize: '14px' }}>
+          LOADING...
+        </div>
+      </div>
+    );
+  }
+
+  return user
+    ? <Dashboard user={user} onLogout={handleLogout} />
+    : <Login onLogin={handleLogin} />;
+}

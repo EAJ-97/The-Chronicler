@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <title>The Chronicler — DnD Notes</title>
+    <!-- PWA / iOS -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Chronicler" />
+    <meta name="theme-color" content="#07080e" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cinzel+Decorative:wght@400;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root { height: 100%; width: 100%; }
+      html {
+        overscroll-behavior: none;
+      }
+      body {
+        background: #07080e;
+        color: #e2d5bb;
+        font-family: 'Crimson Pro', Georgia, serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #0d0f18; }
+      ::-webkit-scrollbar-thumb { background: #2a2f3e; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #3d4558; }
+      /* Hide scrollbar on toolbar rows — scrollable but invisible */
+      .toolbar-scroll::-webkit-scrollbar { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

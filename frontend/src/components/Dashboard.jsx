@@ -1,0 +1,718 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import NoteList from './NoteList.jsx';
+import NoteEditor from './NoteEditor.jsx';
+import GraphView from './GraphView.jsx';
+import AdminPanel from './AdminPanel.jsx';
+import Journal from './Journal.jsx';
+import NotePanel from './NotePanel.jsx';
+import SnapshotPanel from './SnapshotPanel.jsx';
+import TrashPanel from './TrashPanel.jsx';
+import CampaignModal from './CampaignModal.jsx';
+import api from '../api.js';
+import { useWindowWidth } from '../hooks/useWindowWidth.js';
+
+const S = {
+  shell: { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, overflow: 'hidden', background: '#07080e' },
+  topbar: {
+    display: 'flex', alignItems: 'center', padding: '0 20px',
+    height: '52px', flexShrink: 0,
+    background: '#0a0c14', borderBottom: '1px solid rgba(200,148,58,0.12)',
+  },
+  brand: { fontFamily: 'Cinzel Decorative', fontSize: '15px', fontWeight: '700', color: '#c8943a', letterSpacing: '0.03em', marginRight: '24px' },
+  viewToggle: { display: 'flex', gap: '2px', background: 'rgba(255,255,255,0.03)', padding: '3px', borderRadius: '5px', border: '1px solid rgba(255,255,255,0.06)' },
+  viewBtn: (active) => ({
+    padding: '5px 14px', borderRadius: '3px', border: 'none', cursor: 'pointer',
+    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em',
+    background: active ? 'rgba(200,148,58,0.18)' : 'transparent',
+    color: active ? '#c8943a' : 'rgba(226,213,187,0.55)',
+    transition: 'all 0.2s',
+  }),
+  spacer: { flex: 1 },
+  userInfo: { display: 'flex', alignItems: 'center', gap: '12px' },
+  username: { fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.85)' },
+  topBtn: {
+    background: 'transparent', border: '1px solid rgba(226,213,187,0.2)',
+    borderRadius: '3px', cursor: 'pointer', padding: '4px 10px',
+    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em',
+    color: 'rgba(226,213,187,0.65)', transition: 'all 0.2s',
+  },
+  body: { flex: 1, display: 'flex', overflow: 'hidden' },
+  main: { flex: 1, overflow: 'hidden', position: 'relative' },
+  // Mobile styles
+  mobileHamburger: {
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    color: 'rgba(200,148,58,0.8)', fontSize: '22px',
+    minWidth: '44px', minHeight: '44px', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', padding: 0,
+    flexShrink: 0,
+    WebkitUserSelect: 'none', userSelect: 'none',
+  },
+  mobileOverlay: {
+    position: 'fixed', inset: 0, zIndex: 500,
+    background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(2px)',
+    display: 'flex',
+  },
+  mobileDrawer: {
+    width: '85vw', maxWidth: '320px',
+    background: '#0a0c14', borderRight: '1px solid rgba(200,148,58,0.15)',
+    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    height: '100%',
+  },
+  bottomNav: {
+    position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 400,
+    height: 'calc(50px + env(safe-area-inset-bottom))', background: '#0a0c14',
+    borderTop: '1px solid rgba(200,148,58,0.15)',
+    display: 'flex', alignItems: 'stretch', paddingBottom: 'env(safe-area-inset-bottom)',
+  },
+  bottomNavBtn: (active) => ({
+    flex: 1, display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', gap: '4px',
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    color: active ? '#c8943a' : 'rgba(226,213,187,0.4)',
+    borderTop: active ? '2px solid #c8943a' : '2px solid transparent',
+    padding: 0,
+    transition: 'color 0.15s, border-top-color 0.15s',
+    WebkitUserSelect: 'none', userSelect: 'none',
+  }),
+  bottomNavIcon: { fontSize: '22px', lineHeight: 1 },
+  bottomNavLabel: { fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em' },
+  mobileMenuSheet: {
+    position: 'fixed', top: 'calc(52px + env(safe-area-inset-top))', left: 0, right: 0, zIndex: 450,
+    background: '#0f1219', borderBottom: '1px solid rgba(200,148,58,0.2)',
+    borderRadius: '0 0 12px 12px', padding: '16px 16px 8px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+  },
+  mobileMenuBtn: {
+    display: 'flex', alignItems: 'center', gap: '12px',
+    width: '100%', background: 'transparent', border: 'none',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+    cursor: 'pointer', padding: '12px 4px',
+    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+    color: 'rgba(226,213,187,0.7)', textAlign: 'left',
+    minHeight: '48px',
+  },
+};
+
+export default function Dashboard({ user, onLogout }) {
+  const windowWidth = useWindowWidth();
+  const isNarrow = windowWidth <= 960;
+  const isMobile = windowWidth <= 600;
+
+  // Sidebar collapse — default open on wide, collapsed on narrow, persisted
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try { const s = localStorage.getItem('chronicler_sidebar_open'); return s === null ? window.innerWidth > 960 : s === 'true'; } catch { return true; }
+  });
+  const toggleSidebar = () => setSidebarOpen(v => {
+    try { localStorage.setItem('chronicler_sidebar_open', String(!v)); } catch {}
+    return !v;
+  });
+
+  // Mobile-specific state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // PWA install hint — shown on mobile browsers not already in standalone mode
+  const [showInstallHint, setShowInstallHint] = useState(() => {
+    try {
+      if (localStorage.getItem('chronicler_install_dismissed')) return false;
+      const isStandalone = window.navigator.standalone === true ||
+                           window.matchMedia('(display-mode: standalone)').matches;
+      return !isStandalone;
+    } catch { return false; }
+  });
+  const dismissInstallHint = () => {
+    try { localStorage.setItem('chronicler_install_dismissed', '1'); } catch {}
+    setShowInstallHint(false);
+  };
+
+  // Close mobile overlays when switching to desktop
+  useEffect(() => {
+    if (!isMobile) { setMobileSidebarOpen(false); setMobileMenuOpen(false); }
+  }, [isMobile]);
+
+  // VIEW AS popover on narrow topbar
+  const [showViewAs, setShowViewAs] = useState(false);
+  const viewAsRef = useRef(null);
+  // User menu popover on very narrow topbar
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef(null);
+  const [notes, setNotes] = useState([]);
+  const [dmCampaignIds, setDmCampaignIds] = useState([]);
+  const [snapshotFolder, setSnapshotFolder] = useState(null);
+  const [connections, setConnections] = useState([]);
+  const [selectedNoteId, setSelectedNoteId] = useState(null);
+  const [view, setView] = useState('notes');
+  const [loading, setLoading] = useState(true);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
+  const [graphPanelNoteId, setGraphPanelNoteId] = useState(null);
+  const [undoToast, setUndoToast] = useState(null); // { id, title, timer }
+  const [simulatedRole, setSimulatedRole] = useState(null); // null=admin, 'dm','owner','granted','hidden'
+  const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const simulatedRoleRef = useRef(null);
+
+  // Keep ref in sync so WS handler always reads current value
+  useEffect(() => { simulatedRoleRef.current = simulatedRole; }, [simulatedRole]);
+  const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
+  const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
+    : simulatedRole ? []
+    : dmCampaignIds;
+
+  const loadData = useCallback(async (simulate) => {
+    const simParam = simulate !== undefined ? simulate : null;
+    try {
+      const [notesRes, connsRes, dmRes] = await Promise.all([
+        api.get('/notes', simParam ? { params: { simulate: simParam } } : {}),
+        api.get('/connections'),
+        api.get('/notes/meta/my-dm-campaigns'),
+      ]);
+      setNotes(notesRes.data);
+      setConnections(connsRes.data);
+      setDmCampaignIds(dmRes.data || []);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(null); }, [loadData]);
+
+  // Re-fetch notes from backend whenever simulated role changes
+  useEffect(() => {
+    setSelectedNoteId(null);
+    loadData(simulatedRole);
+  }, [simulatedRole]);
+
+  // Live updates via WebSocket — reload data whenever another user changes something
+  const wsRef = useRef(null);
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/ws?token=${token}`;
+    let reconnectTimer = null;
+
+    const connect = () => {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'notes_changed' || msg.type === 'connections_changed') {
+            loadData(simulatedRoleRef.current);
+          }
+          if (msg.type === 'journal_changed') {
+            window.dispatchEvent(new CustomEvent('ws_journal', { detail: e.data }));
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        // Reconnect after 3s unless component is unmounting
+        reconnectTimer = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => ws.close();
+    };
+
+    connect();
+    return () => {
+      clearTimeout(reconnectTimer);
+      wsRef.current?.close();
+    };
+  }, [loadData]);
+
+  const selectedNote = notes.find(n => n.id === selectedNoteId) || null;
+
+  // Fetch full note content on demand — the list endpoint omits content for performance
+  useEffect(() => {
+    if (!selectedNoteId) return;
+    const note = notes.find(n => n.id === selectedNoteId);
+    if (!note || note.content !== undefined) return; // already loaded
+    api.get(`/notes/${selectedNoteId}`).then(r => {
+      setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, ...r.data } : n));
+    }).catch(() => {});
+  }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCreateNote = async (parentId = null) => {
+    if (parentId === null && selectedNoteId) {
+      const sel = notes.find(n => n.id === selectedNoteId);
+      if (sel) parentId = sel.is_folder ? sel.id : (sel.parent_id || null);
+    }
+    try {
+      const res = await api.post('/notes', { title: 'New Note', content: '', category: 'general', is_shared: false, parent_id: parentId });
+      await loadData(simulatedRole);
+      setSelectedNoteId(res.data.id);
+      setView('notes');
+    } catch (err) { console.error(err); }
+  };
+
+  const handleCreateFolder = async (parentId = null) => {
+    if (parentId === null && selectedNoteId) {
+      const sel = notes.find(n => n.id === selectedNoteId);
+      if (sel) parentId = sel.is_folder ? sel.id : (sel.parent_id || null);
+    }
+    try {
+      await api.post('/notes', { title: 'New Folder', content: '', is_folder: true, is_shared: false, parent_id: parentId });
+      await loadData(simulatedRole);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleCreateCampaign = async ({ title, members }) => {
+    try {
+      await api.post('/notes', { title, content: '', is_folder: true, is_shared: false, parent_id: null, members });
+      await loadData(simulatedRole);
+      setShowCampaignModal(false);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleSaveNote = async (updates) => {
+    if (!updates) { await loadData(simulatedRole); return; }
+    if (!selectedNoteId) return;
+    // If updates has an id, doSave already did the PUT — just update local state
+    if (updates.id) {
+      if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {
+        await loadData(simulatedRole);
+      } else {
+        setNotes(prev => prev.map(n => n.id === updates.id ? updates : n));
+      }
+      return;
+    }
+    // Otherwise it's a patch object — do the PUT here (tags, visibility, permissions, etc.)
+    try {
+      const res = await api.put(`/notes/${selectedNoteId}`, updates);
+      if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {
+        await loadData(simulatedRole);
+      } else {
+        setNotes(prev => prev.map(n => n.id === selectedNoteId ? res.data : n));
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleMoveNote = async (noteId, newParentId) => {
+    try {
+      if (newParentId) {
+        const target = notes.find(n => n.id === newParentId);
+        if (target && target.visibility === 'hidden' && target.user_id !== user.id && !user.is_admin) {
+          const ok = window.confirm(
+            `"${target.title}" is private and owned by ${target.author || 'another user'}.\n\nIf you move this here, you may lose access to it. Continue?`
+          );
+          if (!ok) return;
+        }
+      }
+      await api.put(`/notes/${noteId}`, { parent_id: newParentId ?? null });
+      await loadData(simulatedRole);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleRenameNote = async (noteId, newTitle) => {
+    try {
+      const res = await api.put(`/notes/${noteId}`, { title: newTitle });
+      setNotes(prev => prev.map(n => n.id === noteId ? res.data : n));
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteNote = async (noteId, title, isFolder) => {
+    const msg = isFolder
+      ? `Delete folder "${title}" and everything inside it?`
+      : `Delete note "${title}"?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await api.delete(`/notes/${noteId}`);
+      setNotes(prev => prev.filter(n => n.id !== noteId && n.parent_id !== noteId));
+      if (selectedNoteId === noteId) setSelectedNoteId(null);
+      // Show undo toast for 6 seconds
+      if (undoToast?.timer) clearTimeout(undoToast.timer);
+      const timer = setTimeout(() => setUndoToast(null), 6000);
+      setUndoToast({ id: noteId, title, is_folder: isFolder, timer });
+      await loadData(simulatedRole);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleUndoDelete = async () => {
+    if (!undoToast) return;
+    clearTimeout(undoToast.timer);
+    setUndoToast(null);
+    try {
+      await api.post(`/notes/${undoToast.id}/restore`);
+      await loadData(simulatedRole);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleCreateConnection = async (sourceId, targetId) => {
+    try {
+      const res = await api.post('/connections', { source_note_id: sourceId, target_note_id: targetId });
+      setConnections(prev => [...prev, res.data]);
+    } catch (err) { console.error(err); }
+  };
+
+  // Shared NoteList props (used both in desktop sidebar and mobile drawer)
+  const noteListProps = {
+    notes,
+    selectedId: selectedNoteId,
+    onSelect: (id) => {
+      const n = notes.find(n => n.id === id);
+      setSelectedNoteId(id);
+      if (!n?.is_folder && view !== 'graph') setView('notes');
+      if (isMobile) setMobileSidebarOpen(false);
+    },
+    onDeselect: () => setSelectedNoteId(null),
+    onCreateNote: handleCreateNote,
+    onCreateFolder: handleCreateFolder,
+    onOpenCampaignModal: () => setShowCampaignModal(true),
+    onDelete: handleDeleteNote,
+    onRename: handleRenameNote,
+    onMove: handleMoveNote,
+    onSnapshot: (folderId) => setSnapshotFolder(notes.find(n => n.id === folderId)),
+    onSync: async (folderId, folderTitle) => {
+      if (!window.confirm(`Sync visibility of "${folderTitle}" to all its children?\nThis will override child note permissions to match the folder.`)) return;
+      try {
+        await api.post(`/notes/${folderId}/sync-visibility`);
+        await loadData(simulatedRole);
+      } catch (err) { console.error('Sync failed', err); }
+    },
+    currentUser: user,
+    dmCampaignIds: effectiveDmCampaignIds,
+    simulatedRole,
+    isMobile,
+  };
+
+  if (loading) {
+    return (
+      <div style={{ ...S.shell, alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'Cinzel', color: '#c8943a', letterSpacing: '0.2em', fontSize: '13px' }}>LOADING CHRONICLES...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.shell}>
+      {showAdmin && <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} />}
+      {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData(simulatedRole)} />}
+
+      {/* Undo toast */}
+      {undoToast && (
+        <div style={{ position: 'fixed', bottom: isMobile ? '72px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '5px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+          <span style={{ color: 'rgba(226,213,187,0.6)' }}>"{undoToast.title}" moved to trash</span>
+          <button onClick={handleUndoDelete} style={{ background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', padding: '3px 10px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em' }}>
+            UNDO
+          </button>
+          <button onClick={() => { clearTimeout(undoToast.timer); setUndoToast(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.3)', fontSize: '14px', padding: 0 }}>×</button>
+        </div>
+      )}
+
+      {/* Default password warning banner */}
+      {user.force_password_change ? (
+        <div style={{ background: 'rgba(196,80,58,0.18)', borderBottom: '1px solid rgba(196,80,58,0.4)', padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0, zIndex: 20 }}>
+          <span style={{ fontSize: '14px' }}>⚠</span>
+          <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,160,100,0.9)', flex: 1 }}>
+            DEFAULT PASSWORD IN USE — Change your password in Admin → Password before sharing this server
+          </span>
+          <button
+            onClick={() => setShowAdmin(true)}
+            style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', padding: '4px 12px', background: 'rgba(196,80,58,0.25)', border: '1px solid rgba(196,80,58,0.5)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,160,100,0.9)' }}
+          >
+            CHANGE NOW
+          </button>
+        </div>
+      ) : null}
+
+      {/* ── TOPBAR ── */}
+      {isMobile ? (
+        /* Mobile topbar: hamburger | brand | ··· */
+        <div style={{ ...S.topbar, height: 'calc(52px + env(safe-area-inset-top))', paddingTop: 'env(safe-area-inset-top)' }}>
+          <button style={S.mobileHamburger} onClick={() => setMobileSidebarOpen(true)} aria-label="Open notes">
+            ☰
+          </button>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+            <span style={{ ...S.brand, marginRight: 0, fontSize: '13px' }}>The Chronicler</span>
+          </div>
+          <div style={{ minWidth: '44px' }} />
+        </div>
+      ) : (
+        /* Desktop topbar: unchanged */
+        <div style={S.topbar}>
+          <span style={S.brand}>The Chronicler</span>
+          <div style={S.viewToggle}>
+            <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
+            <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
+            <button style={S.viewBtn(view === 'journal')} onClick={() => setView('journal')}>⚡ Journal</button>
+          </div>
+          {!!user.is_admin && (
+            isNarrow ? (
+              <div style={{ position: 'relative', marginLeft: '10px' }} ref={viewAsRef}>
+                <button
+                  onClick={() => setShowViewAs(v => !v)}
+                  style={{ ...S.topBtn, color: simulatedRole ? '#c8943a' : 'rgba(226,213,187,0.65)', borderColor: simulatedRole ? 'rgba(200,148,58,0.4)' : 'rgba(226,213,187,0.2)' }}
+                  title="View As"
+                >⚙ {simulatedRole ? simulatedRole.toUpperCase() : 'VIEW'}</button>
+                {showViewAs && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '110px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '2px 6px 4px' }}>VIEW AS</div>
+                    {[
+                      { role: null,      label: 'ADMIN' },
+                      { role: 'dm',      label: 'DM' },
+                      { role: 'owner',   label: 'OWNER' },
+                      { role: 'granted', label: 'GRANTED' },
+                      { role: 'hidden',  label: 'HIDDEN' },
+                    ].map(({ role, label }) => (
+                      <button key={label} onClick={() => { setSimulatedRole(role); setShowViewAs(false); }} style={{ padding: '5px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)', transition: 'all 0.15s', textAlign: 'left' }}>{label}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginLeft: '16px' }}>
+                <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginRight: '2px' }}>VIEW AS</span>
+                {[
+                  { role: null,      label: 'ADMIN' },
+                  { role: 'dm',      label: 'DM' },
+                  { role: 'owner',   label: 'OWNER' },
+                  { role: 'granted', label: 'GRANTED' },
+                  { role: 'hidden',  label: 'HIDDEN' },
+                ].map(({ role, label }) => (
+                  <button key={label} onClick={() => setSimulatedRole(role)} style={{ padding: '3px 8px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.3)', transition: 'all 0.15s' }}>{label}</button>
+                ))}
+              </div>
+            )
+          )}
+          <div style={S.spacer} />
+          <div style={S.userInfo}>
+            {!isNarrow && <span style={S.username}>{user.username.toUpperCase()}</span>}
+            {windowWidth <= 720 ? (
+              <div style={{ position: 'relative' }} ref={userMenuRef}>
+                <button
+                  style={{ ...S.topBtn, letterSpacing: '0.2em', fontSize: '12px', padding: '4px 10px' }}
+                  onClick={() => setShowUserMenu(v => !v)}
+                  title="Menu"
+                >···</button>
+                {showUserMenu && (
+                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '130px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
+                    <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
+                    {user.is_admin && <button style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
+                    <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <button style={S.topBtn} onClick={() => setShowTrash(true)} title="View deleted items">🗑</button>
+                {user.is_admin && <button style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
+                <button style={S.topBtn} onClick={onLogout}>Leave</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE SIDEBAR DRAWER OVERLAY ── */}
+      {isMobile && (
+        <div
+          style={{ ...S.mobileOverlay, opacity: mobileSidebarOpen ? 1 : 0, pointerEvents: mobileSidebarOpen ? 'auto' : 'none', transition: 'opacity 0.22s ease' }}
+          onClick={() => setMobileSidebarOpen(false)}
+        >
+          <div
+            style={{ ...S.mobileDrawer, transform: mobileSidebarOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px', borderBottom: '1px solid rgba(200,148,58,0.08)', flexShrink: 0 }}>
+              <button style={{ ...S.mobileHamburger, fontSize: '20px', color: 'rgba(226,213,187,0.4)' }} onClick={() => setMobileSidebarOpen(false)} aria-label="Close">×</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <NoteList
+                {...noteListProps}
+                collapsed={false}
+                onToggleCollapse={() => {}}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE MENU SHEET ── */}
+      {isMobile && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 440, opacity: mobileMenuOpen ? 1 : 0, pointerEvents: mobileMenuOpen ? 'auto' : 'none', transition: 'opacity 0.2s ease' }} onClick={() => setMobileMenuOpen(false)} />
+          <div style={{ ...S.mobileMenuSheet, opacity: mobileMenuOpen ? 1 : 0, transform: mobileMenuOpen ? 'translateY(0)' : 'translateY(-8px)', transition: 'opacity 0.2s ease, transform 0.2s ease', pointerEvents: mobileMenuOpen ? 'auto' : 'none' }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
+              {user.username.toUpperCase()}
+            </div>
+            {user.is_admin && (
+              <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
+                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {[
+                    { role: null, label: 'ADMIN' },
+                    { role: 'dm', label: 'DM' },
+                    { role: 'owner', label: 'OWNER' },
+                    { role: 'granted', label: 'GRANTED' },
+                    { role: 'hidden', label: 'HIDDEN' },
+                  ].map(({ role, label }) => (
+                    <button key={label} onClick={() => { setSimulatedRole(role); setMobileMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
+              <span>🗑</span> Trash
+            </button>
+            {user.is_admin && (
+              <button style={{ ...S.mobileMenuBtn, color: 'rgba(200,148,58,0.85)' }} onClick={() => { setShowAdmin(true); setMobileMenuOpen(false); }}>
+                <span>⚙</span> Admin
+              </button>
+            )}
+            <button style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={onLogout}>
+              <span>↩</span> Leave
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── PWA INSTALL HINT ── */}
+      {isMobile && showInstallHint && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 14px', background: 'rgba(200,148,58,0.06)', borderBottom: '1px solid rgba(200,148,58,0.12)', flexShrink: 0 }}>
+          <span style={{ fontSize: '14px', flexShrink: 0 }}>📲</span>
+          <span style={{ fontFamily: 'Cinzel', fontSize: '7.5px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.65)', flex: 1, lineHeight: '1.5' }}>
+            {/iphone|ipad|ipod/i.test(navigator.userAgent)
+              ? 'INSTALL AS APP — tap Share ⬆ then "Add to Home Screen"'
+              : 'INSTALL AS APP — tap ⋮ then "Add to Home Screen"'}
+          </span>
+          <button onClick={dismissInstallHint} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(200,148,58,0.35)', fontSize: '20px', padding: '0 2px', lineHeight: 1, flexShrink: 0 }} aria-label="Dismiss">×</button>
+        </div>
+      )}
+
+      {/* ── BODY ── */}
+      <div style={{ ...S.body, paddingBottom: isMobile ? 'calc(50px + env(safe-area-inset-bottom))' : 0 }}>
+        {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
+        {!isMobile && view !== 'journal' && (
+          <NoteList
+            {...noteListProps}
+            collapsed={!sidebarOpen}
+            onToggleCollapse={toggleSidebar}
+          />
+        )}
+
+        {/* Snapshot modal */}
+        {snapshotFolder && (
+          <SnapshotPanel
+            folder={snapshotFolder}
+            currentUser={user}
+            dmCampaignIds={effectiveDmCampaignIds}
+            onClose={() => setSnapshotFolder(null)}
+            onRestored={() => loadData(simulatedRole)}
+          />
+        )}
+
+        {/* Campaign creation modal */}
+        {showCampaignModal && (
+          <CampaignModal
+            currentUser={user}
+            onConfirm={handleCreateCampaign}
+            onClose={() => setShowCampaignModal(false)}
+          />
+        )}
+
+        <div style={S.main}>
+          {view === 'notes' && (
+            <NoteEditor
+              note={selectedNote}
+              notes={notes}
+              connections={connections}
+              currentUser={user}
+              dmCampaignIds={effectiveDmCampaignIds}
+              simulatedRole={simulatedRole}
+              onSave={handleSaveNote}
+              onDelete={handleDeleteNote}
+              isMobile={isMobile}
+              onBackToList={() => setMobileSidebarOpen(true)}
+            />
+          )}
+
+          {view === 'graph' && (
+            <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
+              {/* Desktop: side panel. Mobile: bottom sheet handled below */}
+              {!isMobile && (
+                <div style={{
+                  width: graphPanelNoteId ? '300px' : '0px',
+                  flexShrink: 0,
+                  overflow: 'hidden',
+                  transition: 'width 0.28s cubic-bezier(0.4,0,0.2,1)',
+                }}>
+                  {graphPanelNoteId && (
+                    <NotePanel
+                      note={notes.find(n => n.id === graphPanelNoteId)}
+                      notes={notes}
+                      connections={connections}
+                      onClose={() => setGraphPanelNoteId(null)}
+                    />
+                  )}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <GraphView
+                  allNotes={notes}
+                  notes={notes.filter(n => !n.is_folder)}
+                  connections={connections}
+                  onSelectNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(id); }}
+                  onOpenNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(null); setView('notes'); }}
+                  onCreateConnection={handleCreateConnection}
+                  onUpdateConnection={() => loadData(simulatedRole)}
+                  selectedNoteId={selectedNoteId}
+                  currentUser={user}
+                  dmCampaignIds={effectiveDmCampaignIds}
+                  isMobile={isMobile}
+                />
+              </div>
+              {/* Mobile graph note panel — bottom sheet */}
+              {isMobile && graphPanelNoteId && (
+                <div style={{
+                  position: 'fixed', bottom: '56px', left: 0, right: 0,
+                  height: '45vh', zIndex: 300,
+                  background: '#0a0c14',
+                  borderTop: '1px solid rgba(200,148,58,0.2)',
+                  overflow: 'hidden',
+                }}>
+                  <NotePanel
+                    note={notes.find(n => n.id === graphPanelNoteId)}
+                    notes={notes}
+                    connections={connections}
+                    onClose={() => setGraphPanelNoteId(null)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === 'journal' && (
+            <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} />
+          )}
+        </div>
+      </div>
+
+      {/* ── MOBILE BOTTOM NAVIGATION BAR ── */}
+      {isMobile && (
+        <div style={S.bottomNav}>
+          <button style={S.bottomNavBtn(view === 'notes')} onClick={() => setView('notes')}>
+            <span style={S.bottomNavIcon}>📜</span>
+            <span style={S.bottomNavLabel}>NOTES</span>
+          </button>
+          <button style={S.bottomNavBtn(view === 'graph')} onClick={() => setView('graph')}>
+            <span style={S.bottomNavIcon}>🕸</span>
+            <span style={S.bottomNavLabel}>WEB</span>
+          </button>
+          <button style={S.bottomNavBtn(view === 'journal')} onClick={() => setView('journal')}>
+            <span style={S.bottomNavIcon}>⚡</span>
+            <span style={S.bottomNavLabel}>JOURNAL</span>
+          </button>
+          <button style={S.bottomNavBtn(mobileMenuOpen)} onClick={() => setMobileMenuOpen(v => !v)}>
+            <span style={S.bottomNavIcon}>☰</span>
+            <span style={S.bottomNavLabel}>MENU</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
