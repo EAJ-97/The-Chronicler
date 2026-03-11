@@ -1,0 +1,24 @@
+version: '3.8'
+
+# Local development override — use this instead of docker-compose.yml on your Windows machine.
+# Run with: docker compose -f docker-compose.dev.yml up --build
+#
+# Key difference from production: the database is saved to a local "data" folder
+# inside the project instead of a hidden Docker volume. This lets tools (like the
+# Cursor SQLite inspector) read the database file directly.
+#
+# The "data" folder is gitignored, so your campaign data never ends up in the repo.
+
+services:
+  chronicler:
+    build: .
+    container_name: dnd-chronicler-dev
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/data
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - JWT_SECRET=dev-secret-change-me-if-sharing-with-others
