@@ -16,6 +16,9 @@ data/
 .env
 .env.*
 
+# Cursor IDE
+.cursor/
+
 # OS / editor
 .DS_Store
 Thumbs.db
