@@ -12,8 +12,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      # CHANGE THIS to a long random string before deploying!
-      - JWT_SECRET=de67kbMM6tjFj56kIsGprRzHNLPK5cElb6vwmLWF06M=
 
 volumes:
   chronicler_data:

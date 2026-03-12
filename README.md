@@ -33,6 +33,8 @@ cd dnd-chronicler
 docker compose up -d --build
 ```
 
+A `JWT_SECRET` is auto-generated on first boot and persisted in the data volume.
+
 App available at `http://localhost:3001`
 
 Default login: `admin` / `admin` — **change this immediately.**
@@ -59,15 +61,12 @@ git clone https://github.com/yourname/dnd-chronicler.git
 cd dnd-chronicler
 ```
 
-### 2. (Optional) Set a fixed JWT secret
-Edit `docker-compose.yml` and set:
-```yaml
-environment:
-  - JWT_SECRET=your-long-random-secret-here
-```
-Without this, all users are logged out every time the container restarts.
+### 2. Start the app
 
-### 3. Start the app
+A `JWT_SECRET` is auto-generated on first boot and saved to the data volume (`/data/.jwt_secret`).
+To override it, set `JWT_SECRET` in the `environment` section of `docker-compose.yml` or in a `.env` file.
+
+### 3. Build and run
 ```bash
 docker compose up -d --build
 ```
@@ -87,13 +86,29 @@ This gives you a public HTTPS URL without opening firewall ports.
 
 ## Configuration
 
-All configuration lives in `docker-compose.yml` environment variables.
-
 | Variable | Default | Description |
 |---|---|---|
+| `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
-| `JWT_SECRET` | auto-generated | Set a fixed value in production |
+
+### Dev Environment
+
+Create a `docker-compose.dev.yml` to run alongside production on a different port. This file is git-ignored — it stays local to your machine.
+
+```bash
+# Start dev (does not affect production)
+docker compose -f docker-compose.dev.yml up -d --build
+
+# View dev logs
+docker compose -f docker-compose.dev.yml logs --tail=50
+
+# Stop dev
+docker compose -f docker-compose.dev.yml down
+```
+
+Dev uses its own container name and data volume — completely isolated from production.
+See `.env.example` for optional environment overrides.
 
 ---
 
@@ -149,7 +164,7 @@ All configuration lives in `docker-compose.yml` environment variables.
 | **SQLite Database** | The single-file database (`dnd_notes.db`) storing all app data. Located in the Data Volume at `/data/dnd_notes.db` inside the container. |
 | **WAL (Write-Ahead Log)** | SQLite's write-ahead log files (`dnd_notes.db-shm`, `dnd_notes.db-wal`). These exist alongside the main DB file during normal operation. Always back up all three files together. |
 | **FTS (Full-Text Search)** | SQLite FTS5 virtual table powering note search. Indexes note titles and content. Search triggers at 3+ characters. `#` prefix routes to tag filtering instead. |
-| **JWT (JSON Web Token)** | The authentication token issued on login. Valid for 7 days. If `JWT_SECRET` is not fixed in `docker-compose.yml`, all sessions are invalidated on every container restart. |
+| **JWT (JSON Web Token)** | The authentication token issued on login. Valid for 7 days. `JWT_SECRET` is auto-generated on first boot and persisted in the data volume. Wiping the volume regenerates the secret and invalidates all sessions. |
 | **Anthropic API Key** | The secret key used to authenticate AI recap requests. Stored only in the database. Never in source code, `.env` files, or Git. Stripped from all backup downloads. |
 | **Cloudflare Tunnel** | The recommended method for exposing the app publicly over HTTPS without opening firewall ports. Runs via `cloudflared`. |
 | **Auto-Migration** | Database schema changes that run automatically on container boot. New tables and columns are added safely without wiping existing data. No manual SQL required when updating. |
@@ -399,7 +414,7 @@ console.log('Done');
 ```
 
 ### Everyone logged out after container restart
-Set a fixed `JWT_SECRET` in `docker-compose.yml` (see Configuration).
+The entrypoint auto-generates and persists `JWT_SECRET` in the data volume. If the volume was wiped (`docker compose down -v`), a new secret is generated and all sessions are invalidated. See Configuration.
 
 ### VS Code can't browse database files
 Run the permission fix commands in the Maintenance section, then refresh VS Code Explorer.

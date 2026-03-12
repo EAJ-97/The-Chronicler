@@ -25,9 +25,14 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Data volume for SQLite database
 VOLUME ["/data"]
 
+# Entrypoint auto-generates JWT_SECRET on first boot if not provided
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 ENV NODE_ENV=production
 ENV PORT=3001
 
 EXPOSE 3001
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "backend/server.js"]
