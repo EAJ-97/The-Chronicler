@@ -1,0 +1,45 @@
+---
+description: 3-tier branch workflow — feature/* → dev → main
+alwaysApply: true
+---
+
+# Branch Workflow
+
+All work follows a strict 3-tier flow:
+
+```
+feature/* or bugfix/*  →  dev  →  main
+```
+
+## Rules
+
+- `main` is production only. Never commit directly to it. It only receives merges from `dev`.
+- `dev` is the integration branch. All tested feature/bugfix branches land here.
+- All new work branches off `dev`, not `main`.
+
+## Starting new work
+
+```bash
+git checkout dev && git pull origin dev
+git checkout -b feature/your-description
+# or
+git checkout -b bugfix/your-description
+```
+
+## Merging and deploying
+
+```bash
+# Merge finished work into dev
+git checkout dev && git merge feature/your-description && git push origin dev
+
+# When dev is stable and ready to ship — merge to main and deploy
+git checkout main && git merge dev && git push origin main
+./deploy.sh   # enforces all checks before rebuilding production
+```
+
+## Subagent behaviour
+
+- If the user is on `main` or `dev` and about to make edits, prompt them to create a feature branch first.
+- Never merge a feature branch directly into `main` — always route through `dev`.
+- Before merging into `dev` or `main`, confirm the dev Docker container has been rebuilt and tested on port 3002.
+- `./deploy.sh` is the only approved way to rebuild production. Do not suggest `docker compose up -d --build` directly for production.

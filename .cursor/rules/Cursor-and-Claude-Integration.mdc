@@ -1,0 +1,6 @@
+---
+globs: 
+alwaysApply: true
+---
+
+All edits should be made in the /home/sysadmin/notesapp folder via SSH. Subagents should assist with generating comments for new functions and existing functions should one not have a comment. Subagents must prompt for branch creation if edits occur on main or dev directly — all work must happen on a feature/* or bugfix/* branch created from dev. Subagents should suggest git commands when needed and remind the user to rebuild the dev Docker container (docker compose -f docker-compose.dev.yml up -d --build) before testing changes on port 3002.

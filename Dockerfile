@@ -29,6 +29,10 @@ VOLUME ["/data"]
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Build-time commit hash — passed in by deploy.sh via --build-arg
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
+
 ENV NODE_ENV=production
 ENV PORT=3001
 

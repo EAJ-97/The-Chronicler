@@ -23,8 +23,9 @@ data-dev/
 docker-compose.dev.yml
 Dockerfile.dev
 
-# Cursor IDE
-.cursor/
+# Cursor IDE — track rules, ignore everything else
+.cursor/*
+!.cursor/rules/
 
 # OS / editor
 .DS_Store

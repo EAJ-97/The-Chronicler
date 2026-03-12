@@ -84,6 +84,42 @@ This gives you a public HTTPS URL without opening firewall ports.
 
 ---
 
+## Branch Workflow
+
+```
+feature/* or bugfix/*  →  dev  →  main
+```
+
+| Branch | Purpose |
+|---|---|
+| `main` | Production only. Never committed to directly. Only receives merges from `dev`. |
+| `dev` | Integration branch. All tested features land here before shipping. |
+| `feature/x`, `bugfix/x` | Individual work. Always branched from `dev`, merged back into `dev`. |
+
+### Day-to-day flow
+
+```bash
+# 1. Start new work from dev
+git checkout dev && git pull origin dev
+git checkout -b feature/my-thing
+
+# 2. Make changes, test on dev Docker (port 3002)
+docker compose -f docker-compose.dev.yml up -d --build
+
+# 3. Merge back to dev when ready
+git checkout dev && git merge feature/my-thing
+git push origin dev
+
+# 4. When dev is stable and ready to ship, merge to main and deploy
+git checkout main && git merge dev
+git push origin main
+./deploy.sh
+```
+
+`deploy.sh` will refuse to run unless `origin/dev` is fully merged into `origin/main`, so there is no way to accidentally deploy code that bypassed the `dev` branch.
+
+---
+
 ## Configuration
 
 | Variable | Default | Description |
