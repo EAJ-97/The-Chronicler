@@ -19,8 +19,9 @@ data-dev/
 .env.*
 !.env.example
 
-# Dev compose (local only, not tracked)
+# Dev files (local only, not tracked)
 docker-compose.dev.yml
+Dockerfile.dev
 
 # Cursor IDE
 .cursor/
