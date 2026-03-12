@@ -150,9 +150,11 @@ export default function Dashboard({ user, onLogout }) {
   const [simulatedRole, setSimulatedRole] = useState(null); // null=admin, 'dm','owner','granted','hidden'
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const simulatedRoleRef = useRef(null);
+  const selectedNoteIdRef = useRef(null);
 
-  // Keep ref in sync so WS handler always reads current value
+  // Keep refs in sync so WS handler and loadData always read current values
   useEffect(() => { simulatedRoleRef.current = simulatedRole; }, [simulatedRole]);
+  useEffect(() => { selectedNoteIdRef.current = selectedNoteId; }, [selectedNoteId]);
   const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
   const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
     : simulatedRole ? []
@@ -166,7 +168,30 @@ export default function Dashboard({ user, onLogout }) {
         api.get('/connections'),
         api.get('/notes/meta/my-dm-campaigns'),
       ]);
-      setNotes(notesRes.data);
+      // Preserve locally-cached content when updated_at hasn't changed.
+      // Without this, every WS-triggered loadData (including from the saving user's own
+      // auto-save) wipes content from all notes, causing blank-on-save, delayed B-user
+      // updates, and stale content after tab switches.
+      // If updated_at *did* change (another user edited), content is intentionally cleared
+      // so the selectedNoteHasContent effect below re-fetches the fresh version.
+      // Also: if the currently selected note is absent from the server response (e.g. a
+      // transient visibility race), keep the previous state entry so selectedNote never
+      // becomes null — that would fire the [note?.id] effect and blank the editor.
+      setNotes(prev => {
+        const mapped = notesRes.data.map(n => {
+          const existing = prev.find(p => p.id === n.id);
+          if (existing?.content !== undefined && existing.updated_at === n.updated_at) {
+            return { ...n, content: existing.content };
+          }
+          return n;
+        });
+        const currentId = selectedNoteIdRef.current;
+        if (currentId && !mapped.find(n => n.id === currentId)) {
+          const preserved = prev.find(p => p.id === currentId);
+          if (preserved) return [...mapped, preserved];
+        }
+        return mapped;
+      });
       setConnections(connsRes.data);
       setDmCampaignIds(dmRes.data || []);
     } catch (err) {
@@ -245,7 +270,8 @@ export default function Dashboard({ user, onLogout }) {
 
   // Fetch full note content on demand — the list endpoint omits content for performance.
   // Also re-fetches when content is wiped (e.g. WS-triggered loadData refreshes the list).
-  const selectedNoteHasContent = selectedNote?.content !== undefined;
+  // Treat null the same as undefined — both mean "content not yet loaded".
+  const selectedNoteHasContent = selectedNote?.content != null;
   useEffect(() => {
     if (!selectedNoteId || !selectedNote || selectedNoteHasContent) return;
     api.get(`/notes/${selectedNoteId}`).then(r => {

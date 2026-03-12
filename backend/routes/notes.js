@@ -359,8 +359,8 @@ router.post('/', authenticateToken, (req, res) => {
     }
   }
 
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.status(201).json(withPermissions(withTags(note)));
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 // PUT update note (title/content/category/tags/visibility/permissions/move)
@@ -408,8 +408,9 @@ router.put('/:id', authenticateToken, (req, res) => {
     const newContent = (note.content || '') + marker + append_content;
     db.prepare('UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newContent, note.id);
     const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(note.id);
+    res.json(withPermissions(withTags(updated)));
     if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
-    return res.json(withPermissions(withTags(updated)));
+    return;
   }
 
   // Block direct content replacement if user can only append
@@ -574,8 +575,8 @@ router.put('/:id', authenticateToken, (req, res) => {
   }
 
   const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json(withPermissions(withTags(updated)));
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 // DELETE note — soft delete, recoverable from trash
@@ -607,8 +608,8 @@ router.delete('/:id', authenticateToken, (req, res) => {
   });
   softDeleteSubtree(parseInt(req.params.id));
 
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json({ success: true, id: note.id, title: note.title, is_folder: !!note.is_folder });
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 // GET trash — deleted items visible to the requesting user
@@ -631,8 +632,8 @@ router.post('/:id/restore', authenticateToken, (req, res) => {
     .run(restoreParentId, recoveredTitle, note.id);
 
   const restored = db.prepare('SELECT * FROM notes WHERE id = ?').get(note.id);
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json(restored);
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 // PUT campaign member management — DM or admin only, root folders only
@@ -694,8 +695,8 @@ router.put('/:id/members', authenticateToken, (req, res) => {
     }
   }
 
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json({ ok: true });
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 // PUT clear recovered label — owner or admin
@@ -709,8 +710,8 @@ router.put('/:id/clear-recovered', authenticateToken, (req, res) => {
   const cleanTitle = note.title.replace(/ \(Recovered\)/g, '').trim();
   db.prepare('UPDATE notes SET title=?, recovered=0 WHERE id=?').run(cleanTitle, note.id);
   const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(note.id);
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json(updated);
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 function saveTags(noteId, tags) {
@@ -754,8 +755,8 @@ router.post('/:id/sync-visibility', authenticateToken, (req, res) => {
   });
   syncAll();
 
-  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
   res.json({ success: true, synced });
+  if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
 module.exports = router;
