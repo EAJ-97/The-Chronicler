@@ -197,6 +197,10 @@ export default function Dashboard({ user, onLogout }) {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
+      ws.onopen = () => {
+        loadData(simulatedRoleRef.current);
+      };
+
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
@@ -210,7 +214,6 @@ export default function Dashboard({ user, onLogout }) {
       };
 
       ws.onclose = () => {
-        // Reconnect after 3s unless component is unmounting
         reconnectTimer = setTimeout(connect, 3000);
       };
 
@@ -224,17 +227,31 @@ export default function Dashboard({ user, onLogout }) {
     };
   }, [loadData]);
 
+  // Refresh data when app returns to foreground (critical for PWA standalone mode)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData(simulatedRoleRef.current);
+        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+          wsRef.current?.close();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [loadData]);
+
   const selectedNote = notes.find(n => n.id === selectedNoteId) || null;
 
-  // Fetch full note content on demand — the list endpoint omits content for performance
+  // Fetch full note content on demand — the list endpoint omits content for performance.
+  // Also re-fetches when content is wiped (e.g. WS-triggered loadData refreshes the list).
+  const selectedNoteHasContent = selectedNote?.content !== undefined;
   useEffect(() => {
-    if (!selectedNoteId) return;
-    const note = notes.find(n => n.id === selectedNoteId);
-    if (!note || note.content !== undefined) return; // already loaded
+    if (!selectedNoteId || !selectedNote || selectedNoteHasContent) return;
     api.get(`/notes/${selectedNoteId}`).then(r => {
       setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, ...r.data } : n));
     }).catch(() => {});
-  }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedNoteId, selectedNoteHasContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreateNote = async (parentId = null) => {
     if (parentId === null && selectedNoteId) {
@@ -271,16 +288,11 @@ export default function Dashboard({ user, onLogout }) {
   const handleSaveNote = async (updates) => {
     if (!updates) { await loadData(simulatedRole); return; }
     if (!selectedNoteId) return;
-    // If updates has an id, doSave already did the PUT — just update local state
     if (updates.id) {
-      if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {
-        await loadData(simulatedRole);
-      } else {
-        setNotes(prev => prev.map(n => n.id === updates.id ? updates : n));
-      }
+      setNotes(prev => prev.map(n => n.id === updates.id ? { ...n, ...updates } : n));
       return;
     }
-    // Otherwise it's a patch object — do the PUT here (tags, visibility, permissions, etc.)
+    // Patch object — do the PUT here (tags, visibility, permissions, etc.)
     try {
       const res = await api.put(`/notes/${selectedNoteId}`, updates);
       if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {

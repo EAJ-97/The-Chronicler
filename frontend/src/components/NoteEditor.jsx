@@ -273,12 +273,13 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     setGrantedUsers(note?.granted_users || []);
   }, [note?.visibility, JSON.stringify(note?.granted_users)]);
 
-  // Sync title/content from server when note updates externally (e.g. WS push from another user)
-  // Only applies when editor is clean — never overwrite unsaved local changes
+  // Sync title/content from server when note updates externally (e.g. WS push from another user).
+  // Only applies when editor is clean — never overwrite unsaved local changes.
+  // Skips undefined values so a loadData refresh (which omits content) doesn't blank the editor.
   useEffect(() => {
     if (dirty) return;
-    setTitle(note?.title || '');
-    setContent(note?.content || '');
+    if (note?.title !== undefined) setTitle(note.title);
+    if (note?.content !== undefined) setContent(note.content);
     serverUpdatedAt.current = note?.updated_at || serverUpdatedAt.current;
   }, [note?.title, note?.content]); // eslint-disable-line react-hooks/exhaustive-deps
 
