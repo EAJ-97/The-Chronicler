@@ -1,0 +1,6 @@
+---
+globs: 
+alwaysApply: true
+---
+
+README.md must accurately describe the project purpose, installation instructions, Docker usage, branch workflow, and features. Subagents should remind the user to update documentation whenever structural or core files change.
