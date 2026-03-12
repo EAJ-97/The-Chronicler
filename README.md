@@ -360,10 +360,11 @@ docker compose logs --tail=50
 cd ~/notesapp && docker compose restart
 ```
 
-### Rebuild (no data loss)
+### Rebuild production (no data loss)
 ```bash
-cd ~/notesapp && docker compose up -d --build
+cd ~/notesapp && ./deploy.sh
 ```
+`deploy.sh` verifies you are on `main`, have no uncommitted changes, and that local `main` matches `origin/main` on GitHub before running the rebuild. Run `docker compose up -d --build` directly only if you intentionally want to bypass these checks.
 
 ### Full wipe and fresh start
 ```bash
@@ -381,10 +382,11 @@ sudo chown -R sysadmin:sysadmin /var/lib/docker/volumes/notesapp_chronicler_data
 
 ## Updating
 
-1. Pull or copy new files into `~/notesapp/`
-2. Rebuild:
+1. Merge your feature branch into `main` and push to GitHub
+2. Pull on the server: `cd ~/notesapp && git pull origin main`
+3. Deploy:
 ```bash
-cd ~/notesapp && docker compose up -d --build
+cd ~/notesapp && ./deploy.sh
 ```
 
 Database migrations run automatically on boot. No manual SQL needed. Existing data is always preserved unless you run `down -v`.
