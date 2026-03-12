@@ -53,6 +53,11 @@ app.get('/api/server-time', (req, res) => {
   res.json({ now: new Date().toISOString() });
 });
 
+// Version — returns the git commit hash baked in at build time
+app.get('/api/version', (req, res) => {
+  res.json({ commit: process.env.GIT_COMMIT || 'unknown' });
+});
+
 // In production, serve the built React app
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, '../frontend/dist');
