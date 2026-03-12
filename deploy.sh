@@ -82,7 +82,8 @@ echo "[deploy] Branch path: feature/* → dev → main ✓"
 echo "[deploy] Deploying commit $(git rev-parse --short HEAD) — $(git log -1 --format='%s')"
 echo ""
 
-docker compose up -d --build --build-arg GIT_COMMIT="$(git rev-parse HEAD)"
+docker compose build --build-arg GIT_COMMIT="$(git rev-parse HEAD)"
+docker compose up -d
 
 echo ""
 echo "[deploy] Production container rebuilt and running."
