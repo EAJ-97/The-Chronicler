@@ -25,6 +25,7 @@ Dockerfile.dev
 
 # AI / agent context (local only, not for public repo)
 CONTEXT.md
+roadmaps.md
 
 # Cursor IDE — track rules, ignore everything else
 .cursor/*
@@ -34,3 +35,4 @@ CONTEXT.md
 .DS_Store
 Thumbs.db
 *.swp
+/home/sysadmin/notesapp/plans
