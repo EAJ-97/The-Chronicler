@@ -303,9 +303,17 @@ export default function Dashboard({ user, onLogout }) {
     } catch (err) { console.error(err); }
   };
 
-  const handleCreateCampaign = async ({ title, members }) => {
+  const handleCreateCampaign = async ({ title, members, is_world, parent_id }) => {
     try {
-      await api.post('/notes', { title, content: '', is_folder: true, is_shared: false, parent_id: null, members });
+      await api.post('/notes', {
+        title,
+        content: '',
+        is_folder: true,
+        is_shared: false,
+        parent_id: parent_id ?? null,
+        members,
+        is_world: !!is_world,
+      });
       await loadData(simulatedRole);
       setShowCampaignModal(false);
     } catch (err) { console.error(err); }

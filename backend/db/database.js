@@ -96,9 +96,12 @@ db.exec(`
     is_dm_only         INTEGER  DEFAULT 0,
     is_demo            INTEGER  DEFAULT 0,
     status             TEXT     DEFAULT NULL,
+    is_world           INTEGER  DEFAULT 0,
+    source_note_id     INTEGER  DEFAULT NULL,
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE SET NULL
   );
 
   CREATE TABLE IF NOT EXISTS note_permissions (
@@ -437,6 +440,15 @@ migrate('030_session_checklist_items_table', () => {
   `);
 });
 
+// ─── Phase 3 — Cross-Campaign Inheritance (3-tier model) ──────────────────────
+// World layers: root folders marked with is_world=1 that contain campaigns as children
+
+// Phase 3 — World Layer Flag: marks a root folder as a world layer
+migrate('031_notes_is_world', () => { try { db.exec("ALTER TABLE notes ADD COLUMN is_world INTEGER DEFAULT 0"); } catch {} });
+
+// Phase 3 — Override Source: points campaign notes that override world-layer notes back to the original
+migrate('032_notes_source_note_id', () => { try { db.exec("ALTER TABLE notes ADD COLUMN source_note_id INTEGER DEFAULT NULL"); } catch {} });
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {
@@ -452,6 +464,7 @@ if (!adminExists) {
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_notes_parent_id        ON notes(parent_id);
   CREATE INDEX IF NOT EXISTS idx_notes_user_id          ON notes(user_id);
+  CREATE INDEX IF NOT EXISTS idx_notes_source_note      ON notes(source_note_id);
   CREATE INDEX IF NOT EXISTS idx_connections_source     ON connections(source_note_id);
   CREATE INDEX IF NOT EXISTS idx_connections_target     ON connections(target_note_id);
   CREATE INDEX IF NOT EXISTS idx_journal_entries_session ON journal_entries(session_id);

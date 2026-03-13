@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, getRootFolderId, isDMOf, isDMOfFolder, isGrantedUser } = require('../utils/access');
+const { isAdmin, getRootFolderId, getCampaignFolderId, isDMOf, isDMOfFolder, isGrantedUser } = require('../utils/access');
 
 const router = express.Router();
 
@@ -41,7 +41,7 @@ router.get('/', authenticateToken, (req, res) => {
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
-    n.recovered, n.is_dm_only, n.is_demo, u.username AS author`;
+    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id, u.username AS author`;
 
   let notes;
   if (admin && !simulate) {
@@ -145,6 +145,76 @@ router.get('/', authenticateToken, (req, res) => {
       }
     });
     if (ancestorsToAdd.size > 0) notes = [...notes, ...ancestorsToAdd.values()];
+
+    // ─── World-layer note inheritance (3-tier model) ───
+    // For each campaign a user is a member of, if it's under a world layer,
+    // include the world layer's direct-child notes that the user can see.
+    if (!admin && simulate !== 'dm') {
+      // Find campaigns this user is a member of
+      const userMembershipCampaigns = new Set();
+      const visibleIds = new Set(notes.map(n => n.id));
+
+      // Check which campaigns/folders the user is a member of via note_permissions
+      const userGrantedFolders = db.prepare('SELECT DISTINCT parent.id FROM notes parent WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = parent.id AND np.user_id = ?) AND parent.is_folder = 1').all(req.user.id);
+      userGrantedFolders.forEach(f => userMembershipCampaigns.add(f.id));
+
+      // For each campaign, check if it has a world layer parent
+      const worldLayerNotes = [];
+      const seenOverrideSourceIds = new Set();
+
+      for (const campaignId of userMembershipCampaigns) {
+        const campaign = db.prepare('SELECT parent_id, is_world FROM notes WHERE id = ?').get(campaignId);
+        if (campaign && campaign.parent_id && campaign.is_world === 0) {
+          // Campaign is under a world layer
+          const worldId = campaign.parent_id;
+          const worldRoot = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(worldId);
+          
+          if (worldRoot && worldRoot.is_world === 1) {
+            // Fetch all direct children of the world that pass canSee
+            const worldChildren = db.prepare(`
+              SELECT ${LIST_COLS} FROM notes n
+              JOIN users u ON n.user_id = u.id
+              WHERE n.parent_id = ? AND n.deleted_at IS NULL
+            `).all(worldId);
+
+            for (const wn of worldChildren) {
+              if (canSee(wn.id, req.user.id, false)) {
+                // Tag it with world_layer_id so frontend knows it's inherited
+                wn.world_layer_id = worldId;
+                wn.world_layer_campaign_id = campaignId;
+                
+                // Check if campaign has an override for this world note
+                const override = db.prepare(`
+                  SELECT n.id FROM notes n
+                  WHERE n.source_note_id = ? 
+                    AND n.parent_id IN (
+                      SELECT id FROM notes WHERE id = ? OR parent_id = ?
+                    )
+                  LIMIT 1
+                `).get(wn.id, campaignId, campaignId);
+                
+                if (!override) {
+                  // No override, include the world note
+                  if (!visibleIds.has(wn.id)) {
+                    worldLayerNotes.push(wn);
+                    visibleIds.add(wn.id);
+                  }
+                } else {
+                  // Override exists; don't include the world note
+                  // (the override should already be in the notes list)
+                  seenOverrideSourceIds.add(wn.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Add world-layer notes to results
+      if (worldLayerNotes.length > 0) {
+        notes = [...notes, ...worldLayerNotes];
+      }
+    }
   }
 
   if (tag) {
@@ -188,6 +258,17 @@ router.get('/', authenticateToken, (req, res) => {
 router.get('/meta/my-dm-campaigns', authenticateToken, (req, res) => {
   const rows = db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(req.user.id);
   res.json(rows.map(r => r.folder_id));
+});
+
+// GET world layer folders where current user is a DM (for campaign creation picker)
+router.get('/meta/worlds', authenticateToken, (req, res) => {
+  const worlds = db.prepare(`
+    SELECT id, title, user_id FROM notes
+    WHERE is_world = 1 AND parent_id IS NULL AND deleted_at IS NULL
+      AND EXISTS (SELECT 1 FROM folder_roles WHERE folder_id = notes.id AND user_id = ? AND role = 'dm')
+    ORDER BY title ASC
+  `).all(req.user.id);
+  res.json(worlds);
 });
 
 // GET all tags (must be before /:id)
@@ -304,10 +385,47 @@ router.post('/', authenticateToken, (req, res) => {
     title, content = '', is_shared = false,
     is_folder = false, category = 'general',
     color = '', parent_id = null, sort_order = 0, tags = [],
-    members = []
+    members = [],
+    is_world = false, source_note_id = null
   } = req.body;
 
   if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
+
+  // Handle override creation: source_note_id set
+  if (source_note_id) {
+    // Creating an override of a world-layer note
+    const sourceNote = db.prepare('SELECT id, title, content, parent_id FROM notes WHERE id = ?').get(source_note_id);
+    if (!sourceNote) return res.status(404).json({ error: 'Source note not found' });
+    
+    // Validate that source note is a world-layer note
+    const sourceRoot = getRootFolderId(source_note_id);
+    const sourceRootData = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(sourceRoot);
+    if (!sourceRootData || sourceRootData.is_world === 0) {
+      return res.status(400).json({ error: 'Source note must be from a world layer' });
+    }
+    
+    // Validate that requester is DM of the campaign this override will be under
+    if (!parent_id) return res.status(400).json({ error: 'Override must specify parent_id (campaign)' });
+    const campaign = db.prepare('SELECT id, parent_id FROM notes WHERE id = ?').get(parent_id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!isDMOf(parent_id, req.user.id)) {
+      return res.status(403).json({ error: 'Must be DM of campaign to create an override' });
+    }
+    
+    // Create override note using source as template
+    const visibility = 'hidden'; // Inherited from campaign
+    const result = db.prepare(`
+      INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility, source_note_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, parent_id, sourceNote.title, sourceNote.content, is_shared ? 1 : 0, 0, category, color, sort_order, visibility, source_note_id);
+    
+    const noteId = result.lastInsertRowid;
+    saveTags(noteId, tags);
+    const note = db.prepare('SELECT * FROM notes WHERE id = ?').get(noteId);
+    res.status(201).json(withPermissions(withTags(note)));
+    if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
+    return;
+  }
 
   // Determine visibility: inherit from parent if exists
   let visibility = 'hidden';
@@ -321,9 +439,9 @@ router.post('/', authenticateToken, (req, res) => {
   }
 
   const result = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.user.id, parent_id, title.trim(), content, is_shared ? 1 : 0, is_folder ? 1 : 0, category, color, sort_order, visibility);
+    INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility, is_world)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(req.user.id, parent_id, title.trim(), content, is_shared ? 1 : 0, is_folder ? 1 : 0, category, color, sort_order, visibility, is_world ? 1 : 0);
 
   const noteId = result.lastInsertRowid;
   saveTags(noteId, tags);
@@ -335,10 +453,10 @@ router.post('/', authenticateToken, (req, res) => {
 
   const note = db.prepare('SELECT * FROM notes WHERE id = ?').get(noteId);
 
-  // Auto-assign creator as DM if this is a new root campaign folder
+  // Auto-assign creator as DM if this is a new folder (world layer or campaign)
   if (is_folder && !parent_id) {
+    // Root folder: world layer
     if (members && members.length > 0) {
-      // Explicit member list provided from campaign creation modal
       const dmInsert     = db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')");
       const memberInsert = db.prepare('INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)');
       const insertMembers = db.transaction(() => {
@@ -348,13 +466,30 @@ router.post('/', authenticateToken, (req, res) => {
         });
       });
       insertMembers();
-      // If no DM was designated, fall back to creator
       const hasDM = members.some(m => m.is_dm);
       if (!hasDM) {
         db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
       }
     } else {
-      // No members specified — creator is DM by default
+      db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
+    }
+  } else if (is_folder && parent_id) {
+    // Campaign under world layer
+    if (members && members.length > 0) {
+      const dmInsert     = db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')");
+      const memberInsert = db.prepare('INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)');
+      const insertMembers = db.transaction(() => {
+        members.forEach(m => {
+          memberInsert.run(noteId, m.user_id);
+          if (m.is_dm) dmInsert.run(noteId, m.user_id);
+        });
+      });
+      insertMembers();
+      const hasDM = members.some(m => m.is_dm);
+      if (!hasDM) {
+        db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
+      }
+    } else {
       db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
     }
   }
@@ -377,6 +512,19 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canFullEdit  = admin || isOwner || isGranted; // full content edit
   const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
   const canAppend    = isDM && !canFullEdit;           // DM on another user's note
+
+  // Block editing of inherited world-layer notes (they need an override)
+  if (note.source_note_id === null && !note.is_world) {
+    // Check if this note is directly under a world layer (not an override)
+    const parentNote = note.parent_id ? db.prepare('SELECT is_world FROM notes WHERE id = ?').get(note.parent_id) : null;
+    const isWorldLayerNote = !parentNote && !note.parent_id;
+    const rootData = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(getRootFolderId(note.id));
+    
+    if (rootData && rootData.is_world === 1 && note.parent_id && !note.source_note_id && !isDM && !admin && !isOwner) {
+      // This is an inherited world note and user is not a DM of world layer or campaign
+      return res.status(403).json({ error: 'This note is from a world layer. Create a local override to edit.' });
+    }
+  }
 
   const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only } = req.body;
 
@@ -423,6 +571,17 @@ router.put('/:id', authenticateToken, (req, res) => {
   const wantsManage = wantsRename || parent_id !== undefined || visibility !== undefined || granted_users !== undefined;
   if (wantsManage && !canManage) {
     return res.status(403).json({ error: 'Not authorised to rename, move, or change permissions on this note' });
+  }
+
+  // Validate move to world layer: only root campaigns can be moved under worlds
+  if (parent_id !== undefined && parent_id !== null && parent_id !== -1) {
+    const target = db.prepare('SELECT is_world, parent_id, is_folder FROM notes WHERE id = ?').get(parent_id);
+    if (target && target.is_world === 1) {
+      // Moving under a world layer: source must be a root campaign (no parent, is_folder=1)
+      if (note.parent_id !== null) {
+        return res.status(400).json({ error: 'Only root campaigns can be moved under a world layer' });
+      }
+    }
   }
 
   const canChangePerms = admin || isOwner || isDM;

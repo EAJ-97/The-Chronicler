@@ -182,8 +182,11 @@ const S = {
 export default function CampaignModal({ currentUser, onConfirm, onClose }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
+  const [creationType, setCreationType] = useState('campaign'); // 'world' or 'campaign'
   const [campaignName, setCampaignName] = useState('');
   const [allUsers, setAllUsers] = useState([]);
+  const [worlds, setWorlds] = useState([]);
+  const [selectedWorld, setSelectedWorld] = useState('none'); // 'none' or world ID
   // members: [{ user_id, username, is_dm }]
   const [members, setMembers] = useState([{ user_id: currentUser.id, username: currentUser.username, is_dm: true }]);
   const [selectedAdd, setSelectedAdd] = useState('');
@@ -192,10 +195,14 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
   useEffect(() => {
     api.get('/notes/meta/users').then(r => {
       setAllUsers(r.data);
-      // Pre-select first non-member user in dropdown
       const nonMembers = r.data.filter(u => u.id !== currentUser.id);
       if (nonMembers.length > 0) setSelectedAdd(String(nonMembers[0].id));
     }).catch(() => {});
+    
+    api.get('/notes/meta/worlds').then(r => {
+      setWorlds(r.data || []);
+    }).catch(() => {});
+    
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
@@ -224,7 +231,16 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
 
   const handleConfirm = () => {
     if (!campaignName.trim()) return;
-    onConfirm({ title: campaignName.trim(), members });
+    const payload = { 
+      title: campaignName.trim(), 
+      members,
+      is_world: creationType === 'world'
+    };
+    // If creating a campaign under a world, set parent_id
+    if (creationType === 'campaign' && selectedWorld !== 'none') {
+      payload.parent_id = parseInt(selectedWorld);
+    }
+    onConfirm(payload);
   };
 
   const handleKeyDown = (e) => {
@@ -236,21 +252,81 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
     <div style={S.overlay} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={isMobile ? { ...S.modal, width: '100%', height: '100%', maxHeight: '100%', borderRadius: 0, border: 'none' } : S.modal}>
         <div style={S.header}>
-          <div style={S.title}>New Campaign</div>
-          <div style={S.subtitle}>Name your chronicle and gather your party</div>
+          <div style={S.title}>{creationType === 'world' ? 'New World Layer' : 'New Campaign'}</div>
+          <div style={S.subtitle}>{creationType === 'world' ? 'Create a shared world for your chronicles' : 'Name your chronicle and gather your party'}</div>
         </div>
 
         <div style={S.body}>
-          {/* Campaign name */}
+          {/* Type selector */}
           <div>
-            <label style={S.label}>CAMPAIGN NAME</label>
+            <label style={S.label}>CREATION TYPE</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setCreationType('campaign')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  background: creationType === 'campaign' ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${creationType === 'campaign' ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                  color: creationType === 'campaign' ? '#c8943a' : 'rgba(226,213,187,0.4)',
+                  fontFamily: 'Cinzel',
+                  fontSize: '9px',
+                  letterSpacing: '0.1em',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                Campaign
+              </button>
+              <button
+                onClick={() => setCreationType('world')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  background: creationType === 'world' ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${creationType === 'world' ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                  color: creationType === 'world' ? '#c8943a' : 'rgba(226,213,187,0.4)',
+                  fontFamily: 'Cinzel',
+                  fontSize: '9px',
+                  letterSpacing: '0.1em',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                World
+              </button>
+            </div>
+          </div>
+
+          {/* World selection (campaign only) */}
+          {creationType === 'campaign' && (
+            <div>
+              <label style={S.label}>WORLD LAYER (Optional)</label>
+              <select
+                style={S.input}
+                value={selectedWorld}
+                onChange={e => setSelectedWorld(e.target.value)}
+              >
+                <option value="none">Standalone Campaign</option>
+                {worlds.map(w => (
+                  <option key={w.id} value={w.id}>{w.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Campaign/World name */}
+          <div>
+            <label style={S.label}>{creationType === 'world' ? 'WORLD NAME' : 'CAMPAIGN NAME'}</label>
             <input
               ref={inputRef}
               style={S.input}
               value={campaignName}
               onChange={e => setCampaignName(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="The Sunken Vale, Curse of Strahd…"
+              placeholder={creationType === 'world' ? 'Midgard, Forgotten Realms…' : 'The Sunken Vale, Curse of Strahd…'}
               maxLength={80}
             />
           </div>
@@ -306,7 +382,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
         <div style={S.footer}>
           <button style={S.cancelBtn} onClick={onClose}>Dismiss</button>
           <button style={S.confirmBtn(!campaignName.trim())} onClick={handleConfirm} disabled={!campaignName.trim()}>
-            Begin Chronicle
+            {creationType === 'world' ? 'Create World' : 'Begin Chronicle'}
           </button>
         </div>
       </div>
