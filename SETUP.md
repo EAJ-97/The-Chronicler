@@ -104,29 +104,18 @@ docker compose version
 ## PART 4: Deploy The Chronicler
 
 1. Copy the project files to your VM. From your Windows PC, open a terminal in
-   the `dnd-notes` folder and run:
+   the project folder (e.g. `notesapp` or `dnd-chronicler`) and run:
    ```bash
-   scp -r . dnd@192.168.1.50:~/dnd-notes
+   scp -r . dnd@192.168.1.50:~/notesapp
    ```
 
 2. SSH back into the VM:
    ```bash
    ssh dnd@192.168.1.50
-   cd ~/dnd-notes
+   cd ~/notesapp
    ```
 
-3. **IMPORTANT**: Set a secret key before running. Edit docker-compose.yml:
-   ```bash
-   nano docker-compose.yml
-   ```
-   Find the line:
-   ```
-   - JWT_SECRET=replace-this-with-a-long-random-secret-string
-   ```
-   Replace it with something long and random, like:
-   ```
-   - JWT_SECRET=xK9#mP2$vL8nQ4wR7yT1uI6oE3sA5dF0
-   ```
+3. **Optional:** A `JWT_SECRET` is auto-generated on first boot and saved to the data volume. To use a fixed secret instead, add `JWT_SECRET` to the `environment` section of `docker-compose.yml` or set it in a `.env` file.
 
 4. Build and start the app:
    ```bash
@@ -193,35 +182,6 @@ securely, without opening any router ports.
 
 ---
 
-## PART 6: Dev Setup on Windows (optional, for making changes)
-
-If you want to code changes on your Windows PC before deploying:
-
-1. Install:
-   - [Node.js](https://nodejs.org) (LTS version)
-   - [VS Code](https://code.visualstudio.com)
-   - [Git](https://git-scm.com)
-
-2. Open the `dnd-notes` folder in VS Code
-
-3. In two separate terminals:
-   ```bash
-   # Terminal 1 - Backend
-   cd backend
-   npm install
-   node server.js
-   ```
-   ```bash
-   # Terminal 2 - Frontend
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-4. Open `http://localhost:5173` in your browser
-
----
-
 ## Maintenance Commands
 
 ```bash
@@ -231,7 +191,7 @@ docker compose logs -f
 # Stop the app
 docker compose down
 
-# Restart after code changes
+# Rebuild and restart (e.g. after updating)
 docker compose up -d --build
 
 # Backup your database
@@ -248,7 +208,7 @@ docker compose exec chronicler cat /data/dnd_notes.db > backup.db
 - Check firewall: `sudo ufw allow 3001`
 
 **Login not working:**
-- Make sure you set a JWT_SECRET in docker-compose.yml before building
+- If you use a custom JWT_SECRET, ensure it is set in the environment or `.env`. Otherwise the app auto-generates one on first boot (stored in the data volume).
 
 **Graph view is empty:**
 - You need to create at least 2 notes and connect them first

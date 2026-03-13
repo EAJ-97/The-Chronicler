@@ -23,6 +23,9 @@ data-dev/
 docker-compose.dev.yml
 Dockerfile.dev
 
+# AI / agent context (local only, not for public repo)
+CONTEXT.md
+
 # Cursor IDE — track rules, ignore everything else
 .cursor/*
 !.cursor/rules/

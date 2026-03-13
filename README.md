@@ -84,42 +84,6 @@ This gives you a public HTTPS URL without opening firewall ports.
 
 ---
 
-## Branch Workflow
-
-```
-feature/* or bugfix/*  →  dev  →  main
-```
-
-| Branch | Purpose |
-|---|---|
-| `main` | Production only. Never committed to directly. Only receives merges from `dev`. |
-| `dev` | Integration branch. All tested features land here before shipping. |
-| `feature/x`, `bugfix/x` | Individual work. Always branched from `dev`, merged back into `dev`. |
-
-### Day-to-day flow
-
-```bash
-# 1. Start new work from dev
-git checkout dev && git pull origin dev
-git checkout -b feature/my-thing
-
-# 2. Make changes, test on dev Docker (port 3002)
-docker compose -f docker-compose.dev.yml up -d --build
-
-# 3. Merge back to dev when ready
-git checkout dev && git merge feature/my-thing
-git push origin dev
-
-# 4. When dev is stable and ready to ship, merge to main and deploy
-git checkout main && git merge dev
-git push origin main
-./deploy.sh
-```
-
-`deploy.sh` will refuse to run unless `origin/dev` is fully merged into `origin/main`, so there is no way to accidentally deploy code that bypassed the `dev` branch.
-
----
-
 ## Configuration
 
 | Variable | Default | Description |
@@ -128,22 +92,6 @@ git push origin main
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
 
-### Dev Environment
-
-Create a `docker-compose.dev.yml` to run alongside production on a different port. This file is git-ignored — it stays local to your machine.
-
-```bash
-# Start dev (does not affect production)
-docker compose -f docker-compose.dev.yml up -d --build
-
-# View dev logs
-docker compose -f docker-compose.dev.yml logs --tail=50
-
-# Stop dev
-docker compose -f docker-compose.dev.yml down
-```
-
-Dev uses its own container name and data volume — completely isolated from production.
 See `.env.example` for optional environment overrides.
 
 ---
@@ -206,7 +154,7 @@ See `.env.example` for optional environment overrides.
 | **Auto-Migration** | Database schema changes that run automatically on container boot. New tables and columns are added safely without wiping existing data. No manual SQL required when updating. |
 | **Backup Hash** | An MD5 checksum of the database file used by the automated backup cron job. Only saves a new backup if the hash differs from the previous two, keeping storage minimal. |
 | **Cron Job** | Automated tasks running on the host VM. Two configured: nightly database backup (2am) and weekly Docker image cleanup (Sunday 3am). |
-| **Symlink** | A symbolic link from `~/notesapp/data` pointing to the Docker Volume, allowing VS Code to browse the live database and image files from the project workspace. |
+| **Symlink** | A symbolic link from the project directory to the Docker volume, used to access database and image files on the host if needed. |
 
 ---
 
@@ -396,11 +344,11 @@ docker compose logs --tail=50
 cd ~/notesapp && docker compose restart
 ```
 
-### Rebuild production (no data loss)
+### Rebuild (e.g. after updating)
 ```bash
-cd ~/notesapp && ./deploy.sh
+cd ~/notesapp && docker compose up -d --build
 ```
-`deploy.sh` verifies you are on `main`, have no uncommitted changes, and that local `main` matches `origin/main` on GitHub before running the rebuild. Run `docker compose up -d --build` directly only if you intentionally want to bypass these checks.
+Your data lives in a Docker volume and is not removed when you rebuild. The database and uploaded images persist across restarts.
 
 ### Full wipe and fresh start
 ```bash
@@ -408,7 +356,7 @@ cd ~/notesapp && docker compose down -v && docker compose up -d --build
 ```
 > ⚠️ Destroys all data. Back up first.
 
-### Fix VS Code permissions after a wipe
+### Fix volume permissions after a wipe
 ```bash
 sudo chmod o+rx /var/lib/docker /var/lib/docker/volumes /var/lib/docker/volumes/notesapp_chronicler_data
 sudo chown -R sysadmin:sysadmin /var/lib/docker/volumes/notesapp_chronicler_data/_data
@@ -418,16 +366,18 @@ sudo chown -R sysadmin:sysadmin /var/lib/docker/volumes/notesapp_chronicler_data
 
 ## Updating
 
-1. Merge your feature branch into `main` and push to GitHub
-2. Pull on the server: `cd ~/notesapp && git pull origin main`
-3. Deploy:
-```bash
-cd ~/notesapp && ./deploy.sh
-```
+1. On your server, pull the latest version:
+   ```bash
+   cd ~/notesapp && git pull origin main
+   ```
+2. Rebuild and restart:
+   ```bash
+   docker compose up -d --build
+   ```
 
-**Data safety:** Rebuilding the container with `./deploy.sh` (or `docker compose up -d --build`) does **not** delete your data. The database and uploaded images live in a Docker volume that persists across rebuilds. Data is only lost if you run `docker compose down -v` (which removes volumes).
+**Data safety:** Rebuilding the container does **not** delete your data. The database and uploaded images live in a Docker volume that persists across rebuilds. Data is only lost if you run `docker compose down -v` (which removes volumes).
 
-Database migrations run automatically on boot. No manual SQL needed. Admins see an in-app update alert in the Admin Panel when a newer release is available on GitHub; the alert is informational only (no auto-update button).
+Database migrations run automatically on boot. No manual SQL needed. Admins may see an in-app update alert in the Admin Panel when a newer release is available; the alert is informational only (no auto-update button).
 
 ---
 
@@ -456,8 +406,8 @@ console.log('Done');
 ### Everyone logged out after container restart
 The entrypoint auto-generates and persists `JWT_SECRET` in the data volume. If the volume was wiped (`docker compose down -v`), a new secret is generated and all sessions are invalidated. See Configuration.
 
-### VS Code can't browse database files
-Run the permission fix commands in the Maintenance section, then refresh VS Code Explorer.
+### Can't access database files in the volume
+Run the permission fix commands in the Maintenance section for the volume path that matches your install.
 
 ### Snapshot restore not working
 Take a fresh snapshot after updating to the latest version — old snapshots taken before update 62 may be missing the root folder in their saved data.
