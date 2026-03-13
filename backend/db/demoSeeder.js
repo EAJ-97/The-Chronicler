@@ -93,6 +93,8 @@ function seed() {
 
     // ── CAMPAIGN 1: THE SUNKEN VALE ────────────────────────────────────────
     noteId['c1'] = mkFolder('The Sunken Vale', 'DungeonMaster', null);
+    // Assign DungeonMaster as DM of campaign 1
+    db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId['c1'], userId['DungeonMaster']);
 
     // Sub-folders
     noteId['c1_npcs']      = mkFolder('NPCs',             'DungeonMaster', 'c1');
@@ -613,6 +615,8 @@ Factor Dray was not informed of the Pale Hand arrangement. She is operating in g
 
     // ── CAMPAIGN 2: WHISPERS OF THE ASHBORN ───────────────────────────────
     noteId['c2'] = mkFolder('Whispers of the Ashborn', 'DungeonMaster', null);
+    // Assign DungeonMaster as DM of campaign 2
+    db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId['c2'], userId['DungeonMaster']);
     noteId['c2_npcs']    = mkFolder('NPCs',           'DungeonMaster', 'c2');
     noteId['c2_locs']    = mkFolder('Locations',      'DungeonMaster', 'c2');
     noteId['c2_quests']  = mkFolder('Quests',         'DungeonMaster', 'c2');
@@ -755,6 +759,33 @@ Escort Zara from the Free City of Maren to the Borderlands and locate her brothe
     mkEntry(s3,'c1','Brennan','I saw it.',1,'2025-01-29 18:53:00');
     mkEntry(s3,'c1','Lira','You saw it. You didn\'t invite it. There\'s a ritual distinction. I\'ve been researching it.',1,'2025-01-29 18:54:00');
     mkEntry(s3,'c1','DungeonMaster','Session ended with party back at the Gilded Anchor. 10 days until dark moon. Halveth sent a message via Boldwin — wants to meet privately.',0,'2025-01-29 19:00:00');
+
+    // ── SESSION ATTENDANCE: CAMPAIGN 1 ──────────────────────────────────
+    // Records which players attended each session (Phase 1 roadmap feature pre-scaffold)
+    const attendees = ['Sable', 'Brennan', 'Lira'];
+    for (const name of attendees) {
+      db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s1, userId[name]);
+      db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s2, userId[name]);
+      db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s3, userId[name]);
+    }
+
+    // ── SESSION PREP CHECKLIST: SESSION 4 PREP ───────────────────────────
+    // Demonstrates the checklist feature; s4 is the upcoming session DM is prepping for
+    const s4 = mkSession('c1', 'DungeonMaster', '2025-02-05 18:00:00');
+    const checklistItems = [
+      { content: 'Review Halveth\'s message — what does he know about Mourne?', checked: 1 },
+      { content: 'Prepare Ironhold Keep guard patrol map for potential infiltration', checked: 1 },
+      { content: 'Decide: does Mira tip off the Pale Hand before the party meets Halveth?', checked: 0 },
+      { content: 'Prep the Watcher encounter in the cistern if party returns underground', checked: 0 },
+      { content: 'Dark moon countdown — 10 days left, set up pressure at session start', checked: 0 },
+      { content: 'Check if any player has noted the Shard\'s hum changing near Brennan', checked: 0 },
+    ];
+    checklistItems.forEach((item, i) => {
+      db.prepare(`
+        INSERT INTO session_checklist_items (session_id, content, is_checked, sort_order, created_by)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(s4, item.content, item.checked, i + 1, userId['DungeonMaster']);
+    });
 
     // ── JOURNAL: CAMPAIGN 2 ──────────────────────────────────────────────
     const cs1 = mkSession('c2', 'DungeonMaster', '2025-02-05 18:00:00');
