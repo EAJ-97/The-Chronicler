@@ -162,15 +162,17 @@ export default function AdminPanel({ currentUser, onClose }) {
   const [curPwd, setCurPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [tab, setTab] = useState('users'); // 'users' | 'vault' | 'demo' | 'password'
+  const [updateCheck, setUpdateCheck] = useState(null); // { updateAvailable, currentVersion, latestVersion, latestTag }
 
   const loadData = async () => {
     try {
-      const [usersRes, settingsRes, demoRes, aiRes, backupRes] = await Promise.all([
+      const [usersRes, settingsRes, demoRes, aiRes, backupRes, updateRes] = await Promise.all([
         api.get('/admin/users'),
         api.get('/admin/settings'),
         api.get('/admin/demo/status'),
         api.get('/admin/ai/settings'),
         api.get('/admin/backup/info'),
+        api.get('/admin/update-check').catch(() => ({ data: null })),
       ]);
       setUsers(usersRes.data);
       setRegOpen(settingsRes.data.registration_open);
@@ -179,6 +181,7 @@ export default function AdminPanel({ currentUser, onClose }) {
       setAiKeySet(aiRes.data.ai_key_set);
       setAiKeyMasked(aiRes.data.ai_key_masked);
       setBackupInfo(backupRes.data);
+      if (updateRes && updateRes.data) setUpdateCheck(updateRes.data);
     } catch (err) {
       setError('Failed to load admin data');
     } finally {
@@ -317,6 +320,17 @@ export default function AdminPanel({ currentUser, onClose }) {
           </div>
           <button style={S.closeBtn} onClick={onClose}>×</button>
         </div>
+
+        {updateCheck?.updateAvailable && (
+          <div style={{
+            padding: '10px 20px', margin: '0 24px 0', flexShrink: 0,
+            background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.35)',
+            borderRadius: '3px', fontFamily: 'Crimson Pro, serif', fontSize: '13px',
+            color: '#e2d5bb',
+          }}>
+            A new version ({updateCheck.latestTag || updateCheck.latestVersion}) is available. To update on the server: <code style={{ background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '2px' }}>git pull origin main && ./deploy.sh</code>. Your data is not deleted.
+          </div>
+        )}
 
         <div style={S.body}>
           {error && <div style={S.error}>{error}</div>}
