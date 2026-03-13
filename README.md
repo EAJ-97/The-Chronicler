@@ -425,7 +425,9 @@ sudo chown -R sysadmin:sysadmin /var/lib/docker/volumes/notesapp_chronicler_data
 cd ~/notesapp && ./deploy.sh
 ```
 
-Database migrations run automatically on boot. No manual SQL needed. Existing data is always preserved unless you run `down -v`.
+**Data safety:** Rebuilding the container with `./deploy.sh` (or `docker compose up -d --build`) does **not** delete your data. The database and uploaded images live in a Docker volume that persists across rebuilds. Data is only lost if you run `docker compose down -v` (which removes volumes).
+
+Database migrations run automatically on boot. No manual SQL needed. Admins see an in-app update alert in the Admin Panel when a newer release is available on GitHub; the alert is informational only (no auto-update button).
 
 ---
 
