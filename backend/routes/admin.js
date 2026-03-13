@@ -274,4 +274,48 @@ router.get('/backup/info', authenticateToken, adminOnly, (req, res) => {
   }
 });
 
+// In-memory cache for GitHub release check (avoids rate limits)
+const UPDATE_CHECK_CACHE_MS = 60 * 60 * 1000; // 1 hour
+let updateCheckCache = null;
+
+// Compare two semver strings (e.g. "0.1.1" vs "0.1.2"). Returns 1 if a > b, -1 if a < b, 0 if equal.
+function compareSemver(a, b) {
+  const pa = a.replace(/^v/, '').split('.').map(Number);
+  const pb = b.replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+// GET /admin/update-check — tells admin if a newer release exists on GitHub (read-only, no action button)
+const GITHUB_REPO = process.env.GITHUB_REPOSITORY || 'EAJ-97/The-Chronicler';
+router.get('/update-check', authenticateToken, adminOnly, async (req, res) => {
+  const currentVersion = require('../package.json').version;
+  const now = Date.now();
+  if (updateCheckCache && (now - updateCheckCache.at) < UPDATE_CHECK_CACHE_MS) {
+    return res.json(updateCheckCache.data);
+  }
+  try {
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'Chronicler-Update-Check' },
+    });
+    if (!r.ok) {
+      updateCheckCache = { at: now, data: { updateAvailable: false, currentVersion, latestVersion: null, latestTag: null, error: 'Could not fetch releases' } };
+      return res.json(updateCheckCache.data);
+    }
+    const data = await r.json();
+    const latestTag = data.tag_name || '';
+    const latestVersion = latestTag.replace(/^v/, '');
+    const updateAvailable = compareSemver(currentVersion, latestVersion) < 0;
+    updateCheckCache = { at: now, data: { updateAvailable, currentVersion, latestVersion, latestTag } };
+    res.json(updateCheckCache.data);
+  } catch (e) {
+    updateCheckCache = { at: now, data: { updateAvailable: false, currentVersion, latestVersion: null, latestTag: null, error: e.message } };
+    res.json(updateCheckCache.data);
+  }
+});
+
 module.exports = router;
