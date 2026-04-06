@@ -14,8 +14,9 @@ feature/* or bugfix/*  →  dev  →  main
 ## Rules
 
 - `main` is production only. Never commit directly to it. It only receives merges from `dev`.
-- `dev` is the integration branch. All tested feature/bugfix branches land here.
+- `dev` is the integration branch. All feature/bugfix branches merge **here first** — never straight to `main`.
 - All new work branches off `dev`, not `main`.
+- **Test on `dev`** (e.g. dev Docker on port 3002) after merges. Only when you are satisfied, merge **`dev` → `main`** and deploy — not one feature at a time to `main` unless that feature is the only change on `dev` and you are releasing.
 
 ## Starting new work
 
