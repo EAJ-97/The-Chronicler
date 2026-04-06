@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId, getCampaignFolderId, isDMOf, isDMOfFolder, isGrantedUser } = require('../utils/access');
+const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 
 const router = express.Router();
 
@@ -607,6 +608,8 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canChangePerms = admin || isOwner || isDM;
   // Cosmetic fields: anyone who can manage the row or fully edit content
   const canStyle = canManage || canFullEdit;
+  // Custom image icons in the tree: DMs of the campaign and admins only (emoji presets stay canStyle)
+  const canSetImageSidebarIcon = admin || isDM;
 
   const newVisibility = visibility !== undefined ? visibility
     : is_shared !== undefined ? (is_shared ? 'shared' : 'hidden')
@@ -755,13 +758,29 @@ router.put('/:id', authenticateToken, (req, res) => {
     cascadeDown(parseInt(req.params.id));
   }
 
-  // Optional tree icon (emoji) and short sidebar description
+  // Optional tree icon (emoji or managed /api/images/files/* URL) and short sidebar description
   if (canStyle && (display_icon !== undefined || display_summary !== undefined)) {
-    const nextIcon = display_icon !== undefined
-      ? (display_icon === null || display_icon === ''
-        ? null
-        : String(display_icon).slice(0, 32))
-      : note.display_icon;
+    let nextIcon = note.display_icon;
+    if (display_icon !== undefined) {
+      const raw = display_icon === null || display_icon === '' ? null : String(display_icon).trim();
+      if (!raw) {
+        nextIcon = null;
+      } else if (raw.startsWith('/api/images/files/')) {
+        if (!isManagedSidebarIconUrl(raw)) {
+          return res.status(400).json({ error: 'Invalid sidebar image URL' });
+        }
+        if (!canSetImageSidebarIcon) {
+          return res.status(403).json({ error: 'Only campaign DMs and admins can use custom image icons' });
+        }
+        nextIcon = raw.slice(0, 256);
+      } else {
+        nextIcon = raw.slice(0, 32);
+      }
+      const prevIcon = note.display_icon;
+      if (prevIcon && isManagedSidebarIconUrl(prevIcon) && prevIcon !== nextIcon) {
+        unlinkManagedSidebarIconFile(prevIcon);
+      }
+    }
     const nextSummary = display_summary !== undefined
       ? (display_summary === null || display_summary === ''
         ? null

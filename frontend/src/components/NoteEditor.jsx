@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
 import { notesByIdMap } from '../utils/campaignTree.js';
-import { getFolderTreeKind, iconChoicesForFolderKind, NOTE_ICONS } from '../utils/displayIcons.js';
+import { getFolderTreeKind, iconChoicesForFolderKind, NOTE_ICONS, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
 
 const CATEGORIES = [
   { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
@@ -162,6 +162,9 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showMdHelp, setShowMdHelp] = useState(false);
   const imageInputRef = useRef(null);
+  /** Hidden file input for DM/admin sidebar icon uploads (folders + notes). */
+  const sidebarIconInputRef = useRef(null);
+  const [uploadingSidebarIcon, setUploadingSidebarIcon] = useState(false);
   const titleInputRef = useRef(null);
   // Permissions
   const [noteVisibility, setNoteVisibility] = useState(note?.visibility || 'hidden');
@@ -410,6 +413,37 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
       setSaving(false);
     }
   }, [isOwner, onSave]);
+
+  /**
+   * Handles image pick for the note-list icon: POSTs to /images/sidebar-icon then PUTs display_icon.
+   * Restricted to DMs and admins on the server; replaces any prior managed image file.
+   * @param {import('react').ChangeEvent<HTMLInputElement>} e
+   */
+  const handleSidebarIconFile = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !noteIdRef.current || !isDM) return;
+    const fd = new FormData();
+    fd.append('image', file);
+    try {
+      setUploadingSidebarIcon(true);
+      const up = await api.post(`/images/sidebar-icon/${noteIdRef.current}`, fd);
+      const url = up.data?.url;
+      if (!url) return;
+      setDisplayIcon(url);
+      const res = await api.put(`/notes/${noteIdRef.current}`, {
+        client_updated_at: serverUpdatedAt.current,
+        display_icon: url,
+        display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
+      });
+      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+      if (onSave) onSave(res.data);
+    } catch (err) {
+      console.error('Sidebar icon upload failed', err);
+    } finally {
+      setUploadingSidebarIcon(false);
+    }
+  }, [isDM, onSave]);
 
   const markDirty = () => {
     setDirty(true);
@@ -925,6 +959,29 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
                   }}
                 >{ic}</button>
               ))}
+              {isDM && (
+                <>
+                  <input
+                    ref={sidebarIconInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleSidebarIconFile}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => sidebarIconInputRef.current?.click()}
+                    disabled={uploadingSidebarIcon}
+                    title="Upload a small image (DM / admin, max 512KB)"
+                    style={{
+                      width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                      border: `1px solid ${isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`,
+                      background: isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.15)' : 'transparent',
+                      flexShrink: 0,
+                    }}
+                  >{uploadingSidebarIcon ? '…' : '🖼'}</button>
+                </>
+              )}
             </div>
           )}
 
@@ -1003,6 +1060,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
               Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
+              {isDM && ' DMs and admins can upload a small image (JPEG/PNG/GIF/WebP, max 512KB) as the list icon.'}
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
               <button
@@ -1040,6 +1098,38 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
                 >{ic}</button>
               ))}
             </div>
+            {isDM && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                <input
+                  ref={sidebarIconInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={handleSidebarIconFile}
+                />
+                <button
+                  type="button"
+                  onClick={() => sidebarIconInputRef.current?.click()}
+                  disabled={uploadingSidebarIcon}
+                  style={{
+                    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                    border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'rgba(226,213,187,0.75)',
+                  }}
+                >
+                  {uploadingSidebarIcon ? 'Uploading…' : 'Upload image icon'}
+                </button>
+                {isManagedSidebarIconUrl(displayIcon) && (
+                  <img
+                    src={displayIcon}
+                    alt=""
+                    style={{
+                      width: 40, height: 40, objectFit: 'cover', borderRadius: 6,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                    }}
+                  />
+                )}
+              </div>
+            )}
             <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
             <textarea
               value={displaySummary}

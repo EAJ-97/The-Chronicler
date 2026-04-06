@@ -6,10 +6,11 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf } = require('../utils/access');
+const { getImagesDataDir } = require('../utils/sidebarIcon');
 
 const router = express.Router();
 
-const IMAGES_DIR = path.join(__dirname, '../../../data/images');
+const IMAGES_DIR = getImagesDataDir();
 if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -21,14 +22,54 @@ const storage = multer.diskStorage({
   },
 });
 
+/** Shared allow-list for JPEG/PNG/GIF/WebP uploads. */
+function imageFileFilter(req, file, cb) {
+  const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  cb(null, allowed.includes(ext));
+}
+
 const upload = multer({
   storage,
   limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
-  fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, allowed.includes(ext));
-  },
+  fileFilter: imageFileFilter,
+});
+
+/** Smaller limit for sidebar tree icons (square thumbnails). */
+const uploadSidebar = multer({
+  storage,
+  limits: { fileSize: 512 * 1024 }, // 512KB
+  fileFilter: imageFileFilter,
+});
+
+/**
+ * POST multipart image for note list / tree icon only (not the note body gallery).
+ * Inserts no note_images row. Allowed for admins and DMs of the note's campaign.
+ * Body field name: image (same as /upload/:noteId).
+ */
+router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No valid image file provided' });
+
+  const noteId = parseInt(req.params.noteId, 10);
+  if (Number.isNaN(noteId)) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(400).json({ error: 'Invalid note id' });
+  }
+
+  const note = db.prepare('SELECT id FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
+  if (!note) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(404).json({ error: 'Note not found' });
+  }
+
+  if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(403).json({ error: 'Only campaign DMs and admins can upload sidebar icons' });
+  }
+
+  res.status(201).json({
+    url: `/api/images/files/${req.file.filename}`,
+  });
 });
 
 // POST upload image to a note

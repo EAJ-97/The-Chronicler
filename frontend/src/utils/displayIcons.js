@@ -4,6 +4,21 @@
  */
 import { notesByIdMap } from './campaignTree.js';
 
+/**
+ * Matches server-generated paths under /api/images/files (hex basename + image ext).
+ * Keep in sync with backend/utils/sidebarIcon.js.
+ */
+export const MANAGED_SIDEBAR_ICON_URL_RE = /^\/api\/images\/files\/([a-f0-9]{32}\.(?:jpe?g|png|gif|webp))$/i;
+
+/**
+ * True if display_icon should be rendered as an <img> (same-origin URL only).
+ * @param {unknown} s
+ * @returns {boolean}
+ */
+export function isManagedSidebarIconUrl(s) {
+  return typeof s === 'string' && MANAGED_SIDEBAR_ICON_URL_RE.test(s.trim());
+}
+
 /** @typedef {'world'|'campaign'|'subfolder'|'note'} TreeKind */
 
 /**
@@ -57,7 +72,7 @@ export function iconChoicesForFolderKind(kind) {
 }
 
 /**
- * Resolves the emoji shown in the sidebar tree (custom display_icon or sensible default).
+ * Resolves the sidebar tree glyph: display_icon (emoji or managed /api/images/files/* URL) or a default emoji.
  * @param {object} node — note row from API
  * @param {Array<object>} allNotes
  * @returns {string}

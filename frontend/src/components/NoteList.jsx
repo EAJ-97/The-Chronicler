@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { getCategoryColor } from './NoteEditor.jsx';
 import api from '../api.js';
 import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
-import { resolveSidebarIcon } from '../utils/displayIcons.js';
+import { resolveSidebarIcon, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
 
 function buildTree(notes) {
   const map = {};
@@ -160,12 +160,27 @@ function TreeNode({
           <span style={{ width: '10px', flexShrink: 0 }} />
         )}
 
-        {/* Icon — custom display_icon or defaults by world / campaign / note category */}
+        {/* Icon — emoji, default by kind, or DM-uploaded image (managed URL only) */}
         <span
-          style={{ fontSize: isFolder ? '13px' : '14px', flexShrink: 0, lineHeight: 1, width: isFolder ? undefined : '22px', textAlign: 'center' }}
+          style={{
+            fontSize: isFolder ? '13px' : '14px', flexShrink: 0, lineHeight: 1,
+            width: isFolder ? '22px' : '22px', height: '22px', textAlign: 'center',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}
           title={node.display_summary ? `${node.title}\n${node.display_summary}` : undefined}
         >
-          {resolveSidebarIcon(node, allNotes || [])}
+          {(() => {
+            const ic = resolveSidebarIcon(node, allNotes || []);
+            return isManagedSidebarIconUrl(ic) ? (
+              <img
+                src={ic}
+                alt=""
+                style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: '4px', display: 'block' }}
+              />
+            ) : (
+              ic
+            );
+          })()}
         </span>
 
         {/* Title */}
