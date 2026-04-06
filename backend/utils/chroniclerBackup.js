@@ -162,7 +162,7 @@ function buildExportPayload(db, rootFolderId) {
 
   const connections = db
     .prepare(
-      `SELECT id, source_note_id, target_note_id, label, is_speculative, created_by, created_at
+      `SELECT id, source_note_id, target_note_id, label, is_speculative, connection_kind, created_by, created_at
        FROM connections WHERE source_note_id IN (${placeholders}) AND target_note_id IN (${placeholders})`
     )
     .all(...ids, ...ids);
@@ -430,8 +430,8 @@ function runImport(db, data, opts) {
     }
 
     const insConn = db.prepare(
-      `INSERT INTO connections (source_note_id, target_note_id, label, is_speculative, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO connections (source_note_id, target_note_id, label, is_speculative, connection_kind, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     for (const c of data.connections || []) {
       const s = idMap.get(c.source_note_id);
@@ -439,7 +439,8 @@ function runImport(db, data, opts) {
       const by = userIdMap.get(c.created_by);
       if (s && t && by) {
         try {
-          insConn.run(s, t, c.label ?? '', c.is_speculative ?? 0, by, c.created_at);
+          const kind = c.connection_kind === 'theory' || c.connection_kind === 'ship' ? c.connection_kind : 'canon';
+          insConn.run(s, t, c.label ?? '', c.is_speculative ?? 0, kind, by, c.created_at);
         } catch (e) {
           if (!String(e.message).includes('UNIQUE')) throw e;
         }

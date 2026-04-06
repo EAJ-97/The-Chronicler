@@ -115,13 +115,14 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS connections (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_note_id INTEGER NOT NULL,
-    target_note_id INTEGER NOT NULL,
-    label          TEXT    DEFAULT '',
-    is_speculative INTEGER DEFAULT 0,
-    created_by     INTEGER NOT NULL,
-    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_note_id   INTEGER NOT NULL,
+    target_note_id   INTEGER NOT NULL,
+    label            TEXT    DEFAULT '',
+    is_speculative   INTEGER DEFAULT 0,
+    connection_kind  TEXT    DEFAULT 'canon',
+    created_by       INTEGER NOT NULL,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
     FOREIGN KEY (target_note_id) REFERENCES notes(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by)     REFERENCES users(id),
@@ -487,6 +488,23 @@ migrate('037_settings_ai_icon_ollama', () => {
     `);
   } catch (e) {
     console.error('[migrate 037]', e.message);
+  }
+});
+
+// Graph: theory vs ship vs canon connection kinds (gimmick edges)
+migrate('038_connections_connection_kind', () => {
+  try {
+    db.exec("ALTER TABLE connections ADD COLUMN connection_kind TEXT DEFAULT 'canon'");
+  } catch {
+    /* already exists */
+  }
+  try {
+    db.prepare(
+      `UPDATE connections SET connection_kind = CASE WHEN is_speculative = 1 THEN 'theory' ELSE 'canon' END
+       WHERE connection_kind IS NULL OR TRIM(connection_kind) = ''`
+    ).run();
+  } catch {
+    /* ignore */
   }
 });
 

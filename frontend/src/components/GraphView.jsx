@@ -20,33 +20,51 @@ function useContainerWidth(ref) {
 
 const HOP_OPACITY = [1.0, 1.0, 0.85, 0.6, 0.35, 0.18, 0.08];
 const FLOOR_OPACITY = 0.04;
+/** While choosing the second node in Find Path, non-source nodes use this opacity (~35% dim vs full). */
+const PATH_FIND_PICK_DIM_OPACITY = 0.65;
 const MAX_HOPS = 6;
 
+/**
+ * BFS hop depths from startId using **canonical edges only** — theory/ship links do not expand tiers or affect hover/selection halos.
+ */
 function getTiers(cy, startId, maxDepth = MAX_HOPS) {
   const tiers = new Map();
-  const visited = new Set();
-  const queue = [[String(startId), 0]];
+  const start = String(startId);
+  const queue = [[start, 0]];
+  tiers.set(start, 0);
   while (queue.length > 0) {
     const [id, depth] = queue.shift();
-    if (visited.has(id)) continue;
-    visited.add(id);
-    tiers.set(id, depth);
-    if (depth < maxDepth) {
-      cy.$(`#${id}`).neighborhood('node').forEach(n => {
-        if (!visited.has(n.id())) queue.push([n.id(), depth + 1]);
-      });
+    if (depth >= maxDepth) continue;
+    for (const nid of getCanonNeighborIds(cy, id)) {
+      if (!tiers.has(nid)) {
+        tiers.set(nid, depth + 1);
+        queue.push([nid, depth + 1]);
+      }
     }
   }
   return tiers;
 }
 
-// Returns all shortest paths between src and tgt, capped at maxPaths
+/** Neighbour node ids reachable via canonical (orange) edges only — theory/ship edges excluded from pathfinding. */
+function getCanonNeighborIds(cy, nodeId) {
+  const out = [];
+  const el = cy.getElementById(nodeId);
+  if (!el || el.length === 0) return out;
+  el.connectedEdges('.kind-canon').forEach((edge) => {
+    edge.connectedNodes().forEach((n) => {
+      if (n.id() !== nodeId) out.push(n.id());
+    });
+  });
+  return out;
+}
+
+// Returns all shortest paths between src and tgt, capped at maxPaths (canonical edges only)
 // Each path is an array of node id strings
 function getAllShortestPaths(cy, srcId, tgtId, maxPaths = 3) {
   const src = String(srcId), tgt = String(tgtId);
   if (src === tgt) return [];
 
-  // BFS tracking all parents for shortest-path reconstruction
+  // BFS tracking all parents for shortest-path reconstruction — only `kind-canon` edges
   const dist    = new Map([[src, 0]]);
   const parents = new Map([[src, []]]);
   const queue   = [src];
@@ -56,8 +74,7 @@ function getAllShortestPaths(cy, srcId, tgtId, maxPaths = 3) {
     const cur = queue.shift();
     const d   = dist.get(cur);
     if (cur === tgt) { found = true; break; }
-    cy.$(`#${cur}`).neighborhood('node').forEach(nb => {
-      const nid = nb.id();
+    for (const nid of getCanonNeighborIds(cy, cur)) {
       if (!dist.has(nid)) {
         dist.set(nid, d + 1);
         parents.set(nid, [cur]);
@@ -65,7 +82,7 @@ function getAllShortestPaths(cy, srcId, tgtId, maxPaths = 3) {
       } else if (dist.get(nid) === d + 1) {
         parents.get(nid).push(cur);
       }
-    });
+    }
   }
 
   if (!found) return [];
@@ -95,7 +112,7 @@ function getSubtreeIds(allNotes, rootId) {
   return ids;
 }
 
-export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile }) {
+export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const hoverTimerRef = useRef(null);
@@ -116,13 +133,22 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   pathModeRef.current   = pathMode;
   pathSourceRef.current = pathSource;
 
+  /** Web gimmick: speculative “theory” edges (2D only). */
+  const [theoryMode, setTheoryMode] = useState(false);
+  /** Web gimmick: pink “ship” edges between NPC/Character notes (2D only). */
+  const [shipMode, setShipMode] = useState(false);
+  const theoryModeRef = useRef(false);
+  const shipModeRef = useRef(false);
+  theoryModeRef.current = theoryMode;
+  shipModeRef.current = shipMode;
+
   const exitPathMode = useCallback(() => {
     setPathMode(false);
     setPathSource(null);
     setPathResult(null);
     pathModeRef.current   = false;
     pathSourceRef.current = null;
-    cyRef.current?.elements().removeClass('path-node path-edge path-floor');
+    cyRef.current?.elements().removeClass('path-node path-edge path-floor path-pick-dim');
     cyRef.current?.elements().removeClass('tier-0 tier-1 tier-2 tier-3 tier-4 tier-5 tier-6 dimmed highlighted');
   }, []);
 
@@ -179,7 +205,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   ).filter(c => visibleNoteIds.has(c.source_note_id) && visibleNoteIds.has(c.target_note_id));
 
   // Edge label editing
-  const [editingEdge, setEditingEdge] = useState(null); // { id, label, x, y }
+  const [editingEdge, setEditingEdge] = useState(null); // { id, label, x, y, gimmickKind?: 'theory'|'ship' }
   const editingEdgeRef = useRef(null);
   editingEdgeRef.current = editingEdge;
 
@@ -191,10 +217,44 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     } catch (err) { console.error(err); }
   }, [onUpdateConnection]);
 
-  const exitConnectMode = () => {
-    setConnectMode(false);
+  /**
+   * Deletes a theory or ship edge from the graph (API); closes the editor on success.
+   * @param {number} connId
+   */
+  const handleGimmickEdgeDelete = useCallback(async (connId) => {
+    if (!onDeleteConnection) return;
+    try {
+      const result = await onDeleteConnection(connId);
+      if (result !== false) setEditingEdge(null);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [onDeleteConnection]);
+
+  /** Clears the two-tap link pick state (connect / theory / ship) and node highlight classes. */
+  const clearLinkPick = () => {
     setConnectSource(null);
-    cyRef.current?.elements().removeClass('connect-source connect-dim');
+    cyRef.current?.elements().removeClass('connect-source connect-dim theory-source ship-source');
+  };
+
+  const exitConnectMode = () => {
+    if (connectModeRef.current) clearLinkPick();
+    setConnectMode(false);
+  };
+  const exitTheoryMode = () => {
+    if (theoryModeRef.current) clearLinkPick();
+    setTheoryMode(false);
+  };
+  const exitShipMode = () => {
+    if (shipModeRef.current) clearLinkPick();
+    setShipMode(false);
+  };
+
+  /** After a link is created, exit whichever mode was active. */
+  const finishActiveLinkMode = () => {
+    if (theoryModeRef.current) exitTheoryMode();
+    else if (shipModeRef.current) exitShipMode();
+    else exitConnectMode();
   };
 
   // Position key for localStorage per campaign
@@ -277,7 +337,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       cy.one('layoutstop', () => separateLabels(cy, posKey));
     }
 
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, exitConnectMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode);
+    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
 
     return () => {
       clearTimeout(hoverTimerRef.current);
@@ -357,7 +417,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     };
     cy.on('dragfree', 'node', savePositions);
     cy.on('layoutstop', savePositions);
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, exitConnectMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode);
+    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
   }, [visibleNotes, visibleConnections]);
 
   // Tiered highlight
@@ -438,6 +498,19 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
             style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,213,187,0.4)', fontFamily: 'Cinzel', fontSize: '9px' }}>
             CLEAR
           </button>
+          {editingEdge.gimmickKind && onDeleteConnection && (
+            <button
+              type="button"
+              onClick={() => handleGimmickEdgeDelete(editingEdge.id)}
+              title="Remove this theory or ship link"
+              style={{
+                padding: '4px 8px', background: 'rgba(196,80,80,0.12)', border: '1px solid rgba(196,100,100,0.35)', borderRadius: '3px',
+                cursor: 'pointer', color: 'rgba(240,160,160,0.95)', fontFamily: 'Cinzel', fontSize: '9px',
+              }}
+            >
+              REMOVE
+            </button>
+          )}
         </div>
       )}
 
@@ -474,34 +547,8 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       {/* Legend — anchored below the toolbar row so it never overlaps it */}
       <LegendPanel selectedNoteId={selectedNoteId} />
 
-      {/* Toolbar — top-right, wraps gracefully, z above graph but below campaign selector */}
+      {/* Toolbar — top-right: buttons first, status hints below (so hints never sit above the buttons) */}
       <div style={{ position: 'absolute', top: 8, right: 16, zIndex: 15, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', maxWidth: 'calc(100% - 200px)' }}>
-        {/* Status messages row */}
-        {(connectMode || pathMode || pathResult) && (
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {connectMode && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(58,139,196,0.15)', border: '1px solid rgba(58,139,196,0.4)', borderRadius: '3px', color: 'rgba(58,196,226,0.9)', whiteSpace: 'nowrap' }}>
-                {connectSource ? `FROM: ${connectSource.title.slice(0, 20)} → click target` : 'Click source node'}
-              </div>
-            )}
-            {pathMode && !pathResult && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
-                {pathSource ? `FROM: ${(pathSource.title || pathSource.name || '').slice(0, 20)} → click target` : 'Click source node'}
-              </div>
-            )}
-            {pathResult && !pathResult.found && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(196,80,58,0.12)', border: '1px solid rgba(196,80,58,0.35)', borderRadius: '3px', color: 'rgba(226,140,100,0.9)', whiteSpace: 'nowrap' }}>
-                No path found between these nodes
-              </div>
-            )}
-            {pathResult?.found && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
-                {pathResult.paths.length} path{pathResult.paths.length > 1 ? 's' : ''} · {pathResult.paths[0].length - 1} hops
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Action buttons — always rendered for collision measurement; dropdown overlays when narrow */}
         <div style={{ position: 'relative' }}>
           {/* ··· dropdown trigger — shown when inline buttons would collide with campaign selector */}
@@ -513,15 +560,27 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               >···</button>
               {showToolMenu && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: isMobile ? '160px' : '140px', boxShadow: '0 6px 24px rgba(0,0,0,0.7)' }}>
-                  <button onClick={() => { if (pathMode) exitPathMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); }}
+                  <button onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); }}
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: connectMode ? 'rgba(58,139,196,0.2)' : 'transparent', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.12)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {connectMode ? '✕ Cancel Connect' : '⟵⟶ Connect'}
                   </button>
-                  <button onClick={() => { exitConnectMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); }}
+                  <button onClick={() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); }}
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: pathMode ? 'rgba(139,196,58,0.18)' : 'transparent', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {pathMode ? '✕ Cancel Path' : '⬡ Find Path'}
                   </button>
-                  <button onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); setShowToolMenu(false); }}
+                  {!is3D && (
+                    <>
+                      <button onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); }}
+                        style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'transparent', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : 'rgba(200,148,58,0.12)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.7)' }}>
+                        {theoryMode ? '✕ Theory' : '◇ Theory'}
+                      </button>
+                      <button onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); setShowToolMenu(false); }}
+                        style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: shipMode ? 'rgba(220,80,140,0.18)' : 'transparent', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.45)' : 'rgba(200,148,58,0.12)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.7)' }}>
+                        {shipMode ? '✕ Ship' : '♥ Ship'}
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); setShowToolMenu(false); }}
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: is3D ? 'rgba(58,139,196,0.15)' : 'transparent', border: `1px solid ${is3D ? 'rgba(58,139,196,0.3)' : 'rgba(200,148,58,0.12)'}`, color: is3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.7)' }}>
                     {is3D ? '↩ 2D View' : '◈ 3D View'}
                   </button>
@@ -545,15 +604,29 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           {/* Inline buttons — always rendered so ref can measure width; hidden when narrow */}
           <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: isNarrowGraph ? 'hidden' : 'visible', pointerEvents: isNarrowGraph ? 'none' : 'auto' }}>
             <button
-              onClick={() => { if (pathMode) exitPathMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } }}
+              onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{connectMode ? '✕ Cancel' : '⟵⟶ Connect'}</button>
             <button
-              onClick={() => { exitConnectMode(); pathMode ? exitPathMode() : setPathMode(true); }}
+              onClick={() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: pathMode ? 'rgba(139,196,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.5)' : 'rgba(200,148,58,0.25)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{pathMode ? '✕ Cancel' : '⬡ Find Path'}</button>
+            {!is3D && (
+              <>
+                <button
+                  onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); }}
+                  title="Add a speculative theory link (dashed violet)"
+                  style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.5)' : 'rgba(200,148,58,0.25)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+                >{theoryMode ? '✕ Theory' : '◇ Theory'}</button>
+                <button
+                  onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); }}
+                  title="Ship two NPC/Character notes (dashed pink)"
+                  style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: shipMode ? 'rgba(220,80,140,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.5)' : 'rgba(200,148,58,0.25)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+                >{shipMode ? '✕ Ship' : '♥ Ship'}</button>
+              </>
+            )}
             <button
-              onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); }}
+              onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: is3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${is3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: is3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{is3D ? '2D' : '3D'}</button>
             {!is3D && (
@@ -568,6 +641,39 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
             )}
           </div>
         </div>
+
+        {/* Status / hints — below the button row */}
+        {(connectMode || theoryMode || shipMode || pathMode || pathResult) && (
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {(connectMode || theoryMode || shipMode) && !pathMode && (
+              <div style={{
+                fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px',
+                background: theoryMode ? 'rgba(150,100,200,0.15)' : shipMode ? 'rgba(220,80,140,0.12)' : 'rgba(58,139,196,0.15)',
+                border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : shipMode ? 'rgba(255,120,170,0.4)' : 'rgba(58,139,196,0.4)'}`,
+                borderRadius: '3px',
+                color: theoryMode ? 'rgba(200,170,240,0.95)' : shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(58,196,226,0.9)',
+                whiteSpace: 'nowrap',
+              }}>
+                {connectSource ? `FROM: ${connectSource.title.slice(0, 20)} → click target` : 'Click source node'}
+              </div>
+            )}
+            {pathMode && !pathResult && (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
+                {pathSource ? `FROM: ${(pathSource.title || pathSource.name || '').slice(0, 20)} → click target` : 'Click source node'}
+              </div>
+            )}
+            {pathResult && !pathResult.found && (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(196,80,58,0.12)', border: '1px solid rgba(196,80,58,0.35)', borderRadius: '3px', color: 'rgba(226,140,100,0.9)', whiteSpace: 'nowrap' }}>
+                No path found between these nodes
+              </div>
+            )}
+            {pathResult?.found && (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
+                {pathResult.paths.length} path{pathResult.paths.length > 1 ? 's' : ''} · {pathResult.paths[0].length - 1} hops
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 3D graph overlay */}
@@ -604,23 +710,34 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   );
 }
 
-function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, exitConnectMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode) {
+/**
+ * Wires Cytoscape: normal select/open, connect/theory/ship two-tap links, path finder, edge label edit, background clear, hover tier preview.
+ * Theory/ship edges skip orange tier styling and use dim/highlight only.
+ */
+function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef) {
   const lastClickRef = { id: null, time: 0 };
   const TIER_CLASSES = ['tier-0','tier-1','tier-2','tier-3','tier-4','tier-5','tier-6'];
-  const ALL_CLASSES  = [...TIER_CLASSES, 'dimmed', 'highlighted', 'path-node', 'path-edge', 'path-floor'].join(' ');
+  const ALL_CLASSES  = [...TIER_CLASSES, 'dimmed', 'highlighted', 'path-node', 'path-edge', 'path-floor', 'path-pick-dim', 'connect-source', 'connect-dim', 'theory-source', 'ship-source'].join(' ');
 
   cy.on('tap', 'node', (e) => {
-    // Connect mode
-    if (connectModeRef.current) {
+    // Connect / theory / ship (shared two-tap flow)
+    const inLinkMode = connectModeRef.current || theoryModeRef.current || shipModeRef.current;
+    if (inLinkMode) {
       if (!connectSourceRef.current) {
         setConnectSource({ id: e.target.id(), title: e.target.data('label') });
         e.target.addClass('connect-source');
+        if (theoryModeRef.current) e.target.addClass('theory-source');
+        if (shipModeRef.current) e.target.addClass('ship-source');
         cy.nodes().not(e.target).addClass('connect-dim');
       } else {
         const sourceId = connectSourceRef.current.id;
         const targetId = e.target.id();
-        if (sourceId !== targetId) onCreateConnection(parseInt(sourceId), parseInt(targetId));
-        exitConnectMode();
+        if (sourceId !== targetId) {
+          if (theoryModeRef.current) onCreateConnection(parseInt(sourceId), parseInt(targetId), { connection_kind: 'theory' });
+          else if (shipModeRef.current) onCreateConnection(parseInt(sourceId), parseInt(targetId), { connection_kind: 'ship' });
+          else onCreateConnection(parseInt(sourceId), parseInt(targetId));
+        }
+        finishActiveLinkMode();
       }
       return;
     }
@@ -634,7 +751,8 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
         // Highlight source node immediately
         cy.elements().removeClass(ALL_CLASSES);
         cy.getElementById(id).addClass('tier-0');
-        cy.nodes().not(`#${id}`).addClass('dimmed');
+        cy.nodes().not(`#${id}`).addClass('path-pick-dim');
+        cy.edges().addClass('path-pick-dim');
       } else {
         const srcId = pathSourceRef.current.id;
         if (srcId === id) return; // same node — ignore
@@ -691,28 +809,32 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
     if (e.target === cy) {
       cy.elements().removeClass(ALL_CLASSES);
       if (editingEdgeRef.current) setEditingEdge(null);
+      if (connectModeRef.current || theoryModeRef.current || shipModeRef.current) setConnectSource(null);
     }
   });
 
   // Edge click → open label editor
   cy.on('tap', 'edge', (e) => {
-    if (connectModeRef.current || pathModeRef.current) return;
+    if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
     const edge = e.target;
     const connId = edge.data('connId');
     if (!connId) return;
+    let gimmickKind = null;
+    if (edge.hasClass('kind-theory')) gimmickKind = 'theory';
+    else if (edge.hasClass('kind-ship')) gimmickKind = 'ship';
     const pos = edge.midpoint();
     const pan = cy.pan();
     const zoom = cy.zoom();
     const x = pos.x * zoom + pan.x;
     const y = pos.y * zoom + pan.y;
-    setEditingEdge({ id: connId, label: edge.data('label') || '', x, y });
+    setEditingEdge({ id: connId, label: edge.data('label') || '', x, y, gimmickKind });
   });
 
   cy.on('mouseover', 'node', (e) => {
-    if (connectModeRef.current || pathModeRef.current) return;
+    if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
     clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = setTimeout(() => {
-      if (connectModeRef.current || pathModeRef.current) return;
+      if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
       const id = e.target.id();
       cy.elements().removeClass(ALL_CLASSES);
       const tiers = getTiers(cy, id, MAX_HOPS);
@@ -721,9 +843,15 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
         n.addClass(t === undefined ? 'dimmed' : `tier-${Math.min(t, MAX_HOPS)}`);
       });
       cy.edges().forEach(edge => {
+        if (edge.hasClass('kind-theory') || edge.hasClass('kind-ship')) {
+          const sT = tiers.get(edge.source().id()) ?? Infinity;
+          const tT = tiers.get(edge.target().id()) ?? Infinity;
+          if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
+          else edge.addClass('highlighted');
+          return;
+        }
         const sT = tiers.get(edge.source().id()) ?? Infinity;
         const tT = tiers.get(edge.target().id()) ?? Infinity;
-        // Edge takes the opacity of its deeper endpoint; if either endpoint is unreachable → floor
         if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
         else edge.addClass(`tier-${Math.min(Math.max(sT, tT), MAX_HOPS)}`);
       });
@@ -731,7 +859,7 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
   });
 
   cy.on('mouseout', 'node', () => {
-    if (connectModeRef.current || pathModeRef.current) return;
+    if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
     clearTimeout(hoverTimerRef.current);
     cy.elements().removeClass(ALL_CLASSES);
   });
@@ -780,6 +908,18 @@ function separateLabels(cy, posKey, maxPasses = 12) {
   }
 }
 
+/**
+ * Returns a Cytoscape edge class for connection_kind (canon / theory / ship).
+ * Legacy rows use is_speculative → theory; unknown values default to canon.
+ */
+function connectionKindClass(conn) {
+  const k = conn.connection_kind;
+  if (k === 'theory' || k === 'ship') return `kind-${k}`;
+  if (k === 'canon') return 'kind-canon';
+  if (conn.is_speculative) return 'kind-theory';
+  return 'kind-canon';
+}
+
 function buildElements(notes, connections) {
   const nodeIds = new Set(notes.map(n => String(n.id)));
   return [
@@ -790,6 +930,7 @@ function buildElements(notes, connections) {
       .filter(conn => nodeIds.has(String(conn.source_note_id)) && nodeIds.has(String(conn.target_note_id)))
       .map(conn => ({
         data: { id: `e${conn.id}`, connId: conn.id, source: String(conn.source_note_id), target: String(conn.target_note_id), label: conn.label || '' },
+        classes: connectionKindClass(conn),
       })),
   ];
 }
@@ -824,6 +965,8 @@ function buildStyle() {
     },
     ...nodeTierStyles,
     { selector: 'node.dimmed',     style: { 'opacity': FLOOR_OPACITY } },
+    { selector: 'node.path-pick-dim', style: { 'opacity': PATH_FIND_PICK_DIM_OPACITY } },
+    { selector: 'edge.path-pick-dim', style: { 'opacity': PATH_FIND_PICK_DIM_OPACITY } },
     { selector: 'node.path-node',  style: { 'opacity': 1, 'background-opacity': 0.7, 'border-width': 3, 'border-opacity': 1, 'width': 44, 'height': 44 } },
     { selector: 'node.path-floor', style: { 'opacity': FLOOR_OPACITY } },
     {
@@ -836,11 +979,50 @@ function buildStyle() {
         'transition-property': 'opacity, line-color, width', 'transition-duration': '200ms',
       },
     },
+    {
+      selector: 'edge.kind-canon',
+      style: {
+        'line-style': 'solid',
+        'line-color': 'rgba(200,148,58,0.35)',
+      },
+    },
+    {
+      selector: 'edge.kind-theory',
+      style: {
+        'line-style': 'dashed',
+        'line-color': 'rgba(160,110,210,0.65)',
+      },
+    },
+    {
+      selector: 'edge.kind-theory.highlighted',
+      style: { 'line-color': 'rgba(190,150,235,0.95)', 'opacity': 1 },
+    },
+    {
+      selector: 'edge.kind-theory.dimmed',
+      style: { 'opacity': FLOOR_OPACITY },
+    },
+    {
+      selector: 'edge.kind-ship',
+      style: {
+        'line-style': 'dashed',
+        'line-color': 'rgba(235,100,160,0.8)',
+      },
+    },
+    {
+      selector: 'edge.kind-ship.highlighted',
+      style: { 'line-color': 'rgba(255,140,190,0.98)', 'opacity': 1 },
+    },
+    {
+      selector: 'edge.kind-ship.dimmed',
+      style: { 'opacity': FLOOR_OPACITY },
+    },
     ...edgeTierStyles,
     { selector: 'edge.dimmed',     style: { 'opacity': FLOOR_OPACITY } },
     { selector: 'edge.path-edge',  style: { 'opacity': 1, 'line-color': 'rgba(200,148,58,0.85)', 'width': 4 } },
     { selector: 'edge.path-floor', style: { 'opacity': FLOOR_OPACITY } },
     { selector: 'node.connect-source', style: { 'border-color': 'rgba(58,196,226,1)', 'border-width': 3, 'background-opacity': 0.6, 'opacity': 1 } },
+    { selector: 'node.theory-source', style: { 'border-color': 'rgba(180,130,240,1)', 'border-width': 3, 'background-opacity': 0.55, 'opacity': 1 } },
+    { selector: 'node.ship-source', style: { 'border-color': 'rgba(255,120,175,1)', 'border-width': 3, 'background-opacity': 0.55, 'opacity': 1 } },
     { selector: 'node.connect-dim',    style: { 'opacity': 0.2 } },
     { selector: 'edge:selected',       style: { 'line-color': 'rgba(200,148,58,0.85)', 'width': 4 } },
   ];
@@ -884,6 +1066,19 @@ function LegendPanel({ selectedNoteId }) {
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: `rgba(200,148,58,${opacity})`, flexShrink: 0 }} />
                 <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: `rgba(226,213,187,${Math.min(1, opacity * 0.8 + 0.4)})`, letterSpacing: '0.05em' }}>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CONNECTIONS</div>
+            {[
+              { label: 'Canon', line: 'rgba(200,148,58,0.75)', dash: false },
+              { label: 'Theory', line: 'rgba(160,110,210,0.85)', dash: true },
+              { label: 'Ship', line: 'rgba(235,100,160,0.9)', dash: true },
+            ].map(({ label, line, dash }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                <span style={{ width: '22px', flexShrink: 0, borderTop: `2px ${dash ? 'dashed' : 'solid'} ${line}` }} />
+                <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
               </div>
             ))}
           </div>

@@ -7,7 +7,21 @@ const N_SEG = 24;
 
 const MAX_HOPS    = 6;
 const FLOOR_OP    = 0.04;
+/** Non-highlighted nodes/links while choosing the second Find Path node (~35% dim vs full). */
+const PATH_PICK_DIM = 0.65;
 const HOP_OPACITY = [1.0, 1.0, 0.85, 0.6, 0.35, 0.18, 0.08];
+
+/**
+ * True if this connection is canonical for pathfinding and hop highlighting (excludes theory/ship gimmick edges).
+ * @param {{ connection_kind?: string, is_speculative?: number }} c
+ * @returns {boolean}
+ */
+function isCanonConnection(c) {
+  const k = c.connection_kind;
+  if (k === 'theory' || k === 'ship') return false;
+  if (k === 'canon') return true;
+  return !c.is_speculative;
+}
 
 function buildTiers(startId, adjacency) {
   const tiers = new Map();
@@ -287,6 +301,7 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
   const rebuildAdj = useCallback(() => {
     const adj = new Map();
     connections.forEach(c => {
+      if (!isCanonConnection(c)) return;
       const s = String(c.source_note_id), t = String(c.target_note_id);
       if (!adj.has(s)) adj.set(s, []);
       if (!adj.has(t)) adj.set(t, []);
@@ -633,7 +648,8 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
         if (pathData) {
           const onPath = pathData.nodeIds.has(nodeId);
           p         = TIER_PARAMS[0];
-          floorMult = onPath ? 1.0 : FLOOR_OP;
+          const offDim = pathData.sourceOnly ? PATH_PICK_DIM : FLOOR_OP;
+          floorMult = onPath ? 1.0 : offDim;
         } else {
           const rawDepth = tiers ? tiers.get(nodeId) : 0;
           const isFloor  = tiers && rawDepth === undefined;
@@ -658,7 +674,8 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
         if (pathData) {
           const pair = [line.userData.src, line.userData.tgt].sort().join('_');
           const onPath = pathData.edgePairs.has(pair);
-          line.material.uniforms.opacity.value = onPath ? 1.0 : FLOOR_OP;
+          const offOpacity = pathData.sourceOnly ? PATH_PICK_DIM : FLOOR_OP;
+          line.material.uniforms.opacity.value = onPath ? 1.0 : offOpacity;
         } else if (!tiers) {
           line.material.uniforms.opacity.value = TIER_PARAMS[0].linkOp;
         } else {

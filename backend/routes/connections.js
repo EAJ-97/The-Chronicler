@@ -1,9 +1,34 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isDMOf } = require('../utils/access');
+const { isAdmin, isDMOf, isGrantedUser } = require('../utils/access');
 
 const router = express.Router();
+
+/**
+ * Whether the user may read a note (mirrors notes route visibility).
+ * @param {number} noteId
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function canSeeNote(noteId, userId) {
+  if (isAdmin(userId)) return true;
+  const note = db.prepare('SELECT user_id, visibility FROM notes WHERE id = ?').get(noteId);
+  if (!note) return false;
+  if (note.user_id === userId) return true;
+  if (note.visibility === 'shared') return true;
+  return isGrantedUser(noteId, userId);
+}
+
+/**
+ * True if category is allowed for Character Shipping (NPC or Character notes).
+ * @param {string} [category]
+ * @returns {boolean}
+ */
+function isShipCategory(category) {
+  const c = String(category || '').toLowerCase();
+  return c === 'npc' || c === 'character';
+}
 
 // GET all connections — only where BOTH notes are visible to the user
 router.get('/', authenticateToken, (req, res) => {
@@ -36,16 +61,51 @@ router.get('/', authenticateToken, (req, res) => {
 
 // POST create a connection
 router.post('/', authenticateToken, (req, res) => {
-  const { source_note_id, target_note_id, label = '' } = req.body;
+  const {
+    source_note_id,
+    target_note_id,
+    label = '',
+    connection_kind: rawKind,
+  } = req.body;
+
   if (!source_note_id || !target_note_id)
     return res.status(400).json({ error: 'source_note_id and target_note_id are required' });
   if (source_note_id === target_note_id)
     return res.status(400).json({ error: 'A note cannot connect to itself' });
 
+  let connection_kind = rawKind === 'theory' || rawKind === 'ship' ? rawKind : 'canon';
+  if (rawKind != null && rawKind !== 'canon' && rawKind !== 'theory' && rawKind !== 'ship') {
+    return res.status(400).json({ error: 'connection_kind must be canon, theory, or ship' });
+  }
+
+  if (!canSeeNote(source_note_id, req.user.id) || !canSeeNote(target_note_id, req.user.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  let is_speculative = connection_kind === 'canon' ? 0 : 1;
+
+  if (connection_kind === 'ship') {
+    const sn = db.prepare('SELECT category FROM notes WHERE id = ?').get(source_note_id);
+    const tn = db.prepare('SELECT category FROM notes WHERE id = ?').get(target_note_id);
+    if (!isShipCategory(sn?.category) || !isShipCategory(tn?.category)) {
+      return res.status(400).json({
+        error: 'Ship links require both endpoints to use the NPC or Character category',
+      });
+    }
+  }
+
   try {
     const result = db.prepare(
-      'INSERT INTO connections (source_note_id, target_note_id, label, created_by) VALUES (?, ?, ?, ?)'
-    ).run(source_note_id, target_note_id, label, req.user.id);
+      `INSERT INTO connections (source_note_id, target_note_id, label, is_speculative, connection_kind, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      source_note_id,
+      target_note_id,
+      label,
+      is_speculative,
+      connection_kind,
+      req.user.id
+    );
 
     const conn = db.prepare('SELECT * FROM connections WHERE id = ?').get(result.lastInsertRowid);
     if (req.app.broadcast) req.app.broadcast({ type: 'connections_changed' });

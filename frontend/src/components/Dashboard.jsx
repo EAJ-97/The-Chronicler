@@ -460,11 +460,42 @@ export default function Dashboard({ user, onLogout }) {
     } catch (err) { console.error(err); }
   };
 
-  const handleCreateConnection = async (sourceId, targetId) => {
+  /**
+   * Creates a graph edge. Optional `opts.connection_kind` is `canon` | `theory` | `ship` (theory/ship are web gimmick modes).
+   * @param {number} sourceId
+   * @param {number} targetId
+   * @param {{ connection_kind?: string }} [opts]
+   */
+  const handleCreateConnection = async (sourceId, targetId, opts = {}) => {
     try {
-      const res = await api.post('/connections', { source_note_id: sourceId, target_note_id: targetId });
+      const body = { source_note_id: sourceId, target_note_id: targetId };
+      if (opts.connection_kind) body.connection_kind = opts.connection_kind;
+      const res = await api.post('/connections', body);
       setConnections(prev => [...prev, res.data]);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const msg = err.response?.data?.error;
+      if (msg) window.alert(msg);
+      console.error(err);
+    }
+  };
+
+  /**
+   * Deletes a connection by id (used from graph to remove theory/ship links). Returns false if the user cancels confirm.
+   * @param {number} connId
+   * @returns {Promise<boolean|void>}
+   */
+  const handleDeleteConnection = async (connId) => {
+    if (!window.confirm('Remove this theory or ship link?')) return false;
+    try {
+      await api.delete(`/connections/${connId}`);
+      await loadData();
+      return true;
+    } catch (err) {
+      const msg = err.response?.data?.error;
+      if (msg) window.alert(msg);
+      console.error(err);
+      throw err;
+    }
   };
 
   /**
@@ -947,6 +978,7 @@ export default function Dashboard({ user, onLogout }) {
                   onSelectNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(id); }}
                   onOpenNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(null); setView('notes'); }}
                   onCreateConnection={handleCreateConnection}
+                  onDeleteConnection={handleDeleteConnection}
                   onUpdateConnection={() => loadData()}
                   selectedNoteId={selectedNoteId}
                   currentUser={user}
