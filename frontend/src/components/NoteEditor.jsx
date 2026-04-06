@@ -353,9 +353,10 @@ export default function NoteEditor({
 
   /** Only world/campaign scope roots may store `is_completed` (matches backend). */
   const scopeRootForCompletion = !!(note?.is_folder && isCompletionScopeRootNote(note, notesByIdForArchive));
-  /** DM or admin may flip completion on that root (including to clear archive). */
+  /** Owner, DM (folder_roles), or admin may flip completion — matches backend `canManage` + scope rules. */
   const canToggleCompletion =
-    scopeRootForCompletion && (isAdminUser || (dmCampaignIds || []).includes(note.id));
+    scopeRootForCompletion &&
+    (isAdminUser || isOwner || (dmCampaignIds || []).includes(note.id));
 
   /**
    * Root folder for AI corpus: world root, or playable campaign folder for descendants.
@@ -408,6 +409,8 @@ export default function NoteEditor({
   const [summarizeErr, setSummarizeErr] = useState('');
   const [summarizeText, setSummarizeText] = useState('');
   const [completionBusy, setCompletionBusy] = useState(false);
+  /** Shown when PUT /notes/:id for completion fails (e.g. permission); cleared on success and note change. */
+  const [completionToggleErr, setCompletionToggleErr] = useState('');
   /** Mirrors DM AI prompt strings for debounced mention fetch; updated in textarea onChange / applyMentionChoice. */
   const npcPromptRef = useRef('');
   const locPromptRef = useRef('');
@@ -573,11 +576,23 @@ export default function NoteEditor({
   const handleCompletionToggle = async (nextChecked) => {
     if (!note?.id || !canToggleCompletion) return;
     setCompletionBusy(true);
+    setCompletionToggleErr('');
     try {
       const res = await api.put(`/notes/${note.id}`, { is_completed: nextChecked ? 1 : 0 });
-      if (onSave) onSave(res.data);
+      const row = res.data || {};
+      // Parent merges by id; always pass numeric id + explicit is_completed so the checkbox state updates even if types differ.
+      if (onSave) {
+        onSave({
+          ...row,
+          id: note.id,
+          is_completed: nextChecked ? 1 : 0,
+        });
+      }
     } catch (e) {
       console.error(e);
+      setCompletionToggleErr(
+        e.response?.data?.error || e.message || 'Could not update completion status',
+      );
     } finally {
       setCompletionBusy(false);
     }
@@ -660,6 +675,7 @@ export default function NoteEditor({
     setMentionPopup(null);
     setSummarizeText('');
     setSummarizeErr('');
+    setCompletionToggleErr('');
   }, [noteSlotKey]);
 
   useEffect(() => () => {
@@ -2034,6 +2050,18 @@ export default function NoteEditor({
               />
               Mark {folderTreeKind === 'world' ? 'world' : 'campaign'} as completed (archives subtree — read-only for players)
             </label>
+            {completionToggleErr && (
+              <div
+                style={{
+                  fontFamily: 'Crimson Pro, serif',
+                  fontSize: '13px',
+                  color: 'rgba(224,112,112,0.95)',
+                  marginTop: '8px',
+                }}
+              >
+                {completionToggleErr}
+              </div>
+            )}
           </div>
         )}
 

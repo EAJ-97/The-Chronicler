@@ -406,8 +406,12 @@ export default function Dashboard({ user, onLogout }) {
   const handleSaveNote = async (updates) => {
     if (!updates) { await loadData(); return; }
     if (!selectedNoteId) return;
-    if (updates.id) {
-      setNotes(prev => prev.map(n => n.id === updates.id ? { ...n, ...updates } : n));
+    // Merge full note rows from PUT (e.g. is_completed) — use numeric id match so string/number never fails `===`.
+    if (updates != null && typeof updates === 'object' && 'id' in updates && updates.id != null) {
+      const rid = Number(updates.id);
+      setNotes((prev) =>
+        prev.map((n) => (Number(n.id) === rid ? { ...n, ...updates } : n)),
+      );
       return;
     }
     // Patch object — do the PUT here (tags, visibility, permissions, etc.)
@@ -416,7 +420,10 @@ export default function Dashboard({ user, onLogout }) {
       if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {
         await loadData();
       } else {
-        setNotes(prev => prev.map(n => n.id === selectedNoteId ? res.data : n));
+        const sid = Number(selectedNoteId);
+        setNotes((prev) =>
+          prev.map((n) => (Number(n.id) === sid ? res.data : n)),
+        );
       }
     } catch (err) { console.error(err); }
   };
