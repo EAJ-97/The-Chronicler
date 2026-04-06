@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from '../api.js';
 import PromoteModal from './PromoteModal.jsx';
 import RecapViewer from './RecapViewer.jsx';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
+import { getGraphCampaignRoots } from '../utils/campaignTree.js';
 
 function parseSQLiteDate(dateStr) {
   if (!dateStr) return new Date(NaN);
@@ -74,7 +75,7 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
     api.get('/server-time').then(r => setServerNow(r.data.now)).catch(() => {});
   }, []);
 
-  const rootFolders = notes.filter(n => n.is_folder && !n.parent_id);
+  const journalCampaignRoots = useMemo(() => getGraphCampaignRoots(notes), [notes]);
 
   const folderKey = `chronicler_journal_folder_${currentUser?.id || 'anon'}`;
   const [activeFolderId, setActiveFolderIdRaw] = useState(() => {
@@ -86,8 +87,12 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
   };
 
   useEffect(() => {
-    if (activeFolderId === null && rootFolders.length > 0) setActiveFolderId(rootFolders[0].id);
-  }, [rootFolders.length]);
+    if (journalCampaignRoots.length === 0) return;
+    const ids = new Set(journalCampaignRoots.map((f) => f.id));
+    if (activeFolderId == null || !ids.has(activeFolderId)) {
+      setActiveFolderId(journalCampaignRoots[0].id);
+    }
+  }, [journalCampaignRoots, activeFolderId]);
 
   const loadEntries = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -313,13 +318,13 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
               Move <em>Session {movingSession.sessionNum}</em> to:
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px' }}>
-              {rootFolders.filter(f => f.id !== activeFolderId).map(f => (
+              {journalCampaignRoots.filter(f => f.id !== activeFolderId).map(f => (
                 <button key={f.id} onClick={() => handleMoveSession(f.id)}
                   style={{ padding: '10px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.8)', textAlign: 'left' }}>
                   {f.title}
                 </button>
               ))}
-              {rootFolders.filter(f => f.id !== activeFolderId).length === 0 && (
+              {journalCampaignRoots.filter(f => f.id !== activeFolderId).length === 0 && (
                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.3)' }}>No other campaigns to move to.</div>
               )}
             </div>
@@ -335,13 +340,13 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
       <div style={{ padding: isMobile ? '12px 16px' : '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? '8px' : '12px', marginBottom: '6px' }}>
           <span style={{ fontFamily: 'Cinzel', fontSize: '12px', letterSpacing: '0.15em', color: '#c8943a' }}>SESSION JOURNAL</span>
-          {rootFolders.length > 0 ? (
+          {journalCampaignRoots.length > 0 ? (
             <select
               style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', padding: isMobile ? '8px 10px' : '4px 8px', outline: 'none', cursor: 'pointer', ...(isMobile ? { width: '100%', minHeight: '40px' } : {}) }}
               value={activeFolderId || ''}
               onChange={e => setActiveFolderId(e.target.value ? parseInt(e.target.value) : null)}
             >
-              {rootFolders.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
+              {journalCampaignRoots.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
             </select>
           ) : (
             <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)' }}>Create a root folder to begin</span>

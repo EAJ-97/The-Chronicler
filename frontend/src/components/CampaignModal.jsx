@@ -179,7 +179,11 @@ const S = {
   }),
 };
 
-export default function CampaignModal({ currentUser, onConfirm, onClose }) {
+/**
+ * Modal to create a world layer or campaign. Optional underWorldId pre-selects parent world;
+ * initialCreationType jumps to World vs Campaign tab for sidebar shortcuts.
+ */
+export default function CampaignModal({ currentUser, onConfirm, onClose, initialCreationType, underWorldId }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [creationType, setCreationType] = useState('campaign'); // 'world' or 'campaign'
@@ -198,13 +202,23 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
       const nonMembers = r.data.filter(u => u.id !== currentUser.id);
       if (nonMembers.length > 0) setSelectedAdd(String(nonMembers[0].id));
     }).catch(() => {});
-    
+
     api.get('/notes/meta/worlds').then(r => {
       setWorlds(r.data || []);
     }).catch(() => {});
-    
+
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
+
+  useEffect(() => {
+    if (initialCreationType === 'world' || initialCreationType === 'campaign') {
+      setCreationType(initialCreationType);
+    }
+    if (underWorldId != null && underWorldId !== '') {
+      setCreationType('campaign');
+      setSelectedWorld(String(underWorldId));
+    }
+  }, [initialCreationType, underWorldId]);
 
   const availableToAdd = allUsers.filter(u => !members.some(m => m.user_id === u.id));
 
@@ -305,7 +319,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose }) {
             <div>
               <label style={S.label}>WORLD LAYER (Optional)</label>
               <select
-                style={S.input}
+                style={{ ...S.input, ...(underWorldId != null && underWorldId !== '' ? { opacity: 0.85, pointerEvents: 'none' } : {}) }}
                 value={selectedWorld}
                 onChange={e => setSelectedWorld(e.target.value)}
               >

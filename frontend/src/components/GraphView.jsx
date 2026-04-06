@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 import { getCategoryColor } from './NoteEditor.jsx';
 import GraphView3D from './GraphView3D.jsx';
 import api from '../api.js';
+import { getGraphCampaignRoots } from '../utils/campaignTree.js';
 
 function useContainerWidth(ref) {
   const [width, setWidth] = useState(9999);
@@ -94,7 +95,7 @@ function getSubtreeIds(allNotes, rootId) {
   return ids;
 }
 
-export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, isMobile }) {
+export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const hoverTimerRef = useRef(null);
@@ -125,8 +126,8 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     cyRef.current?.elements().removeClass('tier-0 tier-1 tier-2 tier-3 tier-4 tier-5 tier-6 dimmed highlighted');
   }, []);
 
-  // Campaign scoping — persisted per user
-  const rootFolders = (allNotes || []).filter(n => n.is_folder && !n.parent_id);
+  // Campaign scoping — playable campaigns only (exclude world-layer roots; matches DB is_world)
+  const graphCampaignRoots = useMemo(() => getGraphCampaignRoots(allNotes || []), [allNotes]);
   const campaignKey = `chronicler_graph_campaign_${currentUser?.id || 'anon'}`;
   const is3DKey     = `chronicler_graph_is3d_${currentUser?.id || 'anon'}`;
   const [activeCampaignId, setActiveCampaignIdRaw] = useState(() => {
@@ -147,7 +148,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
 
   // DM View — show DM-only notes; only available to DMs/admins
   const dmViewKey = `chronicler_graph_dmview_${currentUser?.id || 'anon'}`;
-  const isAdminUser = !!currentUser?.is_admin;
+  const isAdminUser = !simulatedRole && !!currentUser?.is_admin;
   const isDMOfActiveCampaign = isAdminUser || (dmCampaignIds || []).includes(activeCampaignId);
   const [dmView, setDmViewRaw] = useState(() => {
     try { return localStorage.getItem(dmViewKey) === 'true'; } catch { return false; }
@@ -157,12 +158,14 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     try { localStorage.setItem(dmViewKey, String(val)); } catch {}
   };
 
-  // Auto-select first campaign only if nothing persisted
+  // Auto-select first playable campaign; migrate away from stale world-root ids in localStorage
   useEffect(() => {
-    if (rootFolders.length > 0 && activeCampaignId === null) {
-      setActiveCampaignId(rootFolders[0].id);
+    if (graphCampaignRoots.length === 0) return;
+    const ids = new Set(graphCampaignRoots.map((f) => f.id));
+    if (activeCampaignId == null || !ids.has(activeCampaignId)) {
+      setActiveCampaignId(graphCampaignRoots[0].id);
     }
-  }, [rootFolders.length]);
+  }, [graphCampaignRoots, activeCampaignId]);
 
   // Filter notes + connections to active campaign subtree
   const subtreeIds = activeCampaignId ? getSubtreeIds(allNotes || [], activeCampaignId) : null;
@@ -374,7 +377,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     }
   }, [selectedNoteId]);
 
-  const activeCampaignName = rootFolders.find(f => f.id === activeCampaignId)?.title;
+  const activeCampaignName = graphCampaignRoots.find((f) => f.id === activeCampaignId)?.title;
 
   const rootRef = useRef(null);
   const containerWidth = useContainerWidth(rootRef);
@@ -439,9 +442,9 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       )}
 
       {/* Campaign selector — always top-centre, highest z so nothing covers it */}
-      {rootFolders.length > 0 && (
+      {graphCampaignRoots.length > 0 && (
         <div ref={campaignRef} style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
-          {rootFolders.length === 1 ? (
+          {graphCampaignRoots.length === 1 ? (
             <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', whiteSpace: 'nowrap' }}>
               {activeCampaignName?.toUpperCase()}
             </div>
@@ -458,7 +461,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
                 backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
               }}
             >
-              {rootFolders.map(f => (
+              {graphCampaignRoots.map(f => (
                 <option key={f.id} value={f.id} style={{ background: '#0f1219', color: '#e2d5bb' }}>
                   {f.title}
                 </option>

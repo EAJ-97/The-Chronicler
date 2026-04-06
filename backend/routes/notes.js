@@ -34,8 +34,18 @@ function withPermissions(note) {
 router.get('/', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const { tag } = req.query;
-  // Admin-only simulation mode — behave as if current user had this role
-  const simulate = admin ? req.query.simulate : null;
+  // Admin-only: role simulation and/or full visibility as another user (mutually exclusive)
+  let simulate = admin ? req.query.simulate : null;
+  const rawAsUser = req.query.as_user != null && String(req.query.as_user).trim() !== ''
+    ? parseInt(String(req.query.as_user), 10)
+    : NaN;
+  const asUserId = admin && Number.isFinite(rawAsUser) ? rawAsUser : null;
+  if (asUserId != null && !db.prepare('SELECT 1 FROM users WHERE id = ?').get(asUserId)) {
+    return res.status(400).json({ error: 'Unknown user' });
+  }
+  const listingUserId = asUserId != null ? asUserId : req.user.id;
+  if (asUserId != null) simulate = null;
+  const listingAdminAll = admin && !simulate && asUserId == null;
 
   // Columns returned in list — content excluded for performance (fetched on demand via GET /:id)
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
@@ -44,7 +54,7 @@ router.get('/', authenticateToken, (req, res) => {
     n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id, u.username AS author`;
 
   let notes;
-  if (admin && !simulate) {
+  if (listingAdminAll) {
     notes = db.prepare(`
       SELECT ${LIST_COLS} FROM notes n
       JOIN users u ON n.user_id = u.id
@@ -70,7 +80,7 @@ router.get('/', authenticateToken, (req, res) => {
           AND (n.visibility = 'shared'
             OR EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = n.id AND np.user_id = ?))
         ORDER BY n.is_folder DESC, n.sort_order ASC, n.title ASC
-      `).all(req.user.id);
+      `).all(listingUserId);
     } else {
       // owner / dm / real non-admin: own + shared + granted
       notes = db.prepare(`
@@ -81,7 +91,7 @@ router.get('/', authenticateToken, (req, res) => {
             OR n.visibility = 'shared'
             OR EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = n.id AND np.user_id = ?))
         ORDER BY n.is_folder DESC, n.sort_order ASC, n.title ASC
-      `).all(req.user.id, req.user.id);
+      `).all(listingUserId, listingUserId);
     }
 
     // Private folder cascade: visibility is determined by location, not ownership.
@@ -93,8 +103,8 @@ router.get('/', authenticateToken, (req, res) => {
       while (parentId != null) {
         const parent = notesById.get(parentId);
         if (!parent) break;
-        if (parent.is_folder && parent.visibility === 'hidden' && parent.user_id !== req.user.id) {
-          const granted = db.prepare('SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?').get(parent.id, req.user.id);
+        if (parent.is_folder && parent.visibility === 'hidden' && parent.user_id !== listingUserId) {
+          const granted = db.prepare('SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?').get(parent.id, listingUserId);
           if (!granted) return false;
         }
         parentId = parent.parent_id;
@@ -109,7 +119,7 @@ router.get('/', authenticateToken, (req, res) => {
     const dmCampaigns = (simulate === 'dm')
       ? db.prepare('SELECT id AS folder_id FROM notes WHERE parent_id IS NULL AND is_folder = 1 AND deleted_at IS NULL').all()
       : (!simulate)
-        ? db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(req.user.id)
+        ? db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(listingUserId)
         : []; // owner/granted/default — no DM boost
     if (dmCampaigns.length > 0) {
       const dmNoteIds = new Set();
@@ -149,13 +159,13 @@ router.get('/', authenticateToken, (req, res) => {
     // ─── World-layer note inheritance (3-tier model) ───
     // For each campaign a user is a member of, if it's under a world layer,
     // include the world layer's direct-child notes that the user can see.
-    if (!admin && simulate !== 'dm') {
+    if (!listingAdminAll && simulate !== 'dm') {
       // Find campaigns this user is a member of
       const userMembershipCampaigns = new Set();
       const visibleIds = new Set(notes.map(n => n.id));
 
       // Check which campaigns/folders the user is a member of via note_permissions
-      const userGrantedFolders = db.prepare('SELECT DISTINCT parent.id FROM notes parent WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = parent.id AND np.user_id = ?) AND parent.is_folder = 1').all(req.user.id);
+      const userGrantedFolders = db.prepare('SELECT DISTINCT parent.id FROM notes parent WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = parent.id AND np.user_id = ?) AND parent.is_folder = 1').all(listingUserId);
       userGrantedFolders.forEach(f => userMembershipCampaigns.add(f.id));
 
       // For each campaign, check if it has a world layer parent
@@ -178,7 +188,7 @@ router.get('/', authenticateToken, (req, res) => {
             `).all(worldId);
 
             for (const wn of worldChildren) {
-              if (canSee(wn.id, req.user.id, false)) {
+              if (canSee(wn.id, listingUserId, false)) {
                 // Tag it with world_layer_id so frontend knows it's inherited
                 wn.world_layer_id = worldId;
                 wn.world_layer_campaign_id = campaignId;
@@ -223,12 +233,12 @@ router.get('/', authenticateToken, (req, res) => {
   }
 
   // Strip DM-only notes for users who aren't admin, DM, or explicitly granted on that note
-  if (!admin && simulate !== 'dm') {
+  if (!listingAdminAll && simulate !== 'dm') {
     const userDmFolderIds = new Set(
-      db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(req.user.id).map(r => r.folder_id)
+      db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(listingUserId).map(r => r.folder_id)
     );
     const userGrantedNoteIds = new Set(
-      db.prepare("SELECT note_id FROM note_permissions WHERE user_id = ?").all(req.user.id).map(r => r.note_id)
+      db.prepare("SELECT note_id FROM note_permissions WHERE user_id = ?").all(listingUserId).map(r => r.note_id)
     );
     notes = notes.filter(n => {
       if (!n.is_dm_only) return true;
@@ -254,9 +264,18 @@ router.get('/', authenticateToken, (req, res) => {
   res.json(notes.map(n => ({ ...n, tags: tagsByNote[n.id] || [], granted_users: grantsByNote[n.id] || [] })));
 });
 
-// GET campaign folder IDs where current user is a DM
+// GET campaign folder IDs where current user is a DM (admin may pass as_user to inspect another account)
 router.get('/meta/my-dm-campaigns', authenticateToken, (req, res) => {
-  const rows = db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(req.user.id);
+  const admin = isAdmin(req.user.id);
+  const raw = req.query.as_user != null && String(req.query.as_user).trim() !== ''
+    ? parseInt(String(req.query.as_user), 10)
+    : NaN;
+  const asUserId = admin && Number.isFinite(raw) ? raw : null;
+  if (asUserId != null && !db.prepare('SELECT 1 FROM users WHERE id = ?').get(asUserId)) {
+    return res.status(400).json({ error: 'Unknown user' });
+  }
+  const uid = asUserId != null ? asUserId : req.user.id;
+  const rows = db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(uid);
   res.json(rows.map(r => r.folder_id));
 });
 

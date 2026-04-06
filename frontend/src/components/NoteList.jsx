@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getCategoryColor } from './NoteEditor.jsx';
 import api from '../api.js';
+import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
 
 function buildTree(notes) {
   const map = {};
@@ -352,18 +353,10 @@ export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCr
 
   const allTagsInNotes = [...new Set(notes.flatMap(n => n.tags || []))].sort();
 
-  // Determine if the selected note is inside a campaign (has a root folder ancestor or is one)
-  const selectedRootFolderId = (() => {
-    if (!selectedId) return null;
-    const notesById = new Map(notes.map(n => [n.id, n]));
-    let cur = notesById.get(selectedId);
-    while (cur) {
-      if (cur.is_folder && !cur.parent_id) return cur.id;
-      cur = notesById.get(cur.parent_id);
-    }
-    return null;
-  })();
-  const insideCampaign = !!selectedRootFolderId;
+  // Playable campaign folder for +Folder (not the world layer root — that wrongly parented new folders under the world)
+  const campaignFolderId = getCampaignFolderIdForSelection(notes, selectedId);
+  const worldRowSelected = isWorldRootSelected(notes, selectedId);
+  const insideCampaign = campaignFolderId != null;
   const tagFilteredNotes = activeTag.size > 0
     ? notes.filter(n => (n.tags || []).some(t => activeTag.has(t)) || n.is_folder)
     : notes;
@@ -416,12 +409,18 @@ export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCr
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateNote(null)}>+ Note</button>
-          {insideCampaign
-            ? <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateFolder(selectedRootFolderId)}>+ Folder</button>
-            : <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onOpenCampaignModal ? onOpenCampaignModal() : onCreateFolder(null)}>+ Campaign</button>
-          }
+          {insideCampaign ? (
+            <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateFolder(campaignFolderId)}>+ Folder</button>
+          ) : worldRowSelected ? (
+            <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onOpenCampaignModal?.({ underWorldId: selectedId })}>+ Campaign</button>
+          ) : (
+            <>
+              <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0', flex: isMobile ? '1 1 45%' : 1, minWidth: 0 }} onClick={() => onOpenCampaignModal?.({ initialCreationType: 'world' })}>+ World</button>
+              <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0', flex: isMobile ? '1 1 45%' : 1, minWidth: 0 }} onClick={() => onOpenCampaignModal?.({ initialCreationType: 'campaign' })}>+ Campaign</button>
+            </>
+          )}
         </div>
       </div>
 

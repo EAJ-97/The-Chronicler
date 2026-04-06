@@ -148,25 +148,44 @@ export default function Dashboard({ user, onLogout }) {
   const [graphPanelNoteId, setGraphPanelNoteId] = useState(null);
   const [undoToast, setUndoToast] = useState(null); // { id, title, timer }
   const [simulatedRole, setSimulatedRole] = useState(null); // null=admin, 'dm','owner','granted','hidden'
+  const [viewAsUserId, setViewAsUserId] = useState(null); // admin: full visibility as another user (exclusive with simulatedRole)
+  const [viewAsUserList, setViewAsUserList] = useState([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [campaignModalOpts, setCampaignModalOpts] = useState({});
   const simulatedRoleRef = useRef(null);
+  const viewAsUserIdRef = useRef(null);
   const selectedNoteIdRef = useRef(null);
 
   // Keep refs in sync so WS handler and loadData always read current values
   useEffect(() => { simulatedRoleRef.current = simulatedRole; }, [simulatedRole]);
+  useEffect(() => { viewAsUserIdRef.current = viewAsUserId; }, [viewAsUserId]);
   useEffect(() => { selectedNoteIdRef.current = selectedNoteId; }, [selectedNoteId]);
+
+  useEffect(() => {
+    if (!user?.is_admin) return;
+    api.get('/notes/meta/users').then((r) => setViewAsUserList(r.data || [])).catch(() => {});
+  }, [user?.is_admin]);
   const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
   const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
     : simulatedRole ? []
     : dmCampaignIds;
 
-  const loadData = useCallback(async (simulate) => {
-    const simParam = simulate !== undefined ? simulate : null;
+  /**
+   * Reloads notes, connections (edges whose endpoints are both visible), and DM campaign ids.
+   * Admin: optional as_user (full user view) takes precedence over role simulate; connections are clipped to visible notes.
+   */
+  const loadData = useCallback(async () => {
     try {
+      const simRole = simulatedRoleRef.current;
+      const asUid = viewAsUserIdRef.current;
+      const params = {};
+      if (user?.is_admin && asUid) params.as_user = asUid;
+      else if (simRole) params.simulate = simRole;
+      const dmOpts = user?.is_admin && asUid ? { params: { as_user: asUid } } : {};
       const [notesRes, connsRes, dmRes] = await Promise.all([
-        api.get('/notes', simParam ? { params: { simulate: simParam } } : {}),
+        api.get('/notes', Object.keys(params).length ? { params } : {}),
         api.get('/connections'),
-        api.get('/notes/meta/my-dm-campaigns'),
+        api.get('/notes/meta/my-dm-campaigns', Object.keys(dmOpts).length ? dmOpts : {}),
       ]);
       // Preserve locally-cached content when updated_at hasn't changed.
       // Without this, every WS-triggered loadData (including from the saving user's own
@@ -192,22 +211,23 @@ export default function Dashboard({ user, onLogout }) {
         }
         return mapped;
       });
-      setConnections(connsRes.data);
+      const visibleIds = new Set((notesRes.data || []).map((n) => n.id));
+      setConnections((connsRes.data || []).filter(
+        (c) => visibleIds.has(c.source_note_id) && visibleIds.has(c.target_note_id)
+      ));
       setDmCampaignIds(dmRes.data || []);
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.is_admin]);
 
-  useEffect(() => { loadData(null); }, [loadData]);
-
-  // Re-fetch notes from backend whenever simulated role changes
+  // Initial load and whenever simulation / impersonation / loader deps change
   useEffect(() => {
     setSelectedNoteId(null);
-    loadData(simulatedRole);
-  }, [simulatedRole]);
+    loadData();
+  }, [simulatedRole, viewAsUserId, loadData]);
 
   // Live updates via WebSocket — reload data whenever another user changes something
   const wsRef = useRef(null);
@@ -223,14 +243,14 @@ export default function Dashboard({ user, onLogout }) {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        loadData(simulatedRoleRef.current);
+        loadData();
       };
 
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'notes_changed' || msg.type === 'connections_changed') {
-            loadData(simulatedRoleRef.current);
+            loadData();
           }
           if (msg.type === 'journal_changed') {
             window.dispatchEvent(new CustomEvent('ws_journal', { detail: e.data }));
@@ -256,7 +276,7 @@ export default function Dashboard({ user, onLogout }) {
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        loadData(simulatedRoleRef.current);
+        loadData();
         if (wsRef.current?.readyState !== WebSocket.OPEN) {
           wsRef.current?.close();
         }
@@ -286,7 +306,7 @@ export default function Dashboard({ user, onLogout }) {
     }
     try {
       const res = await api.post('/notes', { title: 'New Note', content: '', category: 'general', is_shared: false, parent_id: parentId });
-      await loadData(simulatedRole);
+      await loadData();
       setSelectedNoteId(res.data.id);
       setView('notes');
     } catch (err) { console.error(err); }
@@ -299,7 +319,7 @@ export default function Dashboard({ user, onLogout }) {
     }
     try {
       await api.post('/notes', { title: 'New Folder', content: '', is_folder: true, is_shared: false, parent_id: parentId });
-      await loadData(simulatedRole);
+      await loadData();
     } catch (err) { console.error(err); }
   };
 
@@ -314,13 +334,13 @@ export default function Dashboard({ user, onLogout }) {
         members,
         is_world: !!is_world,
       });
-      await loadData(simulatedRole);
+      await loadData();
       setShowCampaignModal(false);
     } catch (err) { console.error(err); }
   };
 
   const handleSaveNote = async (updates) => {
-    if (!updates) { await loadData(simulatedRole); return; }
+    if (!updates) { await loadData(); return; }
     if (!selectedNoteId) return;
     if (updates.id) {
       setNotes(prev => prev.map(n => n.id === updates.id ? { ...n, ...updates } : n));
@@ -330,7 +350,7 @@ export default function Dashboard({ user, onLogout }) {
     try {
       const res = await api.put(`/notes/${selectedNoteId}`, updates);
       if (updates.tags !== undefined || updates.visibility !== undefined || updates.granted_users !== undefined) {
-        await loadData(simulatedRole);
+        await loadData();
       } else {
         setNotes(prev => prev.map(n => n.id === selectedNoteId ? res.data : n));
       }
@@ -349,7 +369,7 @@ export default function Dashboard({ user, onLogout }) {
         }
       }
       await api.put(`/notes/${noteId}`, { parent_id: newParentId ?? null });
-      await loadData(simulatedRole);
+      await loadData();
     } catch (err) { console.error(err); }
   };
 
@@ -373,7 +393,7 @@ export default function Dashboard({ user, onLogout }) {
       if (undoToast?.timer) clearTimeout(undoToast.timer);
       const timer = setTimeout(() => setUndoToast(null), 6000);
       setUndoToast({ id: noteId, title, is_folder: isFolder, timer });
-      await loadData(simulatedRole);
+      await loadData();
     } catch (err) { console.error(err); }
   };
 
@@ -383,7 +403,7 @@ export default function Dashboard({ user, onLogout }) {
     setUndoToast(null);
     try {
       await api.post(`/notes/${undoToast.id}/restore`);
-      await loadData(simulatedRole);
+      await loadData();
     } catch (err) { console.error(err); }
   };
 
@@ -407,7 +427,10 @@ export default function Dashboard({ user, onLogout }) {
     onDeselect: () => setSelectedNoteId(null),
     onCreateNote: handleCreateNote,
     onCreateFolder: handleCreateFolder,
-    onOpenCampaignModal: () => setShowCampaignModal(true),
+    onOpenCampaignModal: (opts) => {
+      setCampaignModalOpts(opts || {});
+      setShowCampaignModal(true);
+    },
     onDelete: handleDeleteNote,
     onRename: handleRenameNote,
     onMove: handleMoveNote,
@@ -416,7 +439,7 @@ export default function Dashboard({ user, onLogout }) {
       if (!window.confirm(`Sync visibility of "${folderTitle}" to all its children?\nThis will override child note permissions to match the folder.`)) return;
       try {
         await api.post(`/notes/${folderId}/sync-visibility`);
-        await loadData(simulatedRole);
+        await loadData();
       } catch (err) { console.error('Sync failed', err); }
     },
     currentUser: user,
@@ -436,7 +459,7 @@ export default function Dashboard({ user, onLogout }) {
   return (
     <div style={S.shell}>
       {showAdmin && <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} />}
-      {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData(simulatedRole)} />}
+      {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData()} />}
 
       {/* Undo toast */}
       {undoToast && (
@@ -491,12 +514,18 @@ export default function Dashboard({ user, onLogout }) {
               <div style={{ position: 'relative', marginLeft: '10px' }} ref={viewAsRef}>
                 <button
                   onClick={() => setShowViewAs(v => !v)}
-                  style={{ ...S.topBtn, color: simulatedRole ? '#c8943a' : 'rgba(226,213,187,0.65)', borderColor: simulatedRole ? 'rgba(200,148,58,0.4)' : 'rgba(226,213,187,0.2)' }}
+                  style={{
+                    ...S.topBtn,
+                    color: (viewAsUserId || simulatedRole) ? '#c8943a' : 'rgba(226,213,187,0.65)',
+                    borderColor: (viewAsUserId || simulatedRole) ? 'rgba(200,148,58,0.4)' : 'rgba(226,213,187,0.2)',
+                  }}
                   title="View As"
-                >⚙ {simulatedRole ? simulatedRole.toUpperCase() : 'VIEW'}</button>
+                >⚙ {viewAsUserId
+                  ? (viewAsUserList.find((u) => u.id === viewAsUserId)?.username || 'user').toUpperCase().slice(0, 10)
+                  : simulatedRole ? simulatedRole.toUpperCase() : 'VIEW'}</button>
                 {showViewAs && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '110px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '2px 6px 4px' }}>VIEW AS</div>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '160px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '2px 6px 4px' }}>VIEW AS ROLE</div>
                     {[
                       { role: null,      label: 'ADMIN' },
                       { role: 'dm',      label: 'DM' },
@@ -504,13 +533,33 @@ export default function Dashboard({ user, onLogout }) {
                       { role: 'granted', label: 'GRANTED' },
                       { role: 'hidden',  label: 'HIDDEN' },
                     ].map(({ role, label }) => (
-                      <button key={label} onClick={() => { setSimulatedRole(role); setShowViewAs(false); }} style={{ padding: '5px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)', transition: 'all 0.15s', textAlign: 'left' }}>{label}</button>
+                      <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setShowViewAs(false); }} style={{ padding: '5px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)', transition: 'all 0.15s', textAlign: 'left' }}>{label}</button>
                     ))}
+                    {viewAsUserList.length > 0 && (
+                      <>
+                        <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '6px 6px 2px' }}>AS USER</div>
+                        <select
+                          value={viewAsUserId ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSimulatedRole(null);
+                            setViewAsUserId(v ? parseInt(v, 10) : null);
+                            setShowViewAs(false);
+                          }}
+                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '8px', padding: '5px 6px', cursor: 'pointer' }}
+                        >
+                          <option value="">— Off —</option>
+                          {viewAsUserList.map((u) => (
+                            <option key={u.id} value={u.id}>{u.username}</option>
+                          ))}
+                        </select>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginLeft: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginLeft: '16px', maxWidth: '42vw' }}>
                 <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginRight: '2px' }}>VIEW AS</span>
                 {[
                   { role: null,      label: 'ADMIN' },
@@ -519,8 +568,25 @@ export default function Dashboard({ user, onLogout }) {
                   { role: 'granted', label: 'GRANTED' },
                   { role: 'hidden',  label: 'HIDDEN' },
                 ].map(({ role, label }) => (
-                  <button key={label} onClick={() => setSimulatedRole(role)} style={{ padding: '3px 8px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.3)', transition: 'all 0.15s' }}>{label}</button>
+                  <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); }} style={{ padding: '3px 8px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.3)', transition: 'all 0.15s' }}>{label}</button>
                 ))}
+                {viewAsUserList.length > 0 && (
+                  <select
+                    value={viewAsUserId ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSimulatedRole(null);
+                      setViewAsUserId(v ? parseInt(v, 10) : null);
+                    }}
+                    title="View dashboard as this user"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '8px', padding: '3px 6px', cursor: 'pointer', maxWidth: '120px' }}
+                  >
+                    <option value="">User: off</option>
+                    {viewAsUserList.map((u) => (
+                      <option key={u.id} value={u.id}>{u.username}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             )
           )}
@@ -538,7 +604,7 @@ export default function Dashboard({ user, onLogout }) {
                   <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '130px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
                     <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
                     <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
-                    {user.is_admin && <button style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
+                    {!!user.is_admin && <button style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
                     <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
                   </div>
                 )}
@@ -546,7 +612,7 @@ export default function Dashboard({ user, onLogout }) {
             ) : (
               <>
                 <button style={S.topBtn} onClick={() => setShowTrash(true)} title="View deleted items">🗑</button>
-                {user.is_admin && <button style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
+                {!!user.is_admin && <button style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
                 <button style={S.topBtn} onClick={onLogout}>Leave</button>
               </>
             )}
@@ -586,7 +652,7 @@ export default function Dashboard({ user, onLogout }) {
             <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
               {user.username.toUpperCase()}
             </div>
-            {user.is_admin && (
+            {!!user.is_admin && (
               <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
                 <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -597,15 +663,35 @@ export default function Dashboard({ user, onLogout }) {
                     { role: 'granted', label: 'GRANTED' },
                     { role: 'hidden', label: 'HIDDEN' },
                   ].map(({ role, label }) => (
-                    <button key={label} onClick={() => { setSimulatedRole(role); setMobileMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>{label}</button>
+                    <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setMobileMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>{label}</button>
                   ))}
                 </div>
+                {viewAsUserList.length > 0 && (
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>AS USER</div>
+                    <select
+                      value={viewAsUserId ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSimulatedRole(null);
+                        setViewAsUserId(v ? parseInt(v, 10) : null);
+                        setMobileMenuOpen(false);
+                      }}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', padding: '8px 6px' }}
+                    >
+                      <option value="">— Off —</option>
+                      {viewAsUserList.map((u) => (
+                        <option key={u.id} value={u.id}>{u.username}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
             <button style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
             </button>
-            {user.is_admin && (
+            {!!user.is_admin && (
               <button style={{ ...S.mobileMenuBtn, color: 'rgba(200,148,58,0.85)' }} onClick={() => { setShowAdmin(true); setMobileMenuOpen(false); }}>
                 <span>⚙</span> Admin
               </button>
@@ -648,16 +734,19 @@ export default function Dashboard({ user, onLogout }) {
             currentUser={user}
             dmCampaignIds={effectiveDmCampaignIds}
             onClose={() => setSnapshotFolder(null)}
-            onRestored={() => loadData(simulatedRole)}
+            onRestored={() => loadData()}
           />
         )}
 
         {/* Campaign creation modal */}
         {showCampaignModal && (
           <CampaignModal
+            key={`${campaignModalOpts.initialCreationType ?? ''}-${campaignModalOpts.underWorldId ?? ''}`}
             currentUser={user}
+            initialCreationType={campaignModalOpts.initialCreationType}
+            underWorldId={campaignModalOpts.underWorldId}
             onConfirm={handleCreateCampaign}
-            onClose={() => setShowCampaignModal(false)}
+            onClose={() => { setShowCampaignModal(false); setCampaignModalOpts({}); }}
           />
         )}
 
@@ -705,10 +794,11 @@ export default function Dashboard({ user, onLogout }) {
                   onSelectNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(id); }}
                   onOpenNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(null); setView('notes'); }}
                   onCreateConnection={handleCreateConnection}
-                  onUpdateConnection={() => loadData(simulatedRole)}
+                  onUpdateConnection={() => loadData()}
                   selectedNoteId={selectedNoteId}
                   currentUser={user}
                   dmCampaignIds={effectiveDmCampaignIds}
+                  simulatedRole={simulatedRole}
                   isMobile={isMobile}
                 />
               </div>
