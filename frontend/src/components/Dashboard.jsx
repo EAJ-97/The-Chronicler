@@ -5,6 +5,7 @@ import GraphView from './GraphView.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import Journal from './Journal.jsx';
 import NotePanel from './NotePanel.jsx';
+import ReferencePeekPanel from './ReferencePeekPanel.jsx';
 import SnapshotPanel from './SnapshotPanel.jsx';
 import TrashPanel from './TrashPanel.jsx';
 import CampaignModal from './CampaignModal.jsx';
@@ -146,6 +147,8 @@ export default function Dashboard({ user, onLogout }) {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [graphPanelNoteId, setGraphPanelNoteId] = useState(null);
+  /** Stacked note ids opened from `note:` links in preview (right-hand peek panel). */
+  const [refStack, setRefStack] = useState([]);
   const [undoToast, setUndoToast] = useState(null); // { id, title, timer }
   const [simulatedRole, setSimulatedRole] = useState(null); // null=admin, 'dm','owner','granted','hidden'
   const [viewAsUserId, setViewAsUserId] = useState(null); // admin: full visibility as another user (exclusive with simulatedRole)
@@ -160,6 +163,11 @@ export default function Dashboard({ user, onLogout }) {
   useEffect(() => { simulatedRoleRef.current = simulatedRole; }, [simulatedRole]);
   useEffect(() => { viewAsUserIdRef.current = viewAsUserId; }, [viewAsUserId]);
   useEffect(() => { selectedNoteIdRef.current = selectedNoteId; }, [selectedNoteId]);
+
+  /** Closing the peek stack when switching the main editor note avoids stale “layers”. */
+  useEffect(() => {
+    setRefStack([]);
+  }, [selectedNoteId]);
 
   useEffect(() => {
     if (!user?.is_admin) return;
@@ -196,17 +204,17 @@ export default function Dashboard({ user, onLogout }) {
       // Also: if the currently selected note is absent from the server response (e.g. a
       // transient visibility race), keep the previous state entry so selectedNote never
       // becomes null — that would fire the [note?.id] effect and blank the editor.
-      setNotes(prev => {
-        const mapped = notesRes.data.map(n => {
-          const existing = prev.find(p => p.id === n.id);
+      setNotes((prev) => {
+        const mapped = notesRes.data.map((n) => {
+          const existing = prev.find((p) => p.id === n.id);
           if (existing?.content !== undefined && existing.updated_at === n.updated_at) {
             return { ...n, content: existing.content };
           }
           return n;
         });
         const currentId = selectedNoteIdRef.current;
-        if (currentId && !mapped.find(n => n.id === currentId)) {
-          const preserved = prev.find(p => p.id === currentId);
+        if (currentId && !mapped.find((n) => n.id === currentId)) {
+          const preserved = prev.find((p) => p.id === currentId);
           if (preserved) return [...mapped, preserved];
         }
         return mapped;
@@ -286,7 +294,7 @@ export default function Dashboard({ user, onLogout }) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [loadData]);
 
-  const selectedNote = notes.find(n => n.id === selectedNoteId) || null;
+  const selectedNote = notes.find((n) => n.id === selectedNoteId) || null;
 
   // Fetch full note content on demand — the list endpoint omits content for performance.
   // Also re-fetches when content is wiped (e.g. WS-triggered loadData refreshes the list).
@@ -294,14 +302,59 @@ export default function Dashboard({ user, onLogout }) {
   const selectedNoteHasContent = selectedNote?.content != null;
   useEffect(() => {
     if (!selectedNoteId || !selectedNote || selectedNoteHasContent) return;
-    api.get(`/notes/${selectedNoteId}`).then(r => {
-      setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, ...r.data } : n));
+    api.get(`/notes/${selectedNoteId}`).then((r) => {
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === selectedNoteId
+            ? {
+                ...n,
+                ...r.data,
+                source_deleted:
+                  r.data.source_deleted !== undefined ? r.data.source_deleted : n.source_deleted,
+              }
+            : n
+        )
+      );
     }).catch(() => {});
   }, [selectedNoteId, selectedNoteHasContent]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Pushes a note id onto the reference peek stack and loads full note content via GET /notes/:id when needed.
+   * Merges the response into `notes` so the panel and list stay consistent.
+   */
+  const openReferenceNote = useCallback(async (id) => {
+    const numId = Number(id);
+    if (!Number.isFinite(numId)) return;
+    setRefStack((prev) => {
+      if (prev.length && prev[prev.length - 1] === numId) return prev;
+      return [...prev, numId];
+    });
+    try {
+      const r = await api.get(`/notes/${numId}`);
+      setNotes((prev) => {
+        const ix = prev.findIndex((n) => n.id === numId);
+        if (ix >= 0) {
+          const merged = {
+            ...prev[ix],
+            ...r.data,
+            source_deleted:
+              r.data.source_deleted !== undefined ? r.data.source_deleted : prev[ix].source_deleted,
+          };
+          const next = [...prev];
+          next[ix] = merged;
+          return next;
+        }
+        return [...prev, r.data];
+      });
+    } catch (e) {
+      console.error(e);
+      setRefStack((prev) => (prev.length && prev[prev.length - 1] === numId ? prev.slice(0, -1) : prev));
+    }
+  }, []);
+
   const handleCreateNote = async (parentId = null) => {
     if (parentId === null && selectedNoteId) {
-      const sel = notes.find(n => n.id === selectedNoteId);
+      const sel = notes.find((n) => n.id === selectedNoteId);
       if (sel) parentId = sel.is_folder ? sel.id : (sel.parent_id || null);
     }
     try {
@@ -314,7 +367,7 @@ export default function Dashboard({ user, onLogout }) {
 
   const handleCreateFolder = async (parentId = null) => {
     if (parentId === null && selectedNoteId) {
-      const sel = notes.find(n => n.id === selectedNoteId);
+      const sel = notes.find((n) => n.id === selectedNoteId);
       if (sel) parentId = sel.is_folder ? sel.id : (sel.parent_id || null);
     }
     try {
@@ -433,7 +486,7 @@ export default function Dashboard({ user, onLogout }) {
     notes,
     selectedId: selectedNoteId,
     onSelect: (id) => {
-      const n = notes.find(n => n.id === id);
+      const n = notes.find((row) => row.id === id);
       setSelectedNoteId(id);
       if (!n?.is_folder && view !== 'graph') setView('notes');
       if (isMobile) setMobileSidebarOpen(false);
@@ -793,6 +846,12 @@ export default function Dashboard({ user, onLogout }) {
         {snapshotFolder && (
           <SnapshotPanel
             folder={snapshotFolder}
+            worldLayerTitle={(() => {
+              const pid = snapshotFolder.parent_id;
+              if (pid == null) return null;
+              const p = notes.find((n) => n.id === pid);
+              return p?.is_world ? (p.title || '').trim() || 'World' : null;
+            })()}
             currentUser={user}
             dmCampaignIds={effectiveDmCampaignIds}
             onClose={() => setSnapshotFolder(null)}
@@ -814,18 +873,50 @@ export default function Dashboard({ user, onLogout }) {
 
         <div style={S.main}>
           {view === 'notes' && (
-            <NoteEditor
-              note={selectedNote}
-              notes={notes}
-              connections={connections}
-              currentUser={user}
-              dmCampaignIds={effectiveDmCampaignIds}
-              simulatedRole={simulatedRole}
-              onSave={handleSaveNote}
-              onDelete={handleDeleteNote}
-              isMobile={isMobile}
-              onBackToList={() => setMobileSidebarOpen(true)}
-            />
+            <div
+              style={{
+                display: 'flex',
+                width: '100%',
+                height: '100%',
+                overflow: 'hidden',
+                position: 'relative',
+                flexDirection: 'row',
+              }}
+            >
+              <div
+                style={{
+                  flex: !isMobile && refStack.length > 0 ? '1 1 50%' : '1 1 100%',
+                  minWidth: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  transition: 'flex-basis 0.32s ease',
+                }}
+              >
+                <NoteEditor
+                  note={selectedNote}
+                  notes={notes}
+                  connections={connections}
+                  currentUser={user}
+                  dmCampaignIds={effectiveDmCampaignIds}
+                  simulatedRole={simulatedRole}
+                  onSave={handleSaveNote}
+                  onDelete={handleDeleteNote}
+                  isMobile={isMobile}
+                  onBackToList={() => setMobileSidebarOpen(true)}
+                  onOpenReferenceNote={openReferenceNote}
+                />
+              </div>
+              {refStack.length > 0 && (
+                <ReferencePeekPanel
+                  stack={refStack}
+                  notes={notes}
+                  onBack={() => setRefStack((s) => (s.length > 1 ? s.slice(0, -1) : s))}
+                  onClose={() => setRefStack([])}
+                  onOpenReference={openReferenceNote}
+                  isMobile={isMobile}
+                />
+              )}
+            </div>
           )}
 
           {view === 'graph' && (

@@ -31,6 +31,78 @@ function withPermissions(note) {
   return { ...note, granted_users: granted };
 }
 
+/** English filler words ignored when matching @mention queries against note titles. */
+const MENTION_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but',
+  'if', 'as', 'by', 'is', 'it', 'be', 'are', 'was', 'were', 'from', 'with', 'that', 'this',
+]);
+
+/**
+ * Splits a mention query into significant tokens (drops articles etc.); falls back to words with length ≥ 2.
+ * @param {string} query
+ * @returns {string[]}
+ */
+function mentionQueryTokens(query) {
+  const raw = String(query || '').toLowerCase().trim();
+  const words = raw.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const significant = words.filter((w) => !MENTION_STOP_WORDS.has(w));
+  if (significant.length > 0) return significant;
+  return words.filter((w) => w.length >= 2);
+}
+
+/**
+ * True if title matches a multi-word @ query: every remaining token must appear in the title (substring).
+ * @param {string} title
+ * @param {string} query
+ * @returns {boolean}
+ */
+function titleMatchesMentionQuery(title, query) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return false;
+  const tokens = mentionQueryTokens(q);
+  const lower = String(title || '').toLowerCase();
+  if (tokens.length === 0) {
+    return lower.includes(q.toLowerCase());
+  }
+  for (const t of tokens) {
+    if (t.length === 0) continue;
+    if (!lower.includes(t)) return false;
+  }
+  return true;
+}
+
+/**
+ * Collects note ids allowed for @mentions: if the tree root is a world, the entire world subtree (all
+ * campaigns and shared notes); otherwise only the standalone campaign subtree the note belongs to.
+ * @param {number} fromNoteId
+ * @returns {number[]}
+ */
+function getMentionScopeNoteIds(fromNoteId) {
+  const rootId = getRootFolderId(fromNoteId);
+  if (!rootId) return [];
+  const rootRow = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(rootId);
+  const allowed = new Set();
+
+  const addSubtree = (nodeId) => {
+    const queue = [nodeId];
+    while (queue.length) {
+      const id = queue.shift();
+      allowed.add(id);
+      const ch = db.prepare('SELECT id FROM notes WHERE parent_id = ? AND deleted_at IS NULL').all(id);
+      ch.forEach((r) => queue.push(r.id));
+    }
+  };
+
+  if (rootRow && rootRow.is_world === 1) {
+    addSubtree(rootId);
+  } else {
+    const campaignCtx = getCampaignFolderId(fromNoteId);
+    if (campaignCtx) addSubtree(campaignCtx);
+  }
+
+  return [...allowed];
+}
+
 // GET all notes visible to user
 router.get('/', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
@@ -157,76 +229,6 @@ router.get('/', authenticateToken, (req, res) => {
       }
     });
     if (ancestorsToAdd.size > 0) notes = [...notes, ...ancestorsToAdd.values()];
-
-    // ─── World-layer note inheritance (3-tier model) ───
-    // For each campaign a user is a member of, if it's under a world layer,
-    // include the world layer's direct-child notes that the user can see.
-    if (!listingAdminAll && simulate !== 'dm') {
-      // Find campaigns this user is a member of
-      const userMembershipCampaigns = new Set();
-      const visibleIds = new Set(notes.map(n => n.id));
-
-      // Check which campaigns/folders the user is a member of via note_permissions
-      const userGrantedFolders = db.prepare('SELECT DISTINCT parent.id FROM notes parent WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = parent.id AND np.user_id = ?) AND parent.is_folder = 1').all(listingUserId);
-      userGrantedFolders.forEach(f => userMembershipCampaigns.add(f.id));
-
-      // For each campaign, check if it has a world layer parent
-      const worldLayerNotes = [];
-      const seenOverrideSourceIds = new Set();
-
-      for (const campaignId of userMembershipCampaigns) {
-        const campaign = db.prepare('SELECT parent_id, is_world FROM notes WHERE id = ?').get(campaignId);
-        if (campaign && campaign.parent_id && campaign.is_world === 0) {
-          // Campaign is under a world layer
-          const worldId = campaign.parent_id;
-          const worldRoot = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(worldId);
-          
-          if (worldRoot && worldRoot.is_world === 1) {
-            // Fetch all direct children of the world that pass canSee
-            const worldChildren = db.prepare(`
-              SELECT ${LIST_COLS} FROM notes n
-              JOIN users u ON n.user_id = u.id
-              WHERE n.parent_id = ? AND n.deleted_at IS NULL
-            `).all(worldId);
-
-            for (const wn of worldChildren) {
-              if (canSee(wn.id, listingUserId, false)) {
-                // Tag it with world_layer_id so frontend knows it's inherited
-                wn.world_layer_id = worldId;
-                wn.world_layer_campaign_id = campaignId;
-                
-                // Check if campaign has an override for this world note
-                const override = db.prepare(`
-                  SELECT n.id FROM notes n
-                  WHERE n.source_note_id = ? 
-                    AND n.parent_id IN (
-                      SELECT id FROM notes WHERE id = ? OR parent_id = ?
-                    )
-                  LIMIT 1
-                `).get(wn.id, campaignId, campaignId);
-                
-                if (!override) {
-                  // No override, include the world note
-                  if (!visibleIds.has(wn.id)) {
-                    worldLayerNotes.push(wn);
-                    visibleIds.add(wn.id);
-                  }
-                } else {
-                  // Override exists; don't include the world note
-                  // (the override should already be in the notes list)
-                  seenOverrideSourceIds.add(wn.id);
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Add world-layer notes to results
-      if (worldLayerNotes.length > 0) {
-        notes = [...notes, ...worldLayerNotes];
-      }
-    }
   }
 
   if (tag) {
@@ -251,8 +253,8 @@ router.get('/', authenticateToken, (req, res) => {
   }
 
   // Bulk-load all tags and grants in 2 queries instead of N
-  const noteIds = notes.map(n => n.id);
-  if (noteIds.length === 0) return res.json([]);
+  const noteIds = [...new Set(notes.map(n => n.id))];
+  if (notes.length === 0) return res.json([]);
 
   const placeholders = noteIds.map(() => '?').join(',');
   const allTagRows = db.prepare(`SELECT note_id, tag FROM note_tags WHERE note_id IN (${placeholders})`).all(...noteIds);
@@ -263,7 +265,17 @@ router.get('/', authenticateToken, (req, res) => {
   const grantsByNote = {};
   allGrantRows.forEach(r => { (grantsByNote[r.note_id] = grantsByNote[r.note_id] || []).push(r.user_id); });
 
-  res.json(notes.map(n => ({ ...n, tags: tagsByNote[n.id] || [], granted_users: grantsByNote[n.id] || [] })));
+  const srcAlive = db.prepare('SELECT deleted_at FROM notes WHERE id = ?');
+  const enriched = notes.map((n) => {
+    const row = { ...n, tags: tagsByNote[n.id] || [], granted_users: grantsByNote[n.id] || [] };
+    if (n.source_note_id) {
+      const s = srcAlive.get(n.source_note_id);
+      row.source_deleted = !s || s.deleted_at != null;
+    }
+    return row;
+  });
+
+  res.json(enriched);
 });
 
 // GET campaign folder IDs where current user is a DM (admin may pass as_user to inspect another account)
@@ -331,6 +343,56 @@ router.get('/meta/users', authenticateToken, (req, res) => {
   res.json(users);
 });
 
+// GET @mention autocomplete — full world subtree when under a world, else standalone campaign subtree; multi-token title match (stop words ignored)
+router.get('/meta/mention-suggestions', authenticateToken, (req, res) => {
+  const admin = isAdmin(req.user.id);
+  const rawFrom = req.query.from_note_id;
+  const q = (req.query.q || '').trim();
+  const fromNoteId = parseInt(String(rawFrom), 10);
+  if (!Number.isFinite(fromNoteId)) {
+    return res.status(400).json({ error: 'from_note_id is required' });
+  }
+  if (q.length < 3) {
+    return res.json([]);
+  }
+
+  const anchor = db.prepare('SELECT id FROM notes WHERE id = ? AND deleted_at IS NULL').get(fromNoteId);
+  if (!anchor) return res.status(404).json({ error: 'Note not found' });
+  if (!canSee(fromNoteId, req.user.id, admin)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const scopeIds = getMentionScopeNoteIds(fromNoteId);
+  if (scopeIds.length === 0) return res.json([]);
+
+  const chunkSize = 400;
+  const candidates = [];
+  for (let i = 0; i < scopeIds.length; i += chunkSize) {
+    const chunk = scopeIds.slice(i, i + chunkSize);
+    const ph = chunk.map(() => '?').join(',');
+    const part = db
+      .prepare(
+        `SELECT id, title, category, is_folder FROM notes
+         WHERE deleted_at IS NULL AND is_folder = 0 AND id IN (${ph})`
+      )
+      .all(...chunk);
+    candidates.push(...part);
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const r of candidates) {
+    if (r.id === fromNoteId) continue;
+    if (!canSee(r.id, req.user.id, admin)) continue;
+    if (!titleMatchesMentionQuery(r.title, q)) continue;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push({ id: r.id, title: r.title, category: r.category || 'general' });
+  }
+  out.sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  res.json(out.slice(0, 20));
+});
+
 // GET full-text search (must be before /:id)
 router.get('/search', authenticateToken, (req, res) => {
   const { q } = req.query;
@@ -385,7 +447,7 @@ router.get('/:id', authenticateToken, (req, res) => {
   const note = db.prepare('SELECT n.*, u.username AS author FROM notes n JOIN users u ON n.user_id = u.id WHERE n.id = ?').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
   if (!canSee(note.id, req.user.id, admin)) return res.status(403).json({ error: 'Access denied' });
-  res.json(withPermissions(withTags(note)));
+  res.json({ ...withPermissions(withTags(note)) });
 });
 
 // GET permissions for a note (owner, DM, or admin)
@@ -533,19 +595,6 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canFullEdit  = admin || isOwner || isGranted; // full content edit
   const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
   const canAppend    = isDM && !canFullEdit;           // DM on another user's note
-
-  // Block editing of inherited world-layer notes (they need an override)
-  if (note.source_note_id === null && !note.is_world) {
-    // Check if this note is directly under a world layer (not an override)
-    const parentNote = note.parent_id ? db.prepare('SELECT is_world FROM notes WHERE id = ?').get(note.parent_id) : null;
-    const isWorldLayerNote = !parentNote && !note.parent_id;
-    const rootData = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(getRootFolderId(note.id));
-    
-    if (rootData && rootData.is_world === 1 && note.parent_id && !note.source_note_id && !isDM && !admin && !isOwner) {
-      // This is an inherited world note and user is not a DM of world layer or campaign
-      return res.status(403).json({ error: 'This note is from a world layer. Create a local override to edit.' });
-    }
-  }
 
   const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary } = req.body;
 

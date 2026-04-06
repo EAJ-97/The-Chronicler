@@ -2,7 +2,16 @@ import { useState, useEffect } from 'react';
 import api from '../api.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 
-export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onClose, onRestored }) {
+/**
+ * @param {object} props
+ * @param {object} props.folder - Campaign folder row (must include id, title, parent_id).
+ * @param {string|null|undefined} props.worldLayerTitle - When this campaign sits under a world root, shown in the header for context.
+ * @param {object} props.currentUser
+ * @param {number[]} props.dmCampaignIds
+ * @param {() => void} props.onClose
+ * @param {() => void} props.onRestored
+ */
+export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dmCampaignIds, onClose, onRestored }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [snapshots, setSnapshots] = useState([]);
@@ -105,6 +114,11 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
             <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.6)' }}>
               {folder.title}
             </div>
+            {worldLayerTitle && (
+              <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(200,148,58,0.45)', marginTop: '4px' }}>
+                Under world: {worldLayerTitle} — snapshots include this link in export metadata for backups.
+              </div>
+            )}
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.3)', cursor: 'pointer', fontSize: '18px' }}>×</button>
         </div>
@@ -150,6 +164,11 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
                     <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)' }}>
                       saved by {s.saved_by}
                     </div>
+                    {s.export_meta?.world_title && (
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(200,148,58,0.4)', marginTop: '6px' }}>
+                        World context: {s.export_meta.world_title}
+                      </div>
+                    )}
                   </div>
                   {canManage && (
                     <button

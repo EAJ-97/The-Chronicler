@@ -105,11 +105,40 @@ router.get('/:folderId', authenticateToken, (req, res) => {
   const folder = db.prepare('SELECT id, user_id FROM notes WHERE id = ? AND is_folder = 1').get(folderId);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
-  const snapshots = db.prepare(`
-    SELECT fs.id, fs.folder_id, fs.saved_at, fs.label, u.username AS saved_by
+  const rows = db.prepare(`
+    SELECT fs.id, fs.folder_id, fs.saved_at, fs.label, u.username AS saved_by, fs.snapshot_json
     FROM folder_snapshots fs JOIN users u ON fs.saved_by = u.id
     WHERE fs.folder_id = ? ORDER BY fs.saved_at DESC
   `).all(folderId);
+
+  /**
+   * Parses stored snapshot JSON once per row to expose export_meta (world layer title when
+   * the campaign folder lives under a world) without sending the full snapshot payload.
+   * @param {string} jsonStr
+   * @returns {{ world_layer_id: number|null, world_title: string|null }|null}
+   */
+  function parseExportMeta(jsonStr) {
+    try {
+      const j = JSON.parse(jsonStr || '{}');
+      const em = j.export_meta;
+      if (!em || (em.world_layer_id == null && !em.world_title)) return null;
+      return {
+        world_layer_id: em.world_layer_id != null ? em.world_layer_id : null,
+        world_title: em.world_title != null ? String(em.world_title) : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const snapshots = rows.map((r) => ({
+    id: r.id,
+    folder_id: r.folder_id,
+    saved_at: r.saved_at,
+    label: r.label,
+    saved_by: r.saved_by,
+    export_meta: parseExportMeta(r.snapshot_json),
+  }));
 
   // Include cooldown info
   const latest = snapshots[0];
@@ -147,9 +176,17 @@ router.post('/:folderId', authenticateToken, (req, res) => {
 
   // Build snapshot: folder itself + all descendants
   const tags = db.prepare('SELECT tag FROM note_tags WHERE note_id = ?').all(folder.id).map(r => r.tag);
+  let export_meta = { world_layer_id: null, world_title: null };
+  if (folder.parent_id) {
+    const pw = db.prepare('SELECT id, title, is_world FROM notes WHERE id = ?').get(folder.parent_id);
+    if (pw && pw.is_world === 1) {
+      export_meta = { world_layer_id: pw.id, world_title: pw.title || '' };
+    }
+  }
   const snapshot = {
     folder: { ...folder, tags },
     notes: collectSubtree(folderId),
+    export_meta,
   };
 
   db.prepare('INSERT INTO folder_snapshots (folder_id, saved_by, snapshot_json, label) VALUES (?, ?, ?, ?)')

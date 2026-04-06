@@ -4,18 +4,27 @@ import api from '../api.js';
 import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
 import { resolveSidebarIcon, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
 
+/**
+ * Builds parent_id-linked tree roots for the sidebar (no virtual inherit rows).
+ * @param {Array<object>} notes
+ * @returns {object[]}
+ */
 function buildTree(notes) {
   const map = {};
   const roots = [];
-  notes.forEach(n => { map[n.id] = { ...n, children: [] }; });
-  notes.forEach(n => {
+  notes.forEach((n) => {
+    map[n.id] = { ...n, children: [] };
+  });
+  notes.forEach((n) => {
     if (n.parent_id && map[n.parent_id]) map[n.parent_id].children.push(map[n.id]);
     else roots.push(map[n.id]);
   });
 
   function countNotes(node) {
     let count = node.is_folder ? 0 : 1;
-    node.children.forEach(c => { count += countNotes(c); });
+    node.children.forEach((c) => {
+      count += countNotes(c);
+    });
     node._noteCount = node.is_folder ? count : 0;
     return count;
   }
@@ -26,10 +35,10 @@ function buildTree(notes) {
       if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
       return a.title.localeCompare(b.title);
     });
-    arr.forEach(n => sortNodes(n.children));
+    arr.forEach((n) => sortNodes(n.children));
   };
 
-  roots.forEach(r => countNotes(r));
+  roots.forEach((r) => countNotes(r));
   sortNodes(roots);
   return roots;
 }
@@ -317,7 +326,27 @@ const mobileActionBtn = {
   WebkitUserSelect: 'none', userSelect: 'none',
 };
 
-export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCreateNote, onCreateFolder, onOpenCampaignModal, onDelete, onRename, onMove, onSnapshot, onExport, onSync, currentUser, dmCampaignIds, simulatedRole, collapsed, onToggleCollapse, isMobile }) {
+export default function NoteList({
+  notes,
+  selectedId,
+  onSelect,
+  onDeselect,
+  onCreateNote,
+  onCreateFolder,
+  onOpenCampaignModal,
+  onDelete,
+  onRename,
+  onMove,
+  onSnapshot,
+  onExport,
+  onSync,
+  currentUser,
+  dmCampaignIds,
+  simulatedRole,
+  collapsed,
+  onToggleCollapse,
+  isMobile,
+}) {
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);

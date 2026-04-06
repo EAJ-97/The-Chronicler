@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
 import { notesByIdMap } from '../utils/campaignTree.js';
@@ -13,6 +14,27 @@ import {
   defaultNoteIconEmoji,
   isManagedSidebarIconUrl,
 } from '../utils/displayIcons.js';
+
+/**
+ * If the cursor is in an active @mention segment on the current line, returns the query text (may
+ * include spaces for multi-word titles) and the range to replace from `@` through the cursor.
+ * @param {string} text - Full editor value
+ * @param {number} cursorPos - caret index
+ * @returns {{ query: string, replaceStart: number, replaceEnd: number } | null}
+ */
+function parseMentionAtCursor(text, cursorPos) {
+  const lineStart = text.lastIndexOf('\n', cursorPos - 1) + 1;
+  const line = text.slice(lineStart, cursorPos);
+  const atRel = line.lastIndexOf('@');
+  if (atRel === -1) return null;
+  if (atRel > 0 && !/[\s([{@]/.test(line[atRel - 1])) return null;
+  const query = line.slice(atRel + 1);
+  return {
+    query,
+    replaceStart: lineStart + atRel,
+    replaceEnd: cursorPos,
+  };
+}
 
 const CATEGORIES = [
   { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
@@ -87,7 +109,7 @@ const S = {
     flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
   },
   editor: {
-    flex: 1, width: '100%', background: 'transparent',
+    flex: 1, width: '100%', minHeight: 0, background: 'transparent',
     border: 'none', outline: 'none', resize: 'none',
     color: '#e2d5bb', fontSize: '16px', fontFamily: 'Crimson Pro, serif',
     lineHeight: '1.8', padding: '20px 24px',
@@ -142,7 +164,20 @@ const S = {
   },
 };
 
-export default function NoteEditor({ note, notes, connections, currentUser, dmCampaignIds, simulatedRole, onSave, onDelete, isMobile, onBackToList }) {
+export default function NoteEditor({
+  note,
+  notes,
+  connections,
+  currentUser,
+  dmCampaignIds,
+  simulatedRole,
+  onSave,
+  onDelete,
+  isMobile,
+  onBackToList,
+  /** Open a referenced note in the side peek stack (e.g. `note:` link in preview or “Open source note”). */
+  onOpenReferenceNote,
+}) {
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
   const [category, setCategory] = useState(note?.category || 'general');
@@ -199,6 +234,14 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const serverUpdatedAt = useRef(note?.updated_at || null);
   // Conflict state
   const [conflict, setConflict] = useState(null); // { serverTitle, serverContent, serverUpdatedAt, myTitle, myContent }
+  /** @mention dropdown: items from API, range in content to replace, keyboard highlight index. */
+  const [mentionPopup, setMentionPopup] = useState(null);
+  const mentionPopupRef = useRef(null);
+  const mentionDebounceRef = useRef(null);
+  const contentTextareaRef = useRef(null);
+  useEffect(() => {
+    mentionPopupRef.current = mentionPopup;
+  }, [mentionPopup]);
   // Refs to always-current handler functions (avoids stale closure in keydown listener)
   const handleUndoRef = useRef(null);
   const handleRedoRef = useRef(null);
@@ -214,7 +257,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const isDM = (() => {
     if (isAdminUser) return true;
     if (!note || !dmCampaignIds || dmCampaignIds.length === 0) return false;
-    const notesById = new Map((notes || []).map(n => [n.id, n]));
+    const notesById = new Map((notes || []).map((n) => [n.id, n]));
     let current = note;
     while (current.parent_id) {
       current = notesById.get(current.parent_id);
@@ -266,7 +309,8 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     c.source_note_id === note?.id ? c.target_note_id : c.source_note_id
   ));
 
-  // Reset state when note changes
+  // Reset state when note changes (id or override linkage).
+  const noteSlotKey = `${note?.id ?? ''}-${note?.source_note_id ?? ''}`;
   useEffect(() => {
     setTitle(note?.title || '');
     setContent(note?.content || '');
@@ -293,7 +337,12 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     setConflict(null);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setNoteIconMenuOpen(false);
-  }, [note?.id]);
+    setMentionPopup(null);
+  }, [noteSlotKey]);
+
+  useEffect(() => () => {
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+  }, []);
 
   useEffect(() => {
     if (!noteIconMenuOpen) return;
@@ -738,14 +787,119 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     );
   }
 
+  /**
+   * Inserts a markdown link `[title](note:id)` for the chosen suggestion and closes the mention UI.
+   * @param {{ id: number, title: string }} item
+   */
+  const applyMentionChoice = (item) => {
+    const mp = mentionPopupRef.current;
+    if (!mp || !item?.id) return;
+    const { replaceStart, replaceEnd } = mp;
+    const val = contentRef.current;
+    const safeTitle = (item.title || 'Note').replace(/\]/g, '›');
+    const md = `[${safeTitle}](note:${item.id})`;
+    const newVal = val.slice(0, replaceStart) + md + val.slice(replaceEnd);
+    setContent(newVal);
+    markDirty();
+    setMentionPopup(null);
+    requestAnimationFrame(() => {
+      const ta = contentTextareaRef.current;
+      if (ta) {
+        const pos = replaceStart + md.length;
+        ta.selectionStart = ta.selectionEnd = pos;
+        ta.focus();
+      }
+    });
+  };
+
+  /**
+   * Handles main note body typing: debounced @mention fetch (world-wide or campaign-only per backend scope).
+   * @param {React.ChangeEvent<HTMLTextAreaElement>} e
+   */
+  const handleMainEditorChange = (e) => {
+    const v = e.target.value;
+    const cursor = e.target.selectionStart;
+    setContent(v);
+    markDirty();
+    if (!canEdit || !note?.id) return;
+    const parsed = parseMentionAtCursor(v, cursor);
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+    if (!parsed || parsed.query.trim().length < 3) {
+      setMentionPopup(null);
+      return;
+    }
+    mentionDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await api.get('/notes/meta/mention-suggestions', {
+          params: { from_note_id: note.id, q: parsed.query.trim() },
+        });
+        const items = Array.isArray(res.data) ? res.data : [];
+        const cur = contentRef.current;
+        const curCursor = contentTextareaRef.current?.selectionStart ?? cur.length;
+        const again = parseMentionAtCursor(cur, curCursor);
+        if (!again || again.query.trim().length < 3) {
+          setMentionPopup(null);
+          return;
+        }
+        setMentionPopup({
+          items,
+          replaceStart: again.replaceStart,
+          replaceEnd: again.replaceEnd,
+          activeIndex: 0,
+        });
+      } catch {
+        setMentionPopup(null);
+      }
+    }, 220);
+  };
+
   const handleEditorKeyDown = (e) => {
     if (!canEdit) return;
-    const ta   = e.target;
-    const val  = ta.value;
-    const ss   = ta.selectionStart;
-    const se   = ta.selectionEnd;
-    const sel  = val.slice(ss, se);
+    const ta = e.target;
+    const val = ta.value;
+    const ss = ta.selectionStart;
+    const se = ta.selectionEnd;
+    const sel = val.slice(ss, se);
     const meta = e.ctrlKey || e.metaKey;
+
+    const mp = mentionPopupRef.current;
+    if (mp && mp.items && mp.items.length > 0) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionPopup(null);
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionPopup((prev) =>
+          prev
+            ? {
+                ...prev,
+                activeIndex: Math.min(prev.activeIndex + 1, prev.items.length - 1),
+              }
+            : prev
+        );
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionPopup((prev) =>
+          prev
+            ? {
+                ...prev,
+                activeIndex: Math.max(prev.activeIndex - 1, 0),
+              }
+            : prev
+        );
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cur = mentionPopupRef.current;
+        if (cur?.items?.[cur.activeIndex]) applyMentionChoice(cur.items[cur.activeIndex]);
+        return;
+      }
+    }
 
     const wrap = (before, after = before) => {
       e.preventDefault();
@@ -861,6 +1015,10 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     }
   };
 
+  /** Banner when this note was branched from another note (source_note_id) or the source is gone. */
+  const showSourceNoteCallout =
+    !!note && !note.is_folder && (note.source_deleted || note.source_note_id);
+
   return (
     <div style={S.wrap}>
       {showMove && (
@@ -875,6 +1033,53 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
         />
       )}
       <div style={S.header}>
+        {showSourceNoteCallout && (
+          <div
+            style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(200,148,58,0.2)',
+              background: 'rgba(200,148,58,0.06)',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '13px',
+              color: 'rgba(226,213,187,0.75)',
+              lineHeight: 1.45,
+            }}
+          >
+            {!!note?.source_deleted && (
+              <div style={{ marginBottom: note?.source_note_id ? '8px' : 0, color: 'rgba(224,160,112,0.95)' }}>
+                The original note this entry was based on is missing or in trash. You can still edit this copy.
+              </div>
+            )}
+            {!!note?.source_note_id && (
+              <div>
+                This note was branched from another entry. Edits here do not change the source note.
+                {typeof onOpenReferenceNote === 'function' && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      onClick={() => onOpenReferenceNote(note.source_note_id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#c8943a',
+                        textDecoration: 'underline',
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        padding: 0,
+                      }}
+                    >
+                      Open source note
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', marginLeft: '-8px' }}>
             <button
@@ -1304,18 +1509,141 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
 
       <div style={S.body}>
         {viewMode === 'edit' ? (
-          <textarea
-            style={S.editor}
-            value={content}
-            onChange={(e) => { setContent(e.target.value); markDirty(); }}
-            onKeyDown={handleEditorKeyDown}
-            placeholder={canEdit ? "Write your notes here... Markdown is supported." : canAppend ? "This note belongs to another party member. You can append a DM addition below." : "This is a read-only shared note."}
-            readOnly={!canEdit}
-            spellCheck={false}
-          />
+          <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <textarea
+              ref={contentTextareaRef}
+              style={S.editor}
+              value={content}
+              onChange={handleMainEditorChange}
+              onKeyDown={handleEditorKeyDown}
+              placeholder={
+                canEdit
+                  ? 'Write your notes here... Markdown is supported. Type @ then a few characters (or a multi-word title); under a world, search includes all campaigns in that world.'
+                  : canAppend
+                    ? 'This note belongs to another party member. You can append a DM addition below.'
+                    : 'This is a read-only shared note.'
+              }
+              readOnly={!canEdit}
+              spellCheck={false}
+            />
+            {mentionPopup && mentionPopup.items && mentionPopup.items.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  maxHeight: 'min(200px, 40vh)',
+                  overflowY: 'auto',
+                  background: '#12151c',
+                  border: '1px solid rgba(200,148,58,0.35)',
+                  borderRadius: '4px',
+                  boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+                  zIndex: 30,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '7px',
+                    letterSpacing: '0.12em',
+                    color: 'rgba(200,148,58,0.45)',
+                    padding: '6px 10px 4px',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  }}
+                >
+                  @ LINKS (WORLD OR CAMPAIGN SCOPE) — ↑↓ ENTER
+                </div>
+                {mentionPopup.items.map((it, idx) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onClick={() => applyMentionChoice(it)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 12px',
+                      border: 'none',
+                      borderLeft: `3px solid ${getCategoryColor(it.category)}`,
+                      background:
+                        idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
+                      color: '#e2d5bb',
+                      fontFamily: 'Crimson Pro, serif',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      {it.title}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: 'Cinzel',
+                        fontSize: '7px',
+                        letterSpacing: '0.06em',
+                        color: 'rgba(226,213,187,0.35)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {it.category}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <div style={S.preview} className="md-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || '*No content yet.*'}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              urlTransform={chroniclerUrlTransform}
+              components={{
+                a: ({ href, children }) => {
+                  const h = href != null ? String(href).trim() : '';
+                  if (h && /^note:\d+$/i.test(h)) {
+                    const nid = parseInt(h.replace(/^note:/i, ''), 10);
+                    return (
+                      <button
+                        type="button"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: onOpenReferenceNote ? 'pointer' : 'default',
+                          color: '#c8943a',
+                          textDecoration: 'underline',
+                          fontFamily: 'inherit',
+                          fontSize: 'inherit',
+                          padding: 0,
+                        }}
+                        onClick={(ev) => {
+                          ev.preventDefault();
+                          ev.stopPropagation();
+                          if (onOpenReferenceNote) onOpenReferenceNote(nid);
+                        }}
+                      >
+                        {children}
+                      </button>
+                    );
+                  }
+                  return (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#c8943a' }}
+                    >
+                      {children}
+                    </a>
+                  );
+                },
+              }}
+            >
+              {content || '*No content yet.*'}
+            </ReactMarkdown>
             <style>{`
               .md-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
               .md-content h1, .md-content h2, .md-content h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 16px 0 6px; }
