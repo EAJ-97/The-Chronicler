@@ -2159,8 +2159,8 @@ export default function NoteEditor({
           </div>
         )}
 
-        {/* DM AI Tools — only on world or campaign root folders (not nested organizers) */}
-        {note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (!underArchive || isAdminUser) && (
+        {/* DM AI Tools — only on world or campaign root folders (not nested organizers). Use !!is_folder so SQLite 0 does not render as a stray "0". */}
+        {!!note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (!underArchive || isAdminUser) && (
           <div style={{
             marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(139,196,226,0.12)',
           }}>
