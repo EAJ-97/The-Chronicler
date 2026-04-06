@@ -18,4 +18,26 @@ if [ -z "$JWT_SECRET" ]; then
   fi
 fi
 
+# Auto-generate ADMIN_RECOVERY_TOKEN if not provided via environment.
+# Persisted to the data volume so operators can read it from the host (docker exec cat /data/.admin_recovery_token).
+# Override by setting ADMIN_RECOVERY_TOKEN in docker-compose environment or .env.
+
+RECOVERY_FILE="/data/.admin_recovery_token"
+
+if [ -z "$ADMIN_RECOVERY_TOKEN" ]; then
+  if [ -f "$RECOVERY_FILE" ]; then
+    export ADMIN_RECOVERY_TOKEN=$(tr -d '\n\r' < "$RECOVERY_FILE")
+  else
+    if command -v openssl >/dev/null 2>&1; then
+      export ADMIN_RECOVERY_TOKEN=$(openssl rand -hex 32)
+    else
+      export ADMIN_RECOVERY_TOKEN=$(head -c 48 /dev/urandom | base64 | tr -d '\n')
+    fi
+    mkdir -p /data
+    printf '%s' "$ADMIN_RECOVERY_TOKEN" > "$RECOVERY_FILE"
+    chmod 600 "$RECOVERY_FILE"
+    echo "[entrypoint] Generated ADMIN_RECOVERY_TOKEN and saved to $RECOVERY_FILE"
+  fi
+fi
+
 exec "$@"

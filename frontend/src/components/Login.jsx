@@ -207,7 +207,9 @@ export default function Login({ onLogin }) {
         {mode === 'recover-admin' ? (
           <form onSubmit={handleRecoverAdmin}>
             <div style={S.recoverHint}>
-              Set <code style={{ color: 'rgba(200,148,58,0.7)' }}>ADMIN_RECOVERY_TOKEN</code> on the server (at least 16 characters), restart the app, then use the token here. If you have multiple admins, enter the admin username to reset; otherwise the first admin account is updated.
+              In Docker, the token is usually auto-generated and stored on the server at{' '}
+              <code style={{ color: 'rgba(200,148,58,0.7)' }}>/data/.admin_recovery_token</code>{' '}
+              (read it with <code style={{ color: 'rgba(200,148,58,0.55)' }}>docker compose exec … cat /data/.admin_recovery_token</code>). Paste it below. If you have multiple admins, enter the admin username; otherwise the first admin account is updated.
             </div>
             <div style={S.field}>
               <label style={S.label}>Recovery token</label>

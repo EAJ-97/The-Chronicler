@@ -89,7 +89,7 @@ This gives you a public HTTPS URL without opening firewall ports.
 | Variable | Default | Description |
 |---|---|---|
 | `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
-| `ADMIN_RECOVERY_TOKEN` | _(unset)_ | Optional. At least 16 characters. Enables **Reset admin password** on the login screen when the admin account is locked out. Never commit this value. |
+| `ADMIN_RECOVERY_TOKEN` | auto-generated | Emergency admin password reset. Auto-generated on first boot and saved to `/data/.admin_recovery_token` on the data volume (same pattern as JWT). Override via environment if you want a fixed value. Read the file inside the container: `docker compose exec chronicler cat /data/.admin_recovery_token` (service name may be `chronicler-dev` in dev). |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
 See `.env.example` for the minimal environment template. Session recaps use **Anthropic**; configure the API key in **Admin → AI** (stored in the database).
@@ -417,7 +417,11 @@ The React build is memory-intensive. Increase VM RAM to 4GB minimum before rebui
 
 ### Lost admin password
 
-1. **Recommended (login UI):** Set `ADMIN_RECOVERY_TOKEN` in the server environment to a long random string (at least 16 characters; e.g. `openssl rand -hex 24`), restart the container, then open the app and use **Admin locked out? → Reset admin password**. Enter the token and a new password. If several admins exist, fill in the **Admin username** field; otherwise the first admin account (lowest id) is updated.
+1. **Recommended (login UI):** On Docker installs, the recovery token is **created automatically** on first boot and stored at **`/data/.admin_recovery_token`** on the data volume (mode `600`). Read it when you need it:
+   ```bash
+   docker compose exec chronicler cat /data/.admin_recovery_token
+   ```
+   (Use your actual service/container name, e.g. `chronicler-dev` for the dev compose file.) Then open the app → **Admin locked out? → Reset admin password**, paste the token, and set a new admin password. If several admins exist, fill in **Admin username**; otherwise the first admin (lowest id) is updated. To use your own token instead, set `ADMIN_RECOVERY_TOKEN` in the service `environment` before first boot, or replace the file and restart.
 
 2. **Admin changing a player password:** Sign in as admin → **Admin Panel → PARTY** → **Set password** next to the user.
 
