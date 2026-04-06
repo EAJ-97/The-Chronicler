@@ -50,6 +50,12 @@ export function getCategoryColor(cat) {
   return CATEGORIES.find(c => c.value === cat)?.color || '#4a5568';
 }
 
+/**
+ * When the Connections / Tags / Images drawer is open, cap its height to ~1/3 of the viewport
+ * (uses dvh where available so mobile keyboards don’t hide suggestion lists).
+ */
+const DRAWER_EXPANDED_MAX_HEIGHT = 'min(33dvh, 33vh, 520px)';
+
 const S = {
   wrap: {
     display: 'flex', flexDirection: 'column', height: '100%',
@@ -1705,12 +1711,12 @@ export default function NoteEditor({
         )}
       </div>
 
-      {/* ── Bottom Drawer: handle bar ── */}
+      {/* ── Bottom Drawer: handle bar (lifted above home indicator / bottom edge) ── */}
       <div style={{
         borderTop: '1px solid rgba(255,255,255,0.06)',
         background: 'rgba(7,8,14,0.6)',
         display: 'flex', alignItems: 'center',
-        padding: '0 16px',
+        padding: '6px 16px max(10px, env(safe-area-inset-bottom, 0px))',
         flexShrink: 0,
         userSelect: 'none',
       }}>
@@ -1742,16 +1748,16 @@ export default function NoteEditor({
         >⌃</button>
       </div>
 
-      {/* ── Bottom Drawer: panel ── */}
+      {/* ── Bottom Drawer: panel (~1/3 viewport when open — room for suggestion dropdowns) ── */}
       <div style={{
         overflow: 'hidden',
-        maxHeight: drawerOpen ? (isMobile ? '40vh' : '280px') : '0',
-        transition: 'max-height 0.22s ease',
+        maxHeight: drawerOpen ? DRAWER_EXPANDED_MAX_HEIGHT : '0',
+        transition: 'max-height 0.24s ease',
         flexShrink: 0,
         background: 'rgba(0,0,0,0.25)',
         borderTop: drawerOpen ? '1px solid rgba(255,255,255,0.05)' : 'none',
       }}>
-        <div style={{ padding: '14px 24px', overflowY: 'auto', maxHeight: isMobile ? '40vh' : '280px' }}>
+        <div style={{ padding: '14px 24px', overflowY: 'auto', maxHeight: drawerOpen ? DRAWER_EXPANDED_MAX_HEIGHT : '0', boxSizing: 'border-box' }}>
 
           {/* Connections tab */}
           {drawerTab === 'connections' && (
