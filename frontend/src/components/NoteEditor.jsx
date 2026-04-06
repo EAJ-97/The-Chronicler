@@ -285,11 +285,13 @@ export default function NoteEditor({
   const serverUpdatedAt = useRef(note?.updated_at || null);
   // Conflict state
   const [conflict, setConflict] = useState(null); // { serverTitle, serverContent, serverUpdatedAt, myTitle, myContent }
-  /** @mention dropdown: items from API, range in content to replace, keyboard highlight index. */
+  /** @mention dropdown: items from API, replace range, highlight index; `field` is body or DM AI prompt key. */
   const [mentionPopup, setMentionPopup] = useState(null);
   const mentionPopupRef = useRef(null);
   const mentionDebounceRef = useRef(null);
   const contentTextareaRef = useRef(null);
+  /** Viewport-fixed rect for portaled DM AI prompt @mention list (anchored above the active textarea). */
+  const [mentionPromptFixed, setMentionPromptFixed] = useState(null);
   /** Anchors for portaled connection/tag suggestion dropdowns (fixed to viewport). */
   const connInputRef = useRef(null);
   const tagInputRef = useRef(null);
@@ -406,6 +408,13 @@ export default function NoteEditor({
   const [summarizeErr, setSummarizeErr] = useState('');
   const [summarizeText, setSummarizeText] = useState('');
   const [completionBusy, setCompletionBusy] = useState(false);
+  /** Mirrors DM AI prompt strings for debounced mention fetch; updated in textarea onChange / applyMentionChoice. */
+  const npcPromptRef = useRef('');
+  const locPromptRef = useRef('');
+  const itemPromptRef = useRef('');
+  const npcPromptTextareaRef = useRef(null);
+  const locPromptTextareaRef = useRef(null);
+  const itemPromptTextareaRef = useRef(null);
 
   useEffect(() => {
     if (!note?.id) return;
@@ -908,6 +917,60 @@ export default function NoteEditor({
     setTagDropdownFixed(getFixedDropdownAboveInput(tagInputRef.current, 140));
   }, [showTagSuggestions, tagSuggestions.length]);
 
+  /**
+   * Debounced @mention fetch for DM AI NPC / location / item prompt textareas; same API as the main body.
+   * @param {'npc'|'loc'|'item'} field - Which prompt state to validate after the debounce delay.
+   * @param {string} text - Current textarea value.
+   * @param {number} cursor - Caret index.
+   */
+  const schedulePromptMention = useCallback((field, text, cursor) => {
+    if (field === 'npc') npcPromptRef.current = text;
+    if (field === 'loc') locPromptRef.current = text;
+    if (field === 'item') itemPromptRef.current = text;
+    if (!note?.id) {
+      setMentionPopup((prev) => (prev?.field === field ? null : prev));
+      return;
+    }
+    const parsed = parseMentionAtCursor(text, cursor);
+    if (mentionDebounceRef.current) clearTimeout(mentionDebounceRef.current);
+    if (!parsed || parsed.query.trim().length < 3) {
+      setMentionPopup((prev) => (prev?.field === field ? null : prev));
+      return;
+    }
+    const anchorMap = {
+      npc: npcPromptTextareaRef,
+      loc: locPromptTextareaRef,
+      item: itemPromptTextareaRef,
+    };
+    mentionDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await api.get('/notes/meta/mention-suggestions', {
+          params: { from_note_id: note.id, q: parsed.query.trim() },
+        });
+        const items = Array.isArray(res.data) ? res.data : [];
+        const valMap = { npc: npcPromptRef, loc: locPromptRef, item: itemPromptRef };
+        const curText = valMap[field].current;
+        const el = anchorMap[field].current;
+        const curCursor = el?.selectionStart ?? curText.length;
+        const again = parseMentionAtCursor(curText, curCursor);
+        if (!again || again.query.trim().length < 3) {
+          setMentionPopup((prev) => (prev?.field === field ? null : prev));
+          return;
+        }
+        setMentionPopup({
+          items,
+          replaceStart: again.replaceStart,
+          replaceEnd: again.replaceEnd,
+          activeIndex: 0,
+          field,
+          anchorRef: anchorMap[field],
+        });
+      } catch {
+        setMentionPopup((prev) => (prev?.field === field ? null : prev));
+      }
+    }, 220);
+  }, [note?.id]);
+
   useLayoutEffect(() => {
     updateConnDropdownFixed();
     if (!showDropdown || !connSearch || !filteredNotes.length) return undefined;
@@ -944,6 +1007,24 @@ export default function NoteEditor({
     drawerTab,
     updateTagDropdownFixed,
   ]);
+
+  /** Positions the portaled DM AI @mention list above the active prompt textarea; updates on scroll/resize. */
+  useLayoutEffect(() => {
+    if (!mentionPopup || !mentionPopup.field || mentionPopup.field === 'body') {
+      setMentionPromptFixed(null);
+      return undefined;
+    }
+    const anchorRef = mentionPopup.anchorRef;
+    const measure = () => setMentionPromptFixed(getFixedDropdownAboveInput(anchorRef?.current));
+    measure();
+    const onMove = () => measure();
+    window.addEventListener('resize', onMove);
+    document.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      document.removeEventListener('scroll', onMove, true);
+    };
+  }, [mentionPopup]);
 
   const markDirty = () => {
     setDirty(true);
@@ -1177,27 +1258,104 @@ export default function NoteEditor({
 
   /**
    * Inserts a markdown link `[title](note:id)` for the chosen suggestion and closes the mention UI.
-   * @param {{ id: number, title: string }} item
+   * Writes into the main body or the active DM AI prompt field per `mentionPopup.field`.
+   * @param {{ id: number, title: string }} item - Suggestion row from `/notes/meta/mention-suggestions`.
    */
   const applyMentionChoice = (item) => {
     const mp = mentionPopupRef.current;
     if (!mp || !item?.id) return;
-    const { replaceStart, replaceEnd } = mp;
-    const val = contentRef.current;
+    const { replaceStart, replaceEnd, field = 'body' } = mp;
     const safeTitle = (item.title || 'Note').replace(/\]/g, '›');
     const md = `[${safeTitle}](note:${item.id})`;
-    const newVal = val.slice(0, replaceStart) + md + val.slice(replaceEnd);
-    setContent(newVal);
-    markDirty();
-    setMentionPopup(null);
-    requestAnimationFrame(() => {
-      const ta = contentTextareaRef.current;
-      if (ta) {
-        const pos = replaceStart + md.length;
-        ta.selectionStart = ta.selectionEnd = pos;
-        ta.focus();
-      }
-    });
+
+    const focusPrompt = (taRef, pos) => {
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (ta) {
+          ta.selectionStart = ta.selectionEnd = pos;
+          ta.focus();
+        }
+      });
+    };
+
+    if (field === 'body') {
+      const val = contentRef.current;
+      const newVal = val.slice(0, replaceStart) + md + val.slice(replaceEnd);
+      setContent(newVal);
+      markDirty();
+      setMentionPopup(null);
+      requestAnimationFrame(() => {
+        const ta = contentTextareaRef.current;
+        if (ta) {
+          const pos = replaceStart + md.length;
+          ta.selectionStart = ta.selectionEnd = pos;
+          ta.focus();
+        }
+      });
+      return;
+    }
+
+    const applyPrompt = (getter, setter, ref, taRef) => {
+      const val = getter();
+      const newVal = val.slice(0, replaceStart) + md + val.slice(replaceEnd);
+      setter(newVal);
+      ref.current = newVal;
+      setMentionPopup(null);
+      focusPrompt(taRef, replaceStart + md.length);
+    };
+
+    if (field === 'npc') {
+      applyPrompt(() => npcPromptRef.current, setNpcPrompt, npcPromptRef, npcPromptTextareaRef);
+      return;
+    }
+    if (field === 'loc') {
+      applyPrompt(() => locPromptRef.current, setLocPrompt, locPromptRef, locPromptTextareaRef);
+      return;
+    }
+    if (field === 'item') {
+      applyPrompt(() => itemPromptRef.current, setItemPrompt, itemPromptRef, itemPromptTextareaRef);
+    }
+  };
+
+  /**
+   * Keyboard handling for DM AI prompt textareas when an @mention list is open (↑↓ Enter Tab Escape).
+   * @param {React.KeyboardEvent<HTMLTextAreaElement>} e
+   * @param {'npc'|'loc'|'item'} field
+   * @returns {boolean} True if the event was consumed (caller should not run other handlers).
+   */
+  const handlePromptMentionKeyDown = (e, field) => {
+    const mp = mentionPopupRef.current;
+    if (!mp || mp.field !== field || !mp.items?.length) return false;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setMentionPopup(null);
+      return true;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionPopup((prev) =>
+        prev && prev.field === field
+          ? { ...prev, activeIndex: Math.min(prev.activeIndex + 1, prev.items.length - 1) }
+          : prev,
+      );
+      return true;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionPopup((prev) =>
+        prev && prev.field === field
+          ? { ...prev, activeIndex: Math.max(prev.activeIndex - 1, 0) }
+          : prev,
+      );
+      return true;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const cur = mentionPopupRef.current;
+      if (cur?.items?.[cur.activeIndex]) applyMentionChoice(cur.items[cur.activeIndex]);
+      return true;
+    }
+    return false;
   };
 
   /**
@@ -1234,6 +1392,7 @@ export default function NoteEditor({
           replaceStart: again.replaceStart,
           replaceEnd: again.replaceEnd,
           activeIndex: 0,
+          field: 'body',
         });
       } catch {
         setMentionPopup(null);
@@ -1251,7 +1410,8 @@ export default function NoteEditor({
     const meta = e.ctrlKey || e.metaKey;
 
     const mp = mentionPopupRef.current;
-    if (mp && mp.items && mp.items.length > 0) {
+    const isBodyMention = mp && (!mp.field || mp.field === 'body');
+    if (isBodyMention && mp.items && mp.items.length > 0) {
       if (e.key === 'Escape') {
         e.preventDefault();
         setMentionPopup(null);
@@ -1281,7 +1441,7 @@ export default function NoteEditor({
         );
         return;
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         const cur = mentionPopupRef.current;
         if (cur?.items?.[cur.activeIndex]) applyMentionChoice(cur.items[cur.activeIndex]);
@@ -1311,7 +1471,7 @@ export default function NoteEditor({
       requestAnimationFrame(() => ta.focus());
     };
 
-    // Tab / Shift+Tab — indent or outdent bullet lines
+    // Tab / Shift+Tab — indent or outdent bullet lines (skip when accepting a body @mention above)
     if (e.key === 'Tab') {
       e.preventDefault();
       const lineStart = val.lastIndexOf('\n', ss - 1) + 1;
@@ -1848,6 +2008,35 @@ export default function NoteEditor({
           </div>
         )}
 
+        {/* Mark world/campaign complete — DM/admin on scope root only (above Chronicle so it stays visible). */}
+        {canToggleCompletion && (
+          <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
+              Select the <strong style={{ color: 'rgba(226,213,187,0.65)' }}>world or campaign root</strong> folder in the sidebar (not a subfolder). This archives the campaign for players until you clear it.
+            </p>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                cursor: completionBusy ? 'wait' : 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.1em',
+                color: note?.is_completed ? 'rgba(200,148,58,0.9)' : 'rgba(226,213,187,0.65)',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!!note?.is_completed}
+                disabled={completionBusy}
+                onChange={(e) => handleCompletionToggle(e.target.checked)}
+              />
+              Mark {folderTreeKind === 'world' ? 'world' : 'campaign'} as completed (archives subtree — read-only for players)
+            </label>
+          </div>
+        )}
+
         {/* Folder appearance: icon palette by world / campaign / subfolder + sidebar blurb */}
         {canFolderStyle && canEditContent && (
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1942,32 +2131,6 @@ export default function NoteEditor({
           </div>
         )}
 
-        {/* Mark world/campaign complete — DM/admin on scope root only */}
-        {canToggleCompletion && (
-          <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                cursor: completionBusy ? 'wait' : 'pointer',
-                fontFamily: 'Cinzel',
-                fontSize: '9px',
-                letterSpacing: '0.1em',
-                color: note?.is_completed ? 'rgba(200,148,58,0.9)' : 'rgba(226,213,187,0.65)',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={!!note?.is_completed}
-                disabled={completionBusy}
-                onChange={(e) => handleCompletionToggle(e.target.checked)}
-              />
-              Mark {folderTreeKind === 'world' ? 'world' : 'campaign'} as completed (archives subtree — read-only for players)
-            </label>
-          </div>
-        )}
-
         {/* DM AI Tools — only on world or campaign root folders (not nested organizers) */}
         {note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (!underArchive || isAdminUser) && (
           <div style={{
@@ -1985,11 +2148,22 @@ export default function NoteEditor({
                 NPC / CHARACTER
               </div>
               <textarea
+                ref={npcPromptTextareaRef}
                 value={npcPrompt}
-                onChange={(e) => setNpcPrompt(e.target.value)}
-                placeholder="NPC-only: role, voice, goals… Paste [Title](note:id) to tie to existing notes."
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const cursor = e.target.selectionStart;
+                  setNpcPrompt(v);
+                  npcPromptRef.current = v;
+                  schedulePromptMention('npc', v, cursor);
+                }}
+                onKeyDown={(e) => {
+                  if (handlePromptMentionKeyDown(e, 'npc')) return;
+                }}
+                placeholder="NPC-only: role, voice, goals… Type @ for links or paste [Title](note:id)."
                 rows={4}
                 disabled={!aiAdminStatus.ai_enabled}
+                spellCheck={false}
                 style={{
                   width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                   background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
@@ -2049,11 +2223,22 @@ export default function NoteEditor({
                 LOCATION
               </div>
               <textarea
+                ref={locPromptTextareaRef}
                 value={locPrompt}
-                onChange={(e) => setLocPrompt(e.target.value)}
-                placeholder="Place-only: settlement, dungeon, region… Use [Title](note:id) for canon ties."
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const cursor = e.target.selectionStart;
+                  setLocPrompt(v);
+                  locPromptRef.current = v;
+                  schedulePromptMention('loc', v, cursor);
+                }}
+                onKeyDown={(e) => {
+                  if (handlePromptMentionKeyDown(e, 'loc')) return;
+                }}
+                placeholder="Place-only: settlement, dungeon, region… Type @ or use [Title](note:id) for canon ties."
                 rows={4}
                 disabled={!aiAdminStatus.ai_enabled}
+                spellCheck={false}
                 style={{
                   width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                   background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
@@ -2109,11 +2294,22 @@ export default function NoteEditor({
                 ITEM / ARTIFACT
               </div>
               <textarea
+                ref={itemPromptTextareaRef}
                 value={itemPrompt}
-                onChange={(e) => setItemPrompt(e.target.value)}
-                placeholder="Object-only: weapon, relic, consumable… Link notes with [Title](note:id)."
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const cursor = e.target.selectionStart;
+                  setItemPrompt(v);
+                  itemPromptRef.current = v;
+                  schedulePromptMention('item', v, cursor);
+                }}
+                onKeyDown={(e) => {
+                  if (handlePromptMentionKeyDown(e, 'item')) return;
+                }}
+                placeholder="Object-only: weapon, relic, consumable… Type @ or link notes with [Title](note:id)."
                 rows={4}
                 disabled={!aiAdminStatus.ai_enabled}
+                spellCheck={false}
                 style={{
                   width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                   background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
@@ -2237,7 +2433,7 @@ export default function NoteEditor({
               readOnly={!canEdit}
               spellCheck={false}
             />
-            {mentionPopup && mentionPopup.items && mentionPopup.items.length > 0 && (
+            {mentionPopup && (!mentionPopup.field || mentionPopup.field === 'body') && mentionPopup.items && mentionPopup.items.length > 0 && (
               <div
                 style={{
                   position: 'absolute',
@@ -2263,7 +2459,7 @@ export default function NoteEditor({
                     borderBottom: '1px solid rgba(255,255,255,0.06)',
                   }}
                 >
-                  @ LINKS (WORLD OR CAMPAIGN SCOPE) — ↑↓ ENTER
+                  @ LINKS (WORLD OR CAMPAIGN SCOPE) — ↑↓ ENTER TAB
                 </div>
                 {mentionPopup.items.map((it, idx) => (
                   <button
@@ -2938,6 +3134,84 @@ export default function NoteEditor({
               >
                 #{t}
               </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+
+      {mentionPopup &&
+        mentionPopup.field &&
+        mentionPopup.field !== 'body' &&
+        mentionPopup.items?.length > 0 &&
+        mentionPromptFixed &&
+        createPortal(
+          <div
+            role="listbox"
+            style={{
+              position: 'fixed',
+              left: mentionPromptFixed.left,
+              width: mentionPromptFixed.width,
+              bottom: mentionPromptFixed.bottom,
+              top: 'auto',
+              maxHeight: mentionPromptFixed.maxHeight,
+              overflowY: 'auto',
+              background: '#12151c',
+              border: '1px solid rgba(200,148,58,0.35)',
+              borderRadius: '4px',
+              boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+              zIndex: 10000,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: 'Cinzel',
+                fontSize: '7px',
+                letterSpacing: '0.12em',
+                color: 'rgba(200,148,58,0.45)',
+                padding: '6px 10px 4px',
+                borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}
+            >
+              @ LINKS (DM AI PROMPT) — ↑↓ ENTER TAB
+            </div>
+            {mentionPopup.items.map((it, idx) => (
+              <button
+                key={it.id}
+                type="button"
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => applyMentionChoice(it)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '8px 12px',
+                  border: 'none',
+                  borderLeft: `3px solid ${getCategoryColor(it.category)}`,
+                  background:
+                    idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
+                  color: '#e2d5bb',
+                  fontFamily: 'Crimson Pro, serif',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {it.title}
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '7px',
+                    letterSpacing: '0.06em',
+                    color: 'rgba(226,213,187,0.35)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {it.category}
+                </span>
+              </button>
             ))}
           </div>,
           document.body,

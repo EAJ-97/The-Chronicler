@@ -14,6 +14,9 @@ import CampaignModal from './CampaignModal.jsx';
 import api from '../api.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 
+/** Set to true to show the Timeline tab (ITEM_9). Hidden by default; implementation kept in TimelineView.jsx. */
+const SHOW_TIMELINE_TAB = false;
+
 const S = {
   shell: { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, overflow: 'hidden', background: '#07080e' },
   topbar: {
@@ -166,6 +169,11 @@ export default function Dashboard({ user, onLogout }) {
   useEffect(() => { simulatedRoleRef.current = simulatedRole; }, [simulatedRole]);
   useEffect(() => { viewAsUserIdRef.current = viewAsUserId; }, [viewAsUserId]);
   useEffect(() => { selectedNoteIdRef.current = selectedNoteId; }, [selectedNoteId]);
+
+  /** Avoid a stuck view if Timeline is hidden but `view` was previously timeline. */
+  useEffect(() => {
+    if (!SHOW_TIMELINE_TAB && view === 'timeline') setView('notes');
+  }, [view]);
 
   /** Closing the peek stack when switching the main editor note avoids stale “layers”. */
   useEffect(() => {
@@ -657,7 +665,9 @@ export default function Dashboard({ user, onLogout }) {
             <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
             <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
             <button style={S.viewBtn(view === 'journal')} onClick={() => setView('journal')}>⚡ Journal</button>
-            <button style={S.viewBtn(view === 'timeline')} onClick={() => setView('timeline')}>⏱ Timeline</button>
+            {SHOW_TIMELINE_TAB && (
+              <button style={S.viewBtn(view === 'timeline')} onClick={() => setView('timeline')}>⏱ Timeline</button>
+            )}
           </div>
           {(effectiveDmCampaignIds.length > 0 || user.is_admin) && (
             <button
@@ -1043,7 +1053,7 @@ export default function Dashboard({ user, onLogout }) {
             <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} dmCampaignIds={effectiveDmCampaignIds} />
           )}
 
-          {view === 'timeline' && (
+          {SHOW_TIMELINE_TAB && view === 'timeline' && (
             <TimelineView notes={notes} currentUser={user} />
           )}
         </div>
@@ -1064,10 +1074,12 @@ export default function Dashboard({ user, onLogout }) {
             <span style={S.bottomNavIcon}>⚡</span>
             <span style={S.bottomNavLabel}>JOURNAL</span>
           </button>
-          <button style={S.bottomNavBtn(view === 'timeline')} onClick={() => setView('timeline')}>
-            <span style={S.bottomNavIcon}>⏱</span>
-            <span style={S.bottomNavLabel}>TIME</span>
-          </button>
+          {SHOW_TIMELINE_TAB && (
+            <button style={S.bottomNavBtn(view === 'timeline')} onClick={() => setView('timeline')}>
+              <span style={S.bottomNavIcon}>⏱</span>
+              <span style={S.bottomNavLabel}>TIME</span>
+            </button>
+          )}
           <button style={S.bottomNavBtn(mobileMenuOpen)} onClick={() => setMobileMenuOpen(v => !v)}>
             <span style={S.bottomNavIcon}>☰</span>
             <span style={S.bottomNavLabel}>MENU</span>
