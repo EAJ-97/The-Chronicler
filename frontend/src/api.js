@@ -9,14 +9,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401/403, clear stale credentials and reload
+// On 401/403, clear stale credentials and reload — only for requests that sent a JWT (not login/register/recovery).
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401 || err.response?.status === 403) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.reload();
+    const status = err.response?.status;
+    if (status === 401 || status === 403) {
+      const hadAuth = !!(err.config?.headers?.Authorization);
+      if (hadAuth) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.reload();
+      }
     }
     return Promise.reject(err);
   }

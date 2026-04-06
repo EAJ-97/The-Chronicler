@@ -91,6 +91,13 @@ const S = {
     fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
     color: 'rgba(224,112,112,0.7)', transition: 'all 0.2s',
   },
+  /** Opens inline form to set a user password without the current password (admin only). */
+  setPwdBtn: {
+    background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)',
+    borderRadius: '3px', cursor: 'pointer', padding: '4px 10px',
+    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+    color: 'rgba(200,148,58,0.8)', transition: 'all 0.2s', flexShrink: 0,
+  },
   newUserForm: {
     padding: '14px', background: 'rgba(255,255,255,0.02)',
     border: '1px solid rgba(200,148,58,0.15)', borderRadius: '3px',
@@ -128,7 +135,7 @@ const S = {
 };
 
 /**
- * Full-screen admin settings modal: users, vault, demo, AI, database backup, Chronicler JSON import, password.
+ * Full-screen admin settings modal: users (including set-password for any party member), vault, demo, AI, backup, Chronicler JSON import, password.
  * @param {{ id: number, username: string, is_admin?: boolean }} currentUser - Logged-in admin
  * @param {() => void} onClose - Closes the overlay
  * @param {() => void} [onChroniclerImportDone] - Optional; invoked after a successful JSON tree import to refresh the main app’s note list
@@ -175,6 +182,11 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
   const [newPwd, setNewPwd] = useState('');
   const [tab, setTab] = useState('users'); // 'users' | 'vault' | 'demo' | 'password'
   const [updateCheck, setUpdateCheck] = useState(null); // { updateAvailable, currentVersion, latestVersion, latestTag }
+  /** When set, inline form under that user sets a new password via PUT /admin/users/:id/password. */
+  const [editingPwdUserId, setEditingPwdUserId] = useState(null);
+  const [resetPwd, setResetPwd] = useState('');
+  const [resetPwd2, setResetPwd2] = useState('');
+  const [forcePwdNextLogin, setForcePwdNextLogin] = useState(false);
 
   /**
    * Applies a full /admin/ai/settings (or clear-key) JSON payload into React state.
@@ -313,6 +325,35 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
     }
   };
 
+  /**
+   * Sets another user’s password (admin). Optionally forces them to change password on next login.
+   * @param {number} userId
+   */
+  const handleSetUserPassword = async (userId) => {
+    setError(''); setSuccess('');
+    if (!resetPwd || resetPwd.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+    if (resetPwd !== resetPwd2) {
+      setError('Passwords do not match');
+      return;
+    }
+    try {
+      await api.put(`/admin/users/${userId}/password`, {
+        new_password: resetPwd,
+        force_password_change: forcePwdNextLogin,
+      });
+      setSuccess('Password updated.');
+      setEditingPwdUserId(null);
+      setResetPwd('');
+      setResetPwd2('');
+      setForcePwdNextLogin(false);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to set password');
+    }
+  };
+
   return (
     <div style={{ ...S.overlay, padding: isMobile ? 0 : '24px' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={isMobile ? {
@@ -385,22 +426,98 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
               {loading ? (
                 <div style={{ fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.3)', fontSize: '14px' }}>Loading...</div>
               ) : (
-                users.map(u => (
-                  <div key={u.id} style={S.userRow}>
-                    <div style={S.userAvatar(u.is_admin)}>
-                      {u.username[0].toUpperCase()}
+                users.map((u) => (
+                  <div key={u.id}>
+                    <div style={S.userRow}>
+                      <div style={S.userAvatar(u.is_admin)}>
+                        {u.username[0].toUpperCase()}
+                      </div>
+                      <div style={S.userName}>{u.username}</div>
+                      {!!u.is_admin ? <span style={S.adminBadge}>ADMIN</span> : null}
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          style={{
+                            ...S.setPwdBtn,
+                            background: editingPwdUserId === u.id ? 'rgba(200,148,58,0.2)' : S.setPwdBtn.background,
+                          }}
+                          onClick={() => {
+                            if (editingPwdUserId === u.id) {
+                              setEditingPwdUserId(null);
+                              setResetPwd('');
+                              setResetPwd2('');
+                              setForcePwdNextLogin(false);
+                            } else {
+                              setEditingPwdUserId(u.id);
+                              setResetPwd('');
+                              setResetPwd2('');
+                              setForcePwdNextLogin(false);
+                            }
+                          }}
+                        >
+                          {editingPwdUserId === u.id ? 'Cancel' : 'Set password'}
+                        </button>
+                        {u.id !== currentUser.id && (
+                          <button
+                            type="button"
+                            style={S.deleteBtn}
+                            onClick={() => handleDeleteUser(u.id, u.username)}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,32,53,0.3)'; e.currentTarget.style.color = '#e07070'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(139,32,53,0.15)'; e.currentTarget.style.color = 'rgba(224,112,112,0.7)'; }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div style={S.userName}>{u.username}</div>
-                    {!!u.is_admin ? <span style={S.adminBadge}>ADMIN</span> : null}
-                    {u.id !== currentUser.id && (
-                      <button
-                        style={S.deleteBtn}
-                        onClick={() => handleDeleteUser(u.id, u.username)}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(139,32,53,0.3)'; e.currentTarget.style.color = '#e07070'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(139,32,53,0.15)'; e.currentTarget.style.color = 'rgba(224,112,112,0.7)'; }}
+                    {editingPwdUserId === u.id && (
+                      <div style={{
+                        marginBottom: '8px',
+                        padding: '12px 14px',
+                        background: 'rgba(0,0,0,0.22)',
+                        borderRadius: '3px',
+                        border: '1px solid rgba(200,148,58,0.12)',
+                      }}
                       >
-                        Remove
-                      </button>
+                        <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                          NEW PASSWORD FOR {u.username.toUpperCase()}
+                        </div>
+                        <input
+                          style={S.input}
+                          type="password"
+                          placeholder="New password (min 6 characters)"
+                          value={resetPwd}
+                          onChange={(e) => setResetPwd(e.target.value)}
+                          autoComplete="new-password"
+                        />
+                        <input
+                          style={{ ...S.input, marginTop: '8px' }}
+                          type="password"
+                          placeholder="Confirm password"
+                          value={resetPwd2}
+                          onChange={(e) => setResetPwd2(e.target.value)}
+                          autoComplete="new-password"
+                        />
+                        <label style={{
+                          display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', cursor: 'pointer',
+                          fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.55)',
+                        }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={forcePwdNextLogin}
+                            onChange={(e) => setForcePwdNextLogin(e.target.checked)}
+                          />
+                          Force password change on next login
+                        </label>
+                        <button
+                          type="button"
+                          style={{ ...S.createBtn, marginTop: '12px', width: '100%' }}
+                          onClick={() => handleSetUserPassword(u.id)}
+                        >
+                          Save new password
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))

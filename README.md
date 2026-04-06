@@ -89,6 +89,7 @@ This gives you a public HTTPS URL without opening firewall ports.
 | Variable | Default | Description |
 |---|---|---|
 | `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
+| `ADMIN_RECOVERY_TOKEN` | _(unset)_ | Optional. At least 16 characters. Enables **Reset admin password** on the login screen when the admin account is locked out. Never commit this value. |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
 See `.env.example` for the minimal environment template. Session recaps use **Anthropic**; configure the API key in **Admin → AI** (stored in the database).
@@ -243,7 +244,7 @@ Tabs: PARTY · VAULT · DEMO · AI · BACKUP · PASSWORD
 - **DEMO** — generate or wipe demo campaign data
 - **AI** — Anthropic API key for session recaps, test key, enable toggle
 - **BACKUP** — download full database backup (API key stripped); **Chronicler JSON import** (admin-only restore of DM JSON exports)
-- **PASSWORD** — change admin password
+- **PASSWORD** — change your own password; **PARTY** tab also has **Set password** on each user for player resets
 
 ---
 
@@ -415,6 +416,12 @@ docker compose logs --tail=50
 The React build is memory-intensive. Increase VM RAM to 4GB minimum before rebuilding.
 
 ### Lost admin password
+
+1. **Recommended (login UI):** Set `ADMIN_RECOVERY_TOKEN` in the server environment to a long random string (at least 16 characters; e.g. `openssl rand -hex 24`), restart the container, then open the app and use **Admin locked out? → Reset admin password**. Enter the token and a new password. If several admins exist, fill in the **Admin username** field; otherwise the first admin account (lowest id) is updated.
+
+2. **Admin changing a player password:** Sign in as admin → **Admin Panel → PARTY** → **Set password** next to the user.
+
+3. **Fallback (shell):** If recovery is not configured, you can still reset a hash from inside the container:
 ```bash
 docker compose exec dnd-chronicler node -e "
 const db = require('./backend/db/database');

@@ -81,6 +81,30 @@ router.delete('/users/:id', authenticateToken, adminOnly, (req, res) => {
   res.json({ success: true });
 });
 
+/**
+ * PUT /admin/users/:id/password — admin sets another user's password (no current password required).
+ * Body: `{ new_password, force_password_change?: boolean }` — when force_password_change is true, user must change password after login.
+ */
+router.put('/users/:id/password', authenticateToken, adminOnly, async (req, res) => {
+  try {
+    const targetId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(targetId)) return res.status(400).json({ error: 'Invalid user id' });
+    const { new_password, force_password_change = false } = req.body;
+    if (!new_password || String(new_password).length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+    const row = db.prepare('SELECT id, username FROM users WHERE id = ?').get(targetId);
+    if (!row) return res.status(404).json({ error: 'User not found' });
+    const hash = await bcrypt.hash(new_password, 12);
+    const force = force_password_change ? 1 : 0;
+    db.prepare('UPDATE users SET password_hash = ?, force_password_change = ? WHERE id = ?').run(hash, force, targetId);
+    res.json({ success: true, username: row.username });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST toggle registration open/closed
 router.post('/settings/registration', authenticateToken, adminOnly, (req, res) => {
   const { open } = req.body;
