@@ -823,7 +823,7 @@ export default function Dashboard({ user, onLogout }) {
           )}
 
           {view === 'journal' && (
-            <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} />
+            <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} dmCampaignIds={effectiveDmCampaignIds} />
           )}
         </div>
       </div>
