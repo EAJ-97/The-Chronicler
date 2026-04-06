@@ -63,13 +63,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const [serverNow, setServerNow]       = useState(null);
   const [movingSession, setMovingSession] = useState(null);
   const [recapSession, setRecapSession]   = useState(null); // { id, num }
+  /** DM-only prep checklist modal: which session is being edited. */
+  const [prepSession, setPrepSession]       = useState(null); // { id, num } | null
   const [aiEnabled, setAiEnabled]         = useState(false);
   const [recapServerReady, setRecapServerReady] = useState(false);
   const [usageCache, setUsageCache]       = useState({}); // { sessionId: usageObj }
   /** DM-only prep checklist rows from GET /journal `session_checklists` (string session id keys). */
   const [sessionChecklists, setSessionChecklists] = useState({});
-  /** Whether prep checklist panel is expanded per session id. */
-  const [prepExpanded, setPrepExpanded]   = useState({});
   /** Draft text for "add checklist item" per session id. */
   const [prepDrafts, setPrepDrafts]       = useState({});
   const inputRef     = useRef(null);
@@ -135,6 +135,12 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   }, [activeFolderId]);
 
   useEffect(() => { loadEntries(false); }, [loadEntries]);
+
+  /** Close prep modal if its session is no longer in the loaded journal (e.g. campaign switch). */
+  useEffect(() => {
+    if (!prepSession) return;
+    if (!sessions.some((s) => s.id === prepSession.id)) setPrepSession(null);
+  }, [sessions, prepSession]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -300,14 +306,6 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   /**
-   * Toggles the prep checklist accordion for one session header.
-   * @param {number} sessionId
-   */
-  const togglePrepExpanded = (sessionId) => {
-    setPrepExpanded((prev) => ({ ...prev, [sessionId]: !prev[sessionId] }));
-  };
-
-  /**
    * Adds a prep checklist line via POST /journal/sessions/:id/checklist-items; clears draft and reloads journal payload.
    * @param {number} sessionId
    */
@@ -358,7 +356,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
       {recapSession && (
         <RecapViewer
           sessionId={recapSession.id}
@@ -407,6 +405,118 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         </div>
       )}
 
+      {/* Prep checklist modal (DM/admin) */}
+      {prepSession && canPrepForJournal && (
+        <div
+          role="dialog"
+          aria-labelledby="prep-checklist-title"
+          style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setPrepSession(null); }}
+        >
+          <div style={{ background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(440px, calc(100vw - 32px))', maxHeight: 'min(70vh, 520px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
+              <div>
+                <div id="prep-checklist-title" style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>PREP CHECKLIST</div>
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)' }}>
+                  Session {prepSession.num}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrepSession(null)}
+                style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
+                aria-label="Close prep checklist"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, marginBottom: '14px' }}>
+              {(sessionChecklists[String(prepSession.id)] || []).map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '8px 0',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.is_checked}
+                    onChange={() => handlePrepToggleChecked(item)}
+                    style={{ marginTop: '4px', accentColor: '#c8943a', cursor: 'pointer', flexShrink: 0 }}
+                    aria-label="Toggle prep item done"
+                  />
+                  <span
+                    style={{
+                      flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '14px', lineHeight: 1.45,
+                      color: item.is_checked ? 'rgba(226,213,187,0.35)' : 'rgba(226,213,187,0.88)',
+                      textDecoration: item.is_checked ? 'line-through' : 'none', wordBreak: 'break-word',
+                    }}
+                  >
+                    {item.content}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handlePrepDelete(item.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.45)',
+                      fontSize: '16px', padding: '0 6px', flexShrink: 0,
+                    }}
+                    title="Remove item"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {(sessionChecklists[String(prepSession.id)] || []).length === 0 && (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.25)', padding: '8px 0' }}>
+                  No items yet — add tasks below.
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={prepDrafts[prepSession.id] || ''}
+                onChange={(e) => setPrepDrafts((prev) => ({ ...prev, [prepSession.id]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handlePrepAdd(prepSession.id); } }}
+                placeholder="Add prep item…"
+                maxLength={500}
+                style={{
+                  flex: '1 1 160px', minWidth: 0, padding: '10px 12px', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                  color: 'rgba(226,213,187,0.9)', outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => handlePrepAdd(prepSession.id)}
+                style={{
+                  padding: '10px 16px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px',
+                  cursor: 'pointer', color: '#c8943a',
+                }}
+              >
+                ADD
+              </button>
+              {(sessionChecklists[String(prepSession.id)] || []).some((i) => i.is_checked) && (
+                <button
+                  type="button"
+                  onClick={() => handlePrepResetChecks(prepSession.id)}
+                  style={{
+                    padding: '10px 14px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
+                    cursor: 'pointer', color: 'rgba(226,213,187,0.5)',
+                  }}
+                >
+                  UNCHECK ALL
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ padding: isMobile ? '12px 16px' : '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? '8px' : '12px', marginBottom: '6px' }}>
@@ -451,147 +561,69 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             const isFirst = sessionNum === 1;
             return (
               <div key={session.id} style={{ marginBottom: '4px' }}>
-                {/* Session header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '20px 0 4px' }}>
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
-                  <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.25em', color: 'rgba(200,148,58,0.75)' }}>
-                    SESSION {sessionNum}
-                  </span>
-                  {/* Continue Previous Session — merges this session back into the one before */}
-                  {!isFirst && (
-                    <button
-                      onClick={() => handleContinueSession(session.id)}
-                      style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(139,196,58,0.25)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(139,196,58,0.6)' }}
-                      title={`Merge back into Session ${sessionNum - 1}`}
-                    >↩ Continue Session {sessionNum - 1}</button>
-                  )}
-                  {journalCampaignRoots.length > 1 && (
-                    <button
-                      onClick={() => setMovingSession({ sessionId: session.id, sessionNum })}
-                      style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.45)' }}
-                      title="Move this session to another campaign"
-                    >↷ Move</button>
-                  )}
-                  {(() => {
-                    const u = usageCache[session.id];
-                    const hasRecaps = u && (u.used > 0 || !u.can_generate);
-                    const canGen = aiEnabled && u?.can_generate;
-                    const btnColor = canGen ? 'rgba(139,196,226,0.6)' : hasRecaps ? 'rgba(200,148,58,0.5)' : 'rgba(226,213,187,0.2)';
-                    const borderColor = canGen ? 'rgba(139,196,226,0.25)' : hasRecaps ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.07)';
-                    return (
+                {/* Session header — label + actions centered between equal flex lines (stable when Continue is hidden) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '20px 0 4px', width: '100%' }}>
+                  <div style={{ flex: 1, minWidth: 0, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.25em', color: 'rgba(200,148,58,0.75)' }}>
+                      SESSION {sessionNum}
+                    </span>
+                    {!isFirst && (
                       <button
-                        onClick={() => setRecapSession({ id: session.id, num: sessionNum })}
-                        style={{ padding: '2px 8px', background: 'none', border: `1px solid ${borderColor}`, borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: btnColor }}
-                        title={canGen ? 'Generate or view recaps' : hasRecaps ? 'View recaps' : 'Recaps (AI disabled)'}
+                        type="button"
+                        onClick={() => handleContinueSession(session.id)}
+                        style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(139,196,58,0.25)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(139,196,58,0.6)' }}
+                        title={`Merge back into Session ${sessionNum - 1}`}
                       >
-                        ✦ {hasRecaps ? `RECAPS${u?.used > 0 ? ` (${u.used})` : ''}` : 'RECAP'}
+                        ↩ Continue Session {sessionNum - 1}
                       </button>
-                    );
-                  })()}
-                  <div style={{ flex: 1, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
-                </div>
-
-                {canPrepForJournal && (
-                  <div style={{ marginBottom: '12px', paddingLeft: '8px', borderLeft: '2px solid rgba(200,148,58,0.2)' }}>
-                    <button
-                      type="button"
-                      onClick={() => togglePrepExpanded(session.id)}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
-                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.6)',
-                        display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
-                      }}
-                    >
-                      <span>PREP CHECKLIST</span>
-                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '11px', letterSpacing: 0, color: 'rgba(226,213,187,0.25)' }}>
-                        {(sessionChecklists[String(session.id)] || []).length
-                          ? `${(sessionChecklists[String(session.id)] || []).filter((i) => i.is_checked).length}/${(sessionChecklists[String(session.id)] || []).length} done`
-                          : 'empty'}
-                      </span>
-                      <span style={{ marginLeft: 'auto', opacity: 0.5 }}>{prepExpanded[session.id] ? '▲' : '▼'}</span>
-                    </button>
-                    {prepExpanded[session.id] && (
-                      <div style={{ paddingBottom: '8px' }}>
-                        {(sessionChecklists[String(session.id)] || []).map((item) => (
-                          <div
-                            key={item.id}
-                            style={{
-                              display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 0',
-                              borderBottom: '1px solid rgba(255,255,255,0.04)',
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!item.is_checked}
-                              onChange={() => handlePrepToggleChecked(item)}
-                              style={{ marginTop: '4px', accentColor: '#c8943a', cursor: 'pointer', flexShrink: 0 }}
-                              aria-label="Toggle prep item done"
-                            />
-                            <span
-                              style={{
-                                flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '14px', lineHeight: 1.45,
-                                color: item.is_checked ? 'rgba(226,213,187,0.35)' : 'rgba(226,213,187,0.85)',
-                                textDecoration: item.is_checked ? 'line-through' : 'none', wordBreak: 'break-word',
-                              }}
-                            >
-                              {item.content}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handlePrepDelete(item.id)}
-                              style={{
-                                background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.45)',
-                                fontSize: '14px', padding: '2px 6px', flexShrink: 0,
-                              }}
-                              title="Remove item"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px', alignItems: 'center' }}>
-                          <input
-                            type="text"
-                            value={prepDrafts[session.id] || ''}
-                            onChange={(e) => setPrepDrafts((prev) => ({ ...prev, [session.id]: e.target.value }))}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handlePrepAdd(session.id); } }}
-                            placeholder="Add prep item…"
-                            maxLength={500}
-                            style={{
-                              flex: '1 1 180px', minWidth: 0, padding: '8px 10px', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
-                              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px',
-                              color: 'rgba(226,213,187,0.9)', outline: 'none',
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handlePrepAdd(session.id)}
-                            style={{
-                              padding: '8px 14px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
-                              background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px',
-                              cursor: 'pointer', color: '#c8943a',
-                            }}
-                          >
-                            ADD
-                          </button>
-                          {(sessionChecklists[String(session.id)] || []).some((i) => i.is_checked) && (
-                            <button
-                              type="button"
-                              onClick={() => handlePrepResetChecks(session.id)}
-                              style={{
-                                padding: '8px 12px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
-                                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px',
-                                cursor: 'pointer', color: 'rgba(226,213,187,0.45)',
-                              }}
-                            >
-                              UNCHECK ALL
-                            </button>
-                          )}
-                        </div>
-                      </div>
                     )}
+                    {journalCampaignRoots.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setMovingSession({ sessionId: session.id, sessionNum })}
+                        style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.45)' }}
+                        title="Move this session to another campaign"
+                      >
+                        ↷ Move
+                      </button>
+                    )}
+                    {canPrepForJournal && (() => {
+                      const prepItems = sessionChecklists[String(session.id)] || [];
+                      const done = prepItems.filter((i) => i.is_checked).length;
+                      const total = prepItems.length;
+                      const prepTitle = total ? `Prep checklist: ${done}/${total} done` : 'DM prep checklist for this session';
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setPrepSession({ id: session.id, num: sessionNum })}
+                          style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}
+                          title={prepTitle}
+                        >
+                          ✓ Prep{total ? ` ${done}/${total}` : ''}
+                        </button>
+                      );
+                    })()}
+                    {(() => {
+                      const u = usageCache[session.id];
+                      const hasRecaps = u && (u.used > 0 || !u.can_generate);
+                      const canGen = aiEnabled && u?.can_generate;
+                      const btnColor = canGen ? 'rgba(139,196,226,0.6)' : hasRecaps ? 'rgba(200,148,58,0.5)' : 'rgba(226,213,187,0.2)';
+                      const borderColor = canGen ? 'rgba(139,196,226,0.25)' : hasRecaps ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.07)';
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setRecapSession({ id: session.id, num: sessionNum })}
+                          style={{ padding: '2px 8px', background: 'none', border: `1px solid ${borderColor}`, borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: btnColor }}
+                          title={canGen ? 'Generate or view recaps' : hasRecaps ? 'View recaps' : 'Recaps (AI disabled)'}
+                        >
+                          ✦ {hasRecaps ? `RECAPS${u?.used > 0 ? ` (${u.used})` : ''}` : 'RECAP'}
+                        </button>
+                      );
+                    })()}
                   </div>
-                )}
+                  <div style={{ flex: 1, minWidth: 0, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
+                </div>
 
                 {/* Date parts within session */}
                 {parts.map((part, partIdx) => (

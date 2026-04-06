@@ -220,7 +220,7 @@ Admin  >  DM  >  Owner  >  Granted  >  Default
 - Persistent campaign and layout settings
 
 ### Journal
-- **DM prep checklist** (per session) — optional collapsible list: add items, check off, uncheck all; visible only to DMs and admins for that campaign
+- **DM prep checklist** (per session) — **✓ Prep** button in the session header opens a modal to add items, check off, and uncheck all; visible only to DMs and admins for that campaign
 - Session-based entries with multi-user authorship
 - Indent levels for nested discussion/debate
 - Markdown keyboard shortcuts
