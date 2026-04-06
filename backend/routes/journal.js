@@ -1,9 +1,12 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin } = require('../utils/access');
+const { isAdmin, isDMOfFolder } = require('../utils/access');
 
 const router = express.Router();
+
+/** Max characters per prep checklist line item (session_checklist_items.content). */
+const CHECKLIST_CONTENT_MAX = 500;
 
 function canAccessFolder(uid, folderId, admin) {
   if (!folderId || admin) return true;
@@ -14,6 +17,42 @@ function canAccessFolder(uid, folderId, admin) {
   return !!db.prepare('SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?').get(folderId, uid);
 }
 
+/**
+ * Whether the user may view/edit DM prep checklists for this journal folder (campaign root id).
+ * @param {number} uid
+ * @param {number|null} folderId
+ * @param {boolean} admin
+ * @returns {boolean}
+ */
+function canDmPrepChecklist(uid, folderId, admin) {
+  if (!folderId) return false;
+  if (admin) return true;
+  return isDMOfFolder(folderId, uid);
+}
+
+/**
+ * Loads checklist rows for the given session ids, grouped by session_id (string keys for JSON).
+ * @param {number[]} sessionIds
+ * @returns {Record<string, object[]>}
+ */
+function loadSessionChecklistsGrouped(sessionIds) {
+  const out = {};
+  if (!sessionIds.length) return out;
+  const ph = sessionIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT id, session_id, content, is_checked, sort_order, created_by, created_at
+    FROM session_checklist_items
+    WHERE session_id IN (${ph})
+    ORDER BY sort_order ASC, id ASC
+  `).all(...sessionIds);
+  for (const r of rows) {
+    const key = String(r.session_id);
+    if (!out[key]) out[key] = [];
+    out[key].push(r);
+  }
+  return out;
+}
+
 // GET journal entries + sessions for a folder
 router.get('/', authenticateToken, (req, res) => {
   const { folder_id } = req.query;
@@ -21,7 +60,7 @@ router.get('/', authenticateToken, (req, res) => {
   const admin = isAdmin(uid);
   const fid   = folder_id ? parseInt(folder_id) : null;
 
-  if (!canAccessFolder(uid, fid, admin)) return res.json({ sessions: [], entries: [] });
+  if (!canAccessFolder(uid, fid, admin)) return res.json({ sessions: [], entries: [], session_checklists: {} });
 
   const sessions = db.prepare(`
     SELECT * FROM sessions
@@ -38,7 +77,12 @@ router.get('/', authenticateToken, (req, res) => {
     ORDER BY je.sort_order ASC, je.id ASC
   `).all(fid, fid);
 
-  res.json({ sessions, entries });
+  let session_checklists = {};
+  if (canDmPrepChecklist(uid, fid, admin) && sessions.length) {
+    session_checklists = loadSessionChecklistsGrouped(sessions.map(s => s.id));
+  }
+
+  res.json({ sessions, entries, session_checklists });
 });
 
 // POST create a new journal entry
@@ -159,6 +203,149 @@ router.put('/sessions/:id/move', authenticateToken, (req, res) => {
     req.app.broadcast({ type: 'journal_changed', folder_id: oldFid });
     req.app.broadcast({ type: 'journal_changed', folder_id: newFid });
   }
+  res.json({ success: true });
+});
+
+/**
+ * Resolves a session row or sends 404. Used by prep checklist routes.
+ * @param {import('express').Response} res
+ * @param {number} sessionId
+ * @returns {object|null} session row
+ */
+function sessionOr404(res, sessionId) {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) {
+    res.status(404).json({ error: 'Session not found' });
+    return null;
+  }
+  return session;
+}
+
+/**
+ * Ensures the user is admin or DM of the session's campaign folder; otherwise sends 403.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {{ folder_id: number|null }} session
+ * @returns {{ folderId: number }|null}
+ */
+function dmPrepOr403(req, res, session) {
+  const uid = req.user.id;
+  const admin = isAdmin(uid);
+  const fid = session.folder_id;
+  if (fid == null) {
+    res.status(403).json({ error: 'Prep checklist is only available for campaign sessions' });
+    return null;
+  }
+  if (!canDmPrepChecklist(uid, fid, admin)) {
+    res.status(403).json({ error: 'Only the DM or an admin can change the prep checklist' });
+    return null;
+  }
+  return { folderId: fid };
+}
+
+// POST clear all checkmarks for a session's prep checklist (DM/admin). Broadcasts journal_changed.
+router.post('/sessions/:sessionId/checklist-items/reset-checks', authenticateToken, (req, res) => {
+  const sessionId = parseInt(req.params.sessionId, 10);
+  const session = sessionOr404(res, sessionId);
+  if (!session) return;
+  const ctx = dmPrepOr403(req, res, session);
+  if (!ctx) return;
+
+  db.prepare('UPDATE session_checklist_items SET is_checked = 0 WHERE session_id = ?').run(sessionId);
+  if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
+  res.json({ success: true });
+});
+
+// POST add a prep checklist line item (DM/admin). Body: { content }. Broadcasts journal_changed.
+router.post('/sessions/:sessionId/checklist-items', authenticateToken, (req, res) => {
+  const sessionId = parseInt(req.params.sessionId, 10);
+  const session = sessionOr404(res, sessionId);
+  if (!session) return;
+  const ctx = dmPrepOr403(req, res, session);
+  if (!ctx) return;
+
+  const raw = req.body?.content;
+  if (raw == null || typeof raw !== 'string') {
+    return res.status(400).json({ error: 'content is required' });
+  }
+  const content = raw.trim().slice(0, CHECKLIST_CONTENT_MAX);
+  if (!content) return res.status(400).json({ error: 'content cannot be empty' });
+
+  const last = db.prepare(`
+    SELECT sort_order FROM session_checklist_items WHERE session_id = ? ORDER BY sort_order DESC LIMIT 1
+  `).get(sessionId);
+  const sort_order = (last?.sort_order ?? 0) + 1;
+
+  const result = db.prepare(`
+    INSERT INTO session_checklist_items (session_id, content, is_checked, sort_order, created_by)
+    VALUES (?, ?, 0, ?, ?)
+  `).run(sessionId, content, sort_order, req.user.id);
+
+  const row = db.prepare(`
+    SELECT id, session_id, content, is_checked, sort_order, created_by, created_at
+    FROM session_checklist_items WHERE id = ?
+  `).get(result.lastInsertRowid);
+
+  if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
+  res.status(201).json(row);
+});
+
+// PUT update a checklist item (content and/or is_checked). DM/admin. Broadcasts journal_changed.
+router.put('/checklist-items/:itemId', authenticateToken, (req, res) => {
+  const itemId = parseInt(req.params.itemId, 10);
+  const item = db.prepare(`
+    SELECT ci.*, s.folder_id AS session_folder_id
+    FROM session_checklist_items ci
+    JOIN sessions s ON s.id = ci.session_id
+    WHERE ci.id = ?
+  `).get(itemId);
+  if (!item) return res.status(404).json({ error: 'Checklist item not found' });
+
+  const session = { folder_id: item.session_folder_id };
+  const ctx = dmPrepOr403(req, res, session);
+  if (!ctx) return;
+
+  const { content, is_checked } = req.body;
+  let newContent = item.content;
+  if (content !== undefined) {
+    if (typeof content !== 'string') return res.status(400).json({ error: 'content must be a string' });
+    newContent = content.trim().slice(0, CHECKLIST_CONTENT_MAX);
+    if (!newContent) return res.status(400).json({ error: 'content cannot be empty' });
+  }
+  let newChecked = item.is_checked ? 1 : 0;
+  if (is_checked !== undefined) {
+    newChecked = is_checked ? 1 : 0;
+  }
+
+  db.prepare('UPDATE session_checklist_items SET content = ?, is_checked = ? WHERE id = ?')
+    .run(newContent, newChecked, itemId);
+
+  const row = db.prepare(`
+    SELECT id, session_id, content, is_checked, sort_order, created_by, created_at
+    FROM session_checklist_items WHERE id = ?
+  `).get(itemId);
+
+  if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
+  res.json(row);
+});
+
+// DELETE a prep checklist item. DM/admin. Broadcasts journal_changed.
+router.delete('/checklist-items/:itemId', authenticateToken, (req, res) => {
+  const itemId = parseInt(req.params.itemId, 10);
+  const item = db.prepare(`
+    SELECT ci.id, s.folder_id AS session_folder_id
+    FROM session_checklist_items ci
+    JOIN sessions s ON s.id = ci.session_id
+    WHERE ci.id = ?
+  `).get(itemId);
+  if (!item) return res.status(404).json({ error: 'Checklist item not found' });
+
+  const session = { folder_id: item.session_folder_id };
+  const ctx = dmPrepOr403(req, res, session);
+  if (!ctx) return;
+
+  db.prepare('DELETE FROM session_checklist_items WHERE id = ?').run(itemId);
+  if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
   res.json({ success: true });
 });
 

@@ -48,7 +48,7 @@ function groupSessions(sessions, entries, serverNow) {
 
 const INDENT_PX = 24;
 
-export default function Journal({ notes, selectedNoteId, currentUser }) {
+export default function Journal({ notes, selectedNoteId, currentUser, dmCampaignIds = [] }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [sessions, setSessions]         = useState([]);
@@ -66,6 +66,12 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
   const [aiEnabled, setAiEnabled]         = useState(false);
   const [recapServerReady, setRecapServerReady] = useState(false);
   const [usageCache, setUsageCache]       = useState({}); // { sessionId: usageObj }
+  /** DM-only prep checklist rows from GET /journal `session_checklists` (string session id keys). */
+  const [sessionChecklists, setSessionChecklists] = useState({});
+  /** Whether prep checklist panel is expanded per session id. */
+  const [prepExpanded, setPrepExpanded]   = useState({});
+  /** Draft text for "add checklist item" per session id. */
+  const [prepDrafts, setPrepDrafts]       = useState({});
   const inputRef     = useRef(null);
   const bottomRef    = useRef(null);
   const editRef      = useRef(null);
@@ -86,6 +92,13 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
     setActiveFolderIdRaw(id);
     try { if (id) localStorage.setItem(folderKey, String(id)); else localStorage.removeItem(folderKey); } catch {}
   };
+
+  /** True when the user may view/edit DM prep checklists for the selected journal campaign. */
+  const canPrepForJournal = useMemo(() => {
+    if (!activeFolderId) return false;
+    if (currentUser?.is_admin) return true;
+    return (dmCampaignIds || []).includes(activeFolderId);
+  }, [activeFolderId, currentUser?.is_admin, dmCampaignIds]);
 
   useEffect(() => {
     if (journalCampaignRoots.length === 0) return;
@@ -111,6 +124,7 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
         setUsageCache(cache);
       }
       setEntries(res.data.entries || []);
+      setSessionChecklists(res.data.session_checklists && typeof res.data.session_checklists === 'object' ? res.data.session_checklists : {});
       // Load AI status
       try {
         const aiRes = await api.get('/admin/ai/status');
@@ -285,6 +299,61 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
     } catch (err) { console.error(err); }
   };
 
+  /**
+   * Toggles the prep checklist accordion for one session header.
+   * @param {number} sessionId
+   */
+  const togglePrepExpanded = (sessionId) => {
+    setPrepExpanded((prev) => ({ ...prev, [sessionId]: !prev[sessionId] }));
+  };
+
+  /**
+   * Adds a prep checklist line via POST /journal/sessions/:id/checklist-items; clears draft and reloads journal payload.
+   * @param {number} sessionId
+   */
+  const handlePrepAdd = async (sessionId) => {
+    const draft = (prepDrafts[sessionId] || '').trim();
+    if (!draft) return;
+    try {
+      await api.post(`/journal/sessions/${sessionId}/checklist-items`, { content: draft });
+      setPrepDrafts((prev) => ({ ...prev, [sessionId]: '' }));
+      loadEntries(true);
+    } catch (err) { console.error(err); }
+  };
+
+  /**
+   * Flips is_checked for one checklist row (DM/admin).
+   * @param {{ id: number, is_checked?: number }} item
+   */
+  const handlePrepToggleChecked = async (item) => {
+    try {
+      await api.put(`/journal/checklist-items/${item.id}`, { is_checked: !item.is_checked });
+      loadEntries(true);
+    } catch (err) { console.error(err); }
+  };
+
+  /**
+   * Deletes one prep checklist row.
+   * @param {number} itemId
+   */
+  const handlePrepDelete = async (itemId) => {
+    try {
+      await api.delete(`/journal/checklist-items/${itemId}`);
+      loadEntries(true);
+    } catch (err) { console.error(err); }
+  };
+
+  /**
+   * Unchecks all items for a session (prep reset between games).
+   * @param {number} sessionId
+   */
+  const handlePrepResetChecks = async (sessionId) => {
+    try {
+      await api.post(`/journal/sessions/${sessionId}/checklist-items/reset-checks`);
+      loadEntries(true);
+    } catch (err) { console.error(err); }
+  };
+
   const groups = groupSessions(sessions, entries, serverNow);
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
@@ -421,6 +490,108 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
                   })()}
                   <div style={{ flex: 1, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
                 </div>
+
+                {canPrepForJournal && (
+                  <div style={{ marginBottom: '12px', paddingLeft: '8px', borderLeft: '2px solid rgba(200,148,58,0.2)' }}>
+                    <button
+                      type="button"
+                      onClick={() => togglePrepExpanded(session.id)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0',
+                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.6)',
+                        display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
+                      }}
+                    >
+                      <span>PREP CHECKLIST</span>
+                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '11px', letterSpacing: 0, color: 'rgba(226,213,187,0.25)' }}>
+                        {(sessionChecklists[String(session.id)] || []).length
+                          ? `${(sessionChecklists[String(session.id)] || []).filter((i) => i.is_checked).length}/${(sessionChecklists[String(session.id)] || []).length} done`
+                          : 'empty'}
+                      </span>
+                      <span style={{ marginLeft: 'auto', opacity: 0.5 }}>{prepExpanded[session.id] ? '▲' : '▼'}</span>
+                    </button>
+                    {prepExpanded[session.id] && (
+                      <div style={{ paddingBottom: '8px' }}>
+                        {(sessionChecklists[String(session.id)] || []).map((item) => (
+                          <div
+                            key={item.id}
+                            style={{
+                              display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '6px 0',
+                              borderBottom: '1px solid rgba(255,255,255,0.04)',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!item.is_checked}
+                              onChange={() => handlePrepToggleChecked(item)}
+                              style={{ marginTop: '4px', accentColor: '#c8943a', cursor: 'pointer', flexShrink: 0 }}
+                              aria-label="Toggle prep item done"
+                            />
+                            <span
+                              style={{
+                                flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '14px', lineHeight: 1.45,
+                                color: item.is_checked ? 'rgba(226,213,187,0.35)' : 'rgba(226,213,187,0.85)',
+                                textDecoration: item.is_checked ? 'line-through' : 'none', wordBreak: 'break-word',
+                              }}
+                            >
+                              {item.content}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handlePrepDelete(item.id)}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.45)',
+                                fontSize: '14px', padding: '2px 6px', flexShrink: 0,
+                              }}
+                              title="Remove item"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            value={prepDrafts[session.id] || ''}
+                            onChange={(e) => setPrepDrafts((prev) => ({ ...prev, [session.id]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handlePrepAdd(session.id); } }}
+                            placeholder="Add prep item…"
+                            maxLength={500}
+                            style={{
+                              flex: '1 1 180px', minWidth: 0, padding: '8px 10px', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px',
+                              color: 'rgba(226,213,187,0.9)', outline: 'none',
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handlePrepAdd(session.id)}
+                            style={{
+                              padding: '8px 14px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                              background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px',
+                              cursor: 'pointer', color: '#c8943a',
+                            }}
+                          >
+                            ADD
+                          </button>
+                          {(sessionChecklists[String(session.id)] || []).some((i) => i.is_checked) && (
+                            <button
+                              type="button"
+                              onClick={() => handlePrepResetChecks(session.id)}
+                              style={{
+                                padding: '8px 12px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px',
+                                cursor: 'pointer', color: 'rgba(226,213,187,0.45)',
+                              }}
+                            >
+                              UNCHECK ALL
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Date parts within session */}
                 {parts.map((part, partIdx) => (
