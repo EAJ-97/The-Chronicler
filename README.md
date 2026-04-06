@@ -312,6 +312,7 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 
 ### In-app Campaign Snapshots
 - Hover a campaign folder in the sidebar → click 📷
+- Optional **snapshot label** when saving (e.g. “Session 12 wrap”) — shown in the snapshot list and Admin VAULT
 - Saves all notes, folders, tags, and content for that campaign
 - **Non-destructive restore** — notes created after the snapshot are preserved, snapshot content is restored on top
 - DMs and Admins only

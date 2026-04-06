@@ -11,6 +11,8 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
   const [saving, setSaving] = useState(false);
   const [restoring, setRestoring] = useState(null);
   const [error, setError] = useState('');
+  /** Optional label sent with the next POST /snapshots/:folderId (cleared after a successful save). */
+  const [snapshotLabelDraft, setSnapshotLabelDraft] = useState('');
 
   const canManage = !!currentUser.is_admin || (dmCampaignIds || []).includes(folder.id);
 
@@ -43,17 +45,27 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
     setSaving(true);
     setError('');
     try {
-      const res = await api.post(`/snapshots/${folder.id}`);
+      const label = snapshotLabelDraft.trim();
+      const res = await api.post(`/snapshots/${folder.id}`, label ? { label } : {});
       setSnapshots(Array.isArray(res.data.snapshots) ? res.data.snapshots : []);
       setCooldownMs(res.data.cooldown_remaining_ms || 0);
+      setSnapshotLabelDraft('');
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to save snapshot.');
     }
     setSaving(false);
   };
 
-  const handleRestore = async (snapshotId, savedAt) => {
-    if (!window.confirm(`Restore campaign to snapshot from ${new Date(savedAt).toLocaleString()}?\n\nNotes from the snapshot will have their content restored. Notes created after the snapshot will be kept.`)) return;
+  /**
+   * Confirms and POSTs snapshot restore for this campaign. snapshotLabel is optional display text only.
+   * @param {number} snapshotId
+   * @param {string} savedAt - ISO datetime from API
+   * @param {string|null|undefined} snapshotLabel
+   */
+  const handleRestore = async (snapshotId, savedAt, snapshotLabel) => {
+    const when = new Date(savedAt).toLocaleString();
+    const nameLine = snapshotLabel ? `\n\nLabel: "${snapshotLabel}"` : '';
+    if (!window.confirm(`Restore campaign to snapshot from ${when}?${nameLine}\n\nNotes from the snapshot will have their content restored. Notes created after the snapshot will be kept.`)) return;
     setRestoring(snapshotId);
     setError('');
     try {
@@ -124,19 +136,24 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
               {snapshots.map((s, i) => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 14px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '3px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
                       <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.8)' }}>
                         {new Date(s.saved_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                       {i === 0 && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>}
                     </div>
+                    {s.label && (
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(200,148,58,0.85)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
+                        {s.label}
+                      </div>
+                    )}
                     <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)' }}>
                       saved by {s.saved_by}
                     </div>
                   </div>
                   {canManage && (
                     <button
-                      onClick={() => handleRestore(s.id, s.saved_at)}
+                      onClick={() => handleRestore(s.id, s.saved_at, s.label)}
                       disabled={!!restoring}
                       style={{ padding: isMobile ? '10px 16px' : '6px 14px', minHeight: isMobile ? '44px' : 'auto', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
                     >
@@ -151,22 +168,43 @@ export default function SnapshotPanel({ folder, currentUser, dmCampaignIds, onCl
 
         {/* Footer — snapshot button */}
         {canManage && (
-          <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button
-              onClick={handleSnapshot}
-              disabled={saving || cooldownMs > 0}
-              style={{
-                flex: 1, padding: '10px', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
-                background: cooldownMs > 0 ? 'rgba(255,255,255,0.02)' : 'rgba(200,148,58,0.1)',
-                border: `1px solid ${cooldownMs > 0 ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.3)'}`,
-                borderRadius: '3px', cursor: cooldownMs > 0 ? 'default' : 'pointer',
-                color: cooldownMs > 0 ? 'rgba(226,213,187,0.25)' : '#c8943a',
-              }}
-            >
-              {saving ? 'Saving...' : cooldownMs > 0 ? `📷 Cooldown — ${cooldownMins}m remaining` : '📷 Save Snapshot'}
-            </button>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.2)', textAlign: 'right', flexShrink: 0 }}>
-              {snapshots.length}/3 slots used
+          <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div>
+              <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>
+                SNAPSHOT LABEL (OPTIONAL)
+              </label>
+              <input
+                type="text"
+                value={snapshotLabelDraft}
+                onChange={e => setSnapshotLabelDraft(e.target.value)}
+                maxLength={200}
+                placeholder="e.g. Before finale, Session 12 wrap"
+                disabled={saving || cooldownMs > 0}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '10px 12px', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px',
+                  color: 'rgba(226,213,187,0.9)', outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button
+                onClick={handleSnapshot}
+                disabled={saving || cooldownMs > 0}
+                style={{
+                  flex: 1, padding: '10px', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+                  background: cooldownMs > 0 ? 'rgba(255,255,255,0.02)' : 'rgba(200,148,58,0.1)',
+                  border: `1px solid ${cooldownMs > 0 ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.3)'}`,
+                  borderRadius: '3px', cursor: cooldownMs > 0 ? 'default' : 'pointer',
+                  color: cooldownMs > 0 ? 'rgba(226,213,187,0.25)' : '#c8943a',
+                }}
+              >
+                {saving ? 'Saving...' : cooldownMs > 0 ? `📷 Cooldown — ${cooldownMins}m remaining` : '📷 Save Snapshot'}
+              </button>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.2)', textAlign: 'right', flexShrink: 0 }}>
+                {snapshots.length}/3 slots used
+              </div>
             </div>
           </div>
         )}

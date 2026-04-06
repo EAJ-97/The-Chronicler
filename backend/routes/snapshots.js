@@ -7,6 +7,19 @@ const router = express.Router();
 
 const SNAPSHOT_LIMIT = 3;
 const COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+/** Max length for optional human-readable snapshot labels (stored in folder_snapshots.label). */
+const SNAPSHOT_LABEL_MAX = 200;
+
+/**
+ * Trims and caps snapshot label from JSON body; returns null when missing or blank after trim.
+ * @param {unknown} raw - Typically req.body.label
+ * @returns {string|null} Stored value or null (SQLite column)
+ */
+function normalizeSnapshotLabel(raw) {
+  if (raw == null || typeof raw !== 'string') return null;
+  const t = raw.trim().slice(0, SNAPSHOT_LABEL_MAX);
+  return t.length ? t : null;
+}
 
 function canManageFolder(folderId, userId) {
   return isAdmin(userId) || isDMOfFolder(folderId, userId);
@@ -53,7 +66,7 @@ router.get('/', authenticateToken, (req, res) => {
 
   const result = campaigns.map(c => {
     const snapshots = db.prepare(`
-      SELECT fs.id, fs.saved_at, fs.snapshot_json, u.username AS saved_by
+      SELECT fs.id, fs.saved_at, fs.snapshot_json, fs.label, u.username AS saved_by
       FROM folder_snapshots fs JOIN users u ON fs.saved_by = u.id
       WHERE fs.folder_id = ? ORDER BY fs.saved_at DESC
     `).all(c.id);
@@ -71,7 +84,13 @@ router.get('/', authenticateToken, (req, res) => {
           const parsed = JSON.parse(s.snapshot_json);
           note_count = Array.isArray(parsed.notes) ? parsed.notes.length : 0;
         } catch (e) {}
-        return { id: s.id, saved_at: s.saved_at, saved_by: s.saved_by, note_count };
+        return {
+          id: s.id,
+          saved_at: s.saved_at,
+          saved_by: s.saved_by,
+          note_count,
+          label: s.label || null,
+        };
       }),
       cooldown_remaining_ms: cooldownMs,
     };
@@ -87,7 +106,7 @@ router.get('/:folderId', authenticateToken, (req, res) => {
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
   const snapshots = db.prepare(`
-    SELECT fs.id, fs.folder_id, fs.saved_at, u.username AS saved_by
+    SELECT fs.id, fs.folder_id, fs.saved_at, fs.label, u.username AS saved_by
     FROM folder_snapshots fs JOIN users u ON fs.saved_by = u.id
     WHERE fs.folder_id = ? ORDER BY fs.saved_at DESC
   `).all(folderId);
@@ -111,6 +130,8 @@ router.post('/:folderId', authenticateToken, (req, res) => {
   const folder = db.prepare('SELECT * FROM notes WHERE id = ? AND is_folder = 1').get(folderId);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
 
+  const label = normalizeSnapshotLabel(req.body?.label);
+
   // Enforce cooldown (admins are exempt)
   const latest = db.prepare('SELECT saved_at FROM folder_snapshots WHERE folder_id = ? ORDER BY saved_at DESC LIMIT 1').get(folderId);
   if (latest && !isAdmin(req.user.id)) {
@@ -131,8 +152,8 @@ router.post('/:folderId', authenticateToken, (req, res) => {
     notes: collectSubtree(folderId),
   };
 
-  db.prepare('INSERT INTO folder_snapshots (folder_id, saved_by, snapshot_json) VALUES (?, ?, ?)')
-    .run(folderId, req.user.id, JSON.stringify(snapshot));
+  db.prepare('INSERT INTO folder_snapshots (folder_id, saved_by, snapshot_json, label) VALUES (?, ?, ?, ?)')
+    .run(folderId, req.user.id, JSON.stringify(snapshot), label);
 
   // Purge oldest beyond limit
   const all = db.prepare('SELECT id FROM folder_snapshots WHERE folder_id = ? ORDER BY saved_at DESC').all(folderId);
@@ -141,7 +162,7 @@ router.post('/:folderId', authenticateToken, (req, res) => {
   }
 
   const snapshots = db.prepare(`
-    SELECT fs.id, fs.folder_id, fs.saved_at, u.username AS saved_by
+    SELECT fs.id, fs.folder_id, fs.saved_at, fs.label, u.username AS saved_by
     FROM folder_snapshots fs JOIN users u ON fs.saved_by = u.id
     WHERE fs.folder_id = ? ORDER BY fs.saved_at DESC
   `).all(folderId);
@@ -230,6 +251,7 @@ router.get('/:folderId/inspect/:snapshotId', authenticateToken, (req, res) => {
   const data = JSON.parse(snap.snapshot_json);
   res.json({
     saved_at: snap.saved_at,
+    label: snap.label || null,
     root_folder: data.folder?.title,
     note_count: data.notes?.length,
     notes: data.notes?.map(n => ({ id: n.id, title: n.title, parent_id: n.parent_id, is_folder: n.is_folder })),

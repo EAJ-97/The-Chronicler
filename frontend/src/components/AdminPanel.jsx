@@ -216,8 +216,12 @@ export default function AdminPanel({ currentUser, onClose }) {
 
   useEffect(() => { loadData(); loadVault(); }, []);
 
-  const handleRestore = async (folderId, snapshotId, savedAt, campaignTitle) => {
-    if (!window.confirm(`Restore "${campaignTitle}" to snapshot from ${new Date(savedAt).toLocaleString()}?\n\nExisting notes will be restored. Notes created after the snapshot will be kept.`)) return;
+  /**
+   * Restores a campaign folder to a saved snapshot (admin vault). snapshotLabel is optional UI text only.
+   */
+  const handleRestore = async (folderId, snapshotId, savedAt, campaignTitle, snapshotLabel) => {
+    const labelLine = snapshotLabel ? `\n\nLabel: "${snapshotLabel}"` : '';
+    if (!window.confirm(`Restore "${campaignTitle}" to snapshot from ${new Date(savedAt).toLocaleString()}?${labelLine}\n\nExisting notes will be restored. Notes created after the snapshot will be kept.`)) return;
     setRestoring(snapshotId);
     setError('');
     try {
@@ -706,13 +710,18 @@ export default function AdminPanel({ currentUser, onClose }) {
                                       <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>
                                     )}
                                   </div>
+                                  {s.label && (
+                                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(200,148,58,0.85)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
+                                      {s.label}
+                                    </div>
+                                  )}
                                   <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.25)', display: 'flex', gap: '12px' }}>
                                     <span>by {s.saved_by}</span>
                                     <span>{s.note_count} note{s.note_count !== 1 ? 's' : ''} captured</span>
                                   </div>
                                 </div>
                                 <button
-                                  onClick={() => handleRestore(campaign.id, s.id, s.saved_at, campaign.title)}
+                                  onClick={() => handleRestore(campaign.id, s.id, s.saved_at, campaign.title, s.label)}
                                   disabled={!!restoring}
                                   style={{ padding: '6px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
                                   onMouseEnter={e => { if (!restoring) e.currentTarget.style.background = 'rgba(200,148,58,0.15)'; }}
