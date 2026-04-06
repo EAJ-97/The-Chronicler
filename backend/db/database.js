@@ -98,6 +98,8 @@ db.exec(`
     status             TEXT     DEFAULT NULL,
     is_world           INTEGER  DEFAULT 0,
     source_note_id     INTEGER  DEFAULT NULL,
+    display_icon       TEXT     DEFAULT NULL,
+    display_summary    TEXT     DEFAULT NULL,
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -448,6 +450,10 @@ migrate('031_notes_is_world', () => { try { db.exec("ALTER TABLE notes ADD COLUM
 
 // Phase 3 — Override Source: points campaign notes that override world-layer notes back to the original
 migrate('032_notes_source_note_id', () => { try { db.exec("ALTER TABLE notes ADD COLUMN source_note_id INTEGER DEFAULT NULL"); } catch {} });
+
+// Sidebar / tree: optional emoji icon + short blurb (folders: world / campaign / subfolder styling; notes: scroll-style defaults)
+migrate('033_notes_display_icon', () => { try { db.exec("ALTER TABLE notes ADD COLUMN display_icon TEXT DEFAULT NULL"); } catch {} });
+migrate('034_notes_display_summary', () => { try { db.exec("ALTER TABLE notes ADD COLUMN display_summary TEXT DEFAULT NULL"); } catch {} });
 
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();

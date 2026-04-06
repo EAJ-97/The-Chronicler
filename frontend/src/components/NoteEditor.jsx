@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
+import { notesByIdMap } from '../utils/campaignTree.js';
+import { getFolderTreeKind, iconChoicesForFolderKind, NOTE_ICONS } from '../utils/displayIcons.js';
 
 const CATEGORIES = [
   { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
@@ -168,6 +170,9 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const [cascadeChildren, setCascadeChildren] = useState(false);
   // DM Only flag
   const [isDmOnly, setIsDmOnly] = useState(!!note?.is_dm_only);
+  /** Optional emoji + short blurb for sidebar tree (saved to display_icon / display_summary) */
+  const [displayIcon, setDisplayIcon] = useState(note?.display_icon || '');
+  const [displaySummary, setDisplaySummary] = useState(note?.display_summary || '');
   // Campaign member management (root folder only)
   const [addMemberSearch, setAddMemberSearch] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
@@ -209,6 +214,12 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const canManage   = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isDM); // rename, delete, move, perms
   const canAppend   = isDM && !isOwner && !isGranted && !isAdminUser; // DM on someone else's note
   const canEdit     = canFullEdit; // kept for backward compat with existing refs
+  /** Folders: icon + description when user can manage or fully edit the folder */
+  const canFolderStyle = !!(note?.is_folder && (canManage || canFullEdit));
+  const folderTreeKind = useMemo(() => {
+    if (!note?.is_folder) return 'note';
+    return getFolderTreeKind(note, notesByIdMap(notes || []));
+  }, [note, notes]);
   const autoSaveTimer = useRef(null);
   const [appendContent, setAppendContent] = useState('');
   const [appendSaving, setAppendSaving] = useState(false);
@@ -216,6 +227,8 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   // Refs for beforeunload (need current values without stale closures)
   const titleRef = useRef(title);
   const contentRef = useRef(content);
+  const displayIconRef = useRef(displayIcon);
+  const displaySummaryRef = useRef(displaySummary);
   const categoryRef = useRef(category);
   const significanceRef = useRef(significance);
   const narrativeWeightRef = useRef(narrativeWeight);
@@ -223,6 +236,8 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   const noteIdRef = useRef(note?.id);
   titleRef.current = title;
   contentRef.current = content;
+  displayIconRef.current = displayIcon;
+  displaySummaryRef.current = displaySummary;
   categoryRef.current = category;
   significanceRef.current = significance;
   narrativeWeightRef.current = narrativeWeight;
@@ -250,6 +265,8 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     setGrantedUsers(note?.granted_users || []);
     setTags(note?.tags || []);
     setIsDmOnly(!!note?.is_dm_only);
+    setDisplayIcon(note?.display_icon || '');
+    setDisplaySummary(note?.display_summary || '');
     setTagInput('');
     setDirty(false);
     setSavedAt(null);
@@ -361,6 +378,8 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
       category: categoryRef.current,
       significance: significanceRef.current,
       narrative_weight: narrativeWeightRef.current,
+      display_icon: displayIconRef.current === '' ? null : displayIconRef.current,
+      display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
       client_updated_at: serverUpdatedAt.current,
       ...overrides,
     };
@@ -806,7 +825,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
               </button>
               <button
                 style={{ ...S.saveBtn(false), marginLeft: 0, color: 'rgba(224,112,112,0.75)', borderColor: 'rgba(224,112,112,0.3)', flexShrink: 0, ...(isMobile ? { minHeight: '40px', padding: '8px 16px' } : {}) }}
-                onClick={() => onDelete(note.id, note.title, false)}
+                onClick={() => onDelete(note.id, note.title, !!note?.is_folder)}
                 title="Delete this note"
               >
                 Delete
@@ -867,6 +886,47 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
             <option value="node">● Node</option>
             <option value="detail">○ Detail</option>
           </select>}
+
+          {/* Note icon — scroll / parchment presets (optional; sidebar default follows category if unset) */}
+          {!note?.is_folder && canEdit && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }} title="Sidebar icon">
+              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDisplayIcon('');
+                  try {
+                    const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: null, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                    serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                    if (onSave) onSave(res.data);
+                  } catch (e) { console.error(e); }
+                }}
+                style={{
+                  width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: 'pointer',
+                  border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.45)' : 'rgba(255,255,255,0.08)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent',
+                }}
+                title="Default (category icon)"
+              >◌</button>
+              {NOTE_ICONS.map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  onClick={async () => {
+                    setDisplayIcon(ic);
+                    try {
+                      const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: ic, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                      if (onSave) onSave(res.data);
+                    } catch (e) { console.error(e); }
+                  }}
+                  style={{
+                    width: '28px', height: '28px', fontSize: '15px', borderRadius: '4px', cursor: 'pointer',
+                    border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`, background: displayIcon === ic ? 'rgba(200,148,58,0.15)' : 'transparent',
+                  }}
+                >{ic}</button>
+              ))}
+            </div>
+          )}
 
           {/* DM Only badge — visible in toolbar when flag is set */}
           {isDmOnly && (
@@ -936,6 +996,83 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
           )}
 
         </div>
+
+        {/* Folder appearance: icon palette by world / campaign / subfolder + sidebar blurb */}
+        {canFolderStyle && (
+          <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
+            <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
+              Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  setDisplayIcon('');
+                  try {
+                    const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: null, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                    serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                    if (onSave) onSave(res.data);
+                  } catch (e) { console.error(e); }
+                }}
+                style={{
+                  minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'Cinzel',
+                  border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent', color: 'rgba(226,213,187,0.5)',
+                }}
+                title="Automatic default for this folder type"
+              >AUTO</button>
+              {iconChoicesForFolderKind(folderTreeKind).map((ic) => (
+                <button
+                  key={ic}
+                  type="button"
+                  onClick={async () => {
+                    setDisplayIcon(ic);
+                    try {
+                      const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: ic, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                      if (onSave) onSave(res.data);
+                    } catch (e) { console.error(e); }
+                  }}
+                  style={{
+                    width: '40px', height: '40px', fontSize: '20px', borderRadius: '6px', cursor: 'pointer',
+                    border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`, background: displayIcon === ic ? 'rgba(200,148,58,0.18)' : 'rgba(255,255,255,0.02)',
+                  }}
+                >{ic}</button>
+              ))}
+            </div>
+            <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+            <textarea
+              value={displaySummary}
+              onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
+              placeholder="One or two lines shown in the sidebar tooltip (optional)…"
+              disabled={!canEdit}
+              rows={3}
+              style={{
+                width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Optional sidebar blurb for notes (same column as folders; icon row is in toolbar) */}
+        {!note?.is_folder && canEdit && (
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+            <textarea
+              value={displaySummary}
+              onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
+              placeholder="Optional — appears under the title when hovering in the note list…"
+              rows={2}
+              style={{
+                width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '8px 12px', outline: 'none',
+              }}
+            />
+          </div>
+        )}
       </div>
 
       <div style={S.body}>

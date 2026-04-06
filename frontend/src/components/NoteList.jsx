@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { getCategoryColor } from './NoteEditor.jsx';
 import api from '../api.js';
 import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
+import { resolveSidebarIcon } from '../utils/displayIcons.js';
 
 function buildTree(notes) {
   const map = {};
@@ -159,12 +160,13 @@ function TreeNode({
           <span style={{ width: '10px', flexShrink: 0 }} />
         )}
 
-        {/* Icon */}
-        {isFolder ? (
-          <span style={{ fontSize: '12px', flexShrink: 0 }}>{isExpanded ? '📂' : '📁'}</span>
-        ) : (
-          <span style={{ width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0, background: getCategoryColor(node.category) }} />
-        )}
+        {/* Icon — custom display_icon or defaults by world / campaign / note category */}
+        <span
+          style={{ fontSize: isFolder ? '13px' : '14px', flexShrink: 0, lineHeight: 1, width: isFolder ? undefined : '22px', textAlign: 'center' }}
+          title={node.display_summary ? `${node.title}\n${node.display_summary}` : undefined}
+        >
+          {resolveSidebarIcon(node, allNotes || [])}
+        </span>
 
         {/* Title */}
         {renaming ? (
@@ -209,14 +211,19 @@ function TreeNode({
               <div style={{
                 position: 'fixed', left: tooltip.x, top: tooltip.y, zIndex: 999,
                 background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)',
-                borderRadius: '3px', padding: '4px 10px', pointerEvents: 'none',
+                borderRadius: '3px', padding: '6px 12px', pointerEvents: 'none',
                 fontFamily: isFolder ? 'Cinzel' : 'Crimson Pro, serif',
                 fontSize: isFolder ? '11px' : '14px',
                 color: isFolder ? 'rgba(226,213,187,0.9)' : '#e2d5bb',
                 boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
-                whiteSpace: 'nowrap', maxWidth: '320px',
+                maxWidth: 'min(320px, 90vw)',
               }}>
-                {node.title}
+                <div style={{ fontWeight: 600, marginBottom: node.display_summary ? '4px' : 0 }}>{node.title}</div>
+                {node.display_summary ? (
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.55)', whiteSpace: 'normal', lineHeight: 1.35 }}>
+                    {node.display_summary}
+                  </div>
+                ) : null}
               </div>
             )}
             {!!node.is_shared && !isFolder && (

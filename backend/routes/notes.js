@@ -51,7 +51,8 @@ router.get('/', authenticateToken, (req, res) => {
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
-    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id, u.username AS author`;
+    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id,
+    n.display_icon, n.display_summary, u.username AS author`;
 
   let notes;
   if (listingAdminAll) {
@@ -545,7 +546,7 @@ router.put('/:id', authenticateToken, (req, res) => {
     }
   }
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary } = req.body;
 
   // Conflict detection — only for content/title edits, not structural ops
   if (client_updated_at && (content !== undefined || (title !== undefined && title !== note.title))) {
@@ -604,6 +605,8 @@ router.put('/:id', authenticateToken, (req, res) => {
   }
 
   const canChangePerms = admin || isOwner || isDM;
+  // Cosmetic fields: anyone who can manage the row or fully edit content
+  const canStyle = canManage || canFullEdit;
 
   const newVisibility = visibility !== undefined ? visibility
     : is_shared !== undefined ? (is_shared ? 'shared' : 'hidden')
@@ -750,6 +753,23 @@ router.put('/:id', authenticateToken, (req, res) => {
       }
     });
     cascadeDown(parseInt(req.params.id));
+  }
+
+  // Optional tree icon (emoji) and short sidebar description
+  if (canStyle && (display_icon !== undefined || display_summary !== undefined)) {
+    const nextIcon = display_icon !== undefined
+      ? (display_icon === null || display_icon === ''
+        ? null
+        : String(display_icon).slice(0, 32))
+      : note.display_icon;
+    const nextSummary = display_summary !== undefined
+      ? (display_summary === null || display_summary === ''
+        ? null
+        : String(display_summary).slice(0, 2000))
+      : note.display_summary;
+    db.prepare(
+      'UPDATE notes SET display_icon = ?, display_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(nextIcon, nextSummary, req.params.id);
   }
 
   const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
