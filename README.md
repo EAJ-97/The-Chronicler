@@ -242,7 +242,7 @@ Tabs: PARTY · VAULT · DEMO · AI · BACKUP · PASSWORD
 - **VAULT** — browse and restore campaign snapshots
 - **DEMO** — generate or wipe demo campaign data
 - **AI** — Anthropic API key for session recaps, test key, enable toggle
-- **BACKUP** — download full database backup (API key stripped)
+- **BACKUP** — download full database backup (API key stripped); **Chronicler JSON import** (admin-only restore of DM JSON exports)
 - **PASSWORD** — change admin password
 
 ---
@@ -312,6 +312,14 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 
 ## Backups & Snapshots
 
+### DM export (💾) — JSON + HTML
+On a **world** root, **standalone campaign** root, or **campaign under a world** (sidebar row), hover → click **💾**. Your browser downloads **two** files:
+
+1. **`chronicler-export-….json`** — Pretty-printed archive (`chronicler_export_version: 1`): notes, tags, permissions, connections, journal sessions/entries, recaps, attendance, checklist items, image metadata. **Give this file to an admin** for re-import (**Admin → BACKUP → Chronicler JSON import**). Opening the `.json` in VS Code or in a browser tab only shows raw text — that is normal.
+2. **`chronicler-viewer-….html`** — **Self-contained read-only snapshot** of the same data. **Double-click** this file (or open it via **File → Open** in your browser). It does not talk to your Chronicler server; everything is embedded in the file. Use **Notes**, **Journal**, and **Recaps** tabs. Markdown uses CDN scripts (jsDelivr) when you’re online; offline, bodies fall back to plain text.
+
+**User images:** filenames are in the export; copy binaries from the old server’s `data/images` if you need gallery thumbnails after admin import.
+
 ### In-app Campaign Snapshots
 - Hover a campaign folder in the sidebar → click 📷
 - Optional **snapshot label** when saving (e.g. “Session 12 wrap”) — shown in the snapshot list and Admin VAULT
@@ -327,6 +335,10 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 - Full SQLite `.db` file with API key stripped
 - Openable with [DB Browser for SQLite](https://sqlitebrowser.org/)
 - Shows current DB size and last modified time
+
+### Chronicler JSON import (admin)
+- **Admin Panel → BACKUP** — choose a DM-exported `.json`, optional **parent folder id** (empty = new top-level tree)
+- Every username referenced in the file must already exist on this server (matched case-insensitively)
 
 ### Automated VM Backups (recommended cron setup)
 Add to `crontab -e` on your host:

@@ -51,7 +51,7 @@ const INDENT = 16;
 function TreeNode({
   node, depth, selectedId, onSelect, onCreateNote, onCreateFolder,
   onDelete, expandedIds, onToggleExpand, currentUser, onRename,
-  draggedId, onDragStart, onDragEnd, onDrop, dropTargetId, onSnapshot, onSync,
+  draggedId, onDragStart, onDragEnd, onDrop, dropTargetId, onSnapshot, onExport, onSync,
   allNotes, dmCampaignIds, simulatedRole, isMobile,
 }) {
   const [hovered, setHovered] = useState(false);
@@ -85,6 +85,12 @@ function TreeNode({
   })();
 
   const isRootFolder = isFolder && depth === 0;
+  /** World root or standalone campaign root or a campaign folder whose parent is a world (export root). */
+  const parentNote = node.parent_id && allNotes ? allNotes.find((n) => n.id === node.parent_id) : null;
+  const isExportRootFolder = isFolder && (!node.parent_id || !!parentNote?.is_world);
+  const canExportBackup =
+    isExportRootFolder &&
+    (isAdmin || (dmCampaignIds && dmCampaignIds.includes(node.id)));
   const canManage = isRootFolder ? (isAdmin || isDM) : (isAdmin || isOwner || isDM);
   const indent = depth * INDENT + 10;
 
@@ -263,10 +269,13 @@ function TreeNode({
           </span>
         )}
 
-        {(hovered || (isMobile && isSelected)) && canManage && !renaming && (
+        {(hovered || (isMobile && isSelected)) && !renaming && (
           <span style={{ display: 'flex', gap: isMobile ? '6px' : '2px', flexShrink: 0 }}>
-            {isFolder && depth === 0 && (
+            {isFolder && depth === 0 && canManage && (
               <span title="Campaign snapshot" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSnapshot(node.id); }}>📷</span>
+            )}
+            {canExportBackup && onExport && (
+              <span title="Downloads JSON (admin import) + HTML (double-click to browse read-only)" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onExport(node.id, node.title); }}>💾</span>
             )}
             {isFolder && canManage && (
               <span title="Sync visibility to all children" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSync(node.id, node.title); }}>⟳</span>
@@ -285,7 +294,7 @@ function TreeNode({
           onDelete={onDelete} expandedIds={expandedIds} onToggleExpand={onToggleExpand}
           currentUser={currentUser} onRename={onRename}
           draggedId={draggedId} onDragStart={onDragStart} onDragEnd={onDragEnd}
-          onDrop={onDrop} dropTargetId={dropTargetId} onSnapshot={onSnapshot} onSync={onSync}
+          onDrop={onDrop} dropTargetId={dropTargetId} onSnapshot={onSnapshot} onExport={onExport} onSync={onSync}
           allNotes={allNotes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
           isMobile={isMobile}
         />
@@ -308,7 +317,7 @@ const mobileActionBtn = {
   WebkitUserSelect: 'none', userSelect: 'none',
 };
 
-export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCreateNote, onCreateFolder, onOpenCampaignModal, onDelete, onRename, onMove, onSnapshot, onSync, currentUser, dmCampaignIds, simulatedRole, collapsed, onToggleCollapse, isMobile }) {
+export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCreateNote, onCreateFolder, onOpenCampaignModal, onDelete, onRename, onMove, onSnapshot, onExport, onSync, currentUser, dmCampaignIds, simulatedRole, collapsed, onToggleCollapse, isMobile }) {
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
@@ -537,6 +546,7 @@ export default function NoteList({ notes, selectedId, onSelect, onDeselect, onCr
                 draggedId={draggedId} onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd} onDrop={handleDrop} dropTargetId={dropTargetId}
                 onSnapshot={onSnapshot}
+                onExport={onExport}
                 onSync={onSync}
                 allNotes={notes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
                 isMobile={isMobile}

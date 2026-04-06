@@ -127,7 +127,13 @@ const S = {
   },
 };
 
-export default function AdminPanel({ currentUser, onClose }) {
+/**
+ * Full-screen admin settings modal: users, vault, demo, AI, database backup, Chronicler JSON import, password.
+ * @param {{ id: number, username: string, is_admin?: boolean }} currentUser - Logged-in admin
+ * @param {() => void} onClose - Closes the overlay
+ * @param {() => void} [onChroniclerImportDone] - Optional; invoked after a successful JSON tree import to refresh the main app’s note list
+ */
+export default function AdminPanel({ currentUser, onClose, onChroniclerImportDone }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [users, setUsers] = useState([]);
@@ -149,6 +155,10 @@ export default function AdminPanel({ currentUser, onClose }) {
   const [backupInfo, setBackupInfo]       = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupError, setBackupError]     = useState('');
+  const [jsonImportBusy, setJsonImportBusy] = useState(false);
+  const [jsonImportMsg, setJsonImportMsg]   = useState('');
+  const [jsonImportErr, setJsonImportErr]   = useState('');
+  const [jsonImportParentId, setJsonImportParentId] = useState('');
   // AI settings
   const [aiEnabled, setAiEnabled]       = useState(false);
   const [aiKeySet, setAiKeySet]         = useState(false);
@@ -625,6 +635,77 @@ export default function AdminPanel({ currentUser, onClose }) {
                 style={{ padding: '10px 22px', background: backupLoading ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(200,148,58,0.25), rgba(200,148,58,0.1))', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '3px', cursor: backupLoading ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: backupLoading ? 'rgba(226,213,187,0.3)' : '#c8943a' }}>
                 {backupLoading ? '⏳ PREPARING...' : '⬇ DOWNLOAD BACKUP'}
               </button>
+
+              <div style={{ marginTop: '28px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={S.sectionTitle}>Chronicler JSON import</div>
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: '1.6', marginBottom: '14px' }}>
+                  Restore a <strong style={{ color: 'rgba(226,213,187,0.65)' }}>.json</strong> file exported by a DM from a world or campaign root. Usernames in the file must exist on this server (case-insensitive match). Uploaded note images are metadata only — copy image files from the old server’s data folder if you need binaries. Leave parent folder empty to create a new top-level root.
+                </div>
+                {jsonImportErr && (
+                  <div style={{ padding: '8px 12px', borderRadius: '3px', marginBottom: '12px', background: 'rgba(200,80,80,0.08)', border: '1px solid rgba(200,80,80,0.25)', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(220,100,100,0.9)' }}>
+                    {jsonImportErr}
+                  </div>
+                )}
+                {jsonImportMsg && (
+                  <div style={{ padding: '8px 12px', borderRadius: '3px', marginBottom: '12px', background: 'rgba(110,219,176,0.08)', border: '1px solid rgba(110,219,176,0.25)', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(110,219,176,0.95)' }}>
+                    {jsonImportMsg}
+                  </div>
+                )}
+                <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>EXPORT FILE (.JSON)</label>
+                <input
+                  id="chronicler-json-import"
+                  type="file"
+                  accept=".json,application/json"
+                  disabled={jsonImportBusy}
+                  style={{ width: '100%', marginBottom: '12px', fontSize: '13px', color: 'rgba(226,213,187,0.6)' }}
+                />
+                <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>PARENT FOLDER ID (OPTIONAL)</label>
+                <input
+                  style={{ ...S.input, marginBottom: '12px' }}
+                  placeholder="Empty = new top-level tree"
+                  value={jsonImportParentId}
+                  onChange={(e) => setJsonImportParentId(e.target.value)}
+                  disabled={jsonImportBusy}
+                />
+                <button
+                  type="button"
+                  disabled={jsonImportBusy}
+                  onClick={async () => {
+                    const el = document.getElementById('chronicler-json-import');
+                    const file = el?.files?.[0];
+                    if (!file) {
+                      setJsonImportErr('Choose a JSON file first.');
+                      setJsonImportMsg('');
+                      return;
+                    }
+                    setJsonImportBusy(true);
+                    setJsonImportErr('');
+                    setJsonImportMsg('');
+                    try {
+                      const fd = new FormData();
+                      fd.append('file', file);
+                      const p = String(jsonImportParentId || '').trim();
+                      if (p) fd.append('parent_id', p);
+                      const res = await api.post('/admin/backup/import-json', fd);
+                      const id = res.data?.new_root_id;
+                      const c = res.data?.counts;
+                      setJsonImportMsg(
+                        `Imported. New root note id: ${id}. Notes: ${c?.notes ?? '—'}, sessions: ${c?.sessions ?? '—'}, connections: ${c?.connections ?? '—'}.`
+                      );
+                      if (typeof onChroniclerImportDone === 'function') onChroniclerImportDone();
+                      try { el.value = ''; } catch { /* ignore */ }
+                    } catch (e) {
+                      const msg = e.response?.data?.error || e.message || 'Import failed';
+                      setJsonImportErr(msg);
+                    } finally {
+                      setJsonImportBusy(false);
+                    }
+                  }}
+                  style={{ padding: '10px 22px', background: jsonImportBusy ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(110,180,140,0.2), rgba(110,180,140,0.08))', border: '1px solid rgba(110,180,140,0.35)', borderRadius: '3px', cursor: jsonImportBusy ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: jsonImportBusy ? 'rgba(226,213,187,0.3)' : 'rgba(110,219,176,0.9)' }}
+                >
+                  {jsonImportBusy ? '⏳ IMPORTING…' : '⬆ IMPORT JSON TREE'}
+                </button>
+              </div>
 
               <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>WHAT IS INCLUDED</div>

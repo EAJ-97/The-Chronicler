@@ -414,6 +414,20 @@ export default function Dashboard({ user, onLogout }) {
     } catch (err) { console.error(err); }
   };
 
+  /**
+   * Triggers a browser download from a blob response (Content-Disposition filename used when present).
+   * @param {Blob} blob
+   * @param {string} [fallbackName]
+   */
+  const triggerBlobDownload = (blob, fallbackName) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fallbackName || 'download';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Shared NoteList props (used both in desktop sidebar and mobile drawer)
   const noteListProps = {
     notes,
@@ -435,6 +449,54 @@ export default function Dashboard({ user, onLogout }) {
     onRename: handleRenameNote,
     onMove: handleMoveNote,
     onSnapshot: (folderId) => setSnapshotFolder(notes.find(n => n.id === folderId)),
+    onExport: async (folderId, folderTitle) => {
+      try {
+        const parseFilename = (disp, fb) => {
+          const m = String(disp || '').match(/filename="?([^";]+)"?/i);
+          return m ? m[1].trim() : fb;
+        };
+        const readError = async (blob) => {
+          try {
+            const t = await blob.text();
+            const j = JSON.parse(t);
+            return j.error || 'Export failed';
+          } catch {
+            return 'Export failed';
+          }
+        };
+
+        const resJson = await api.get(`/backup/export/${folderId}`, { responseType: 'blob', validateStatus: () => true });
+        if (resJson.status !== 200 || !String(resJson.headers['content-disposition'] || '').includes('attachment')) {
+          const msg =
+            resJson.status === 403
+              ? 'You are not allowed to export this folder'
+              : await readError(resJson.data);
+          window.alert(msg);
+          return;
+        }
+        triggerBlobDownload(
+          resJson.data,
+          parseFilename(resJson.headers['content-disposition'], `chronicler-export-${folderId}.json`)
+        );
+
+        await new Promise((r) => setTimeout(r, 300));
+
+        const resHtml = await api.get(`/backup/export/${folderId}/html`, { responseType: 'blob', validateStatus: () => true });
+        if (resHtml.status !== 200 || !String(resHtml.headers['content-disposition'] || '').includes('attachment')) {
+          const msg = await readError(resHtml.data);
+          window.alert(
+            `JSON downloaded, but the HTML viewer could not be generated: ${msg}\n\nYou can still use the JSON file for admin import.`
+          );
+          return;
+        }
+        triggerBlobDownload(
+          resHtml.data,
+          parseFilename(resHtml.headers['content-disposition'], `chronicler-viewer-${folderId}.html`)
+        );
+      } catch (e) {
+        window.alert(e.message || 'Export failed');
+      }
+    },
     onSync: async (folderId, folderTitle) => {
       if (!window.confirm(`Sync visibility of "${folderTitle}" to all its children?\nThis will override child note permissions to match the folder.`)) return;
       try {
@@ -458,7 +520,7 @@ export default function Dashboard({ user, onLogout }) {
 
   return (
     <div style={S.shell}>
-      {showAdmin && <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} />}
+      {showAdmin && <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} onChroniclerImportDone={loadData} />}
       {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData()} />}
 
       {/* Undo toast */}

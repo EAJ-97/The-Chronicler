@@ -1,12 +1,20 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const multer  = require('multer');
 const db      = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
+const { runImport } = require('../utils/chroniclerBackup');
 const fs      = require('fs');
 const path    = require('path');
 const os      = require('os');
 
 const router = express.Router();
+
+/** Multipart upload for Chronicler JSON tree backups (admin import only). */
+const uploadBackupJson = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 40 * 1024 * 1024 },
+});
 
 /**
  * True when an Anthropic API key is stored for session recaps.
@@ -303,6 +311,40 @@ router.get('/backup/info', authenticateToken, adminOnly, (req, res) => {
     res.json({ size_bytes: 0, size_kb: 0, last_modified: null });
   }
 });
+
+// POST /admin/backup/import-json — restore a DM-exported JSON tree (admin only). Optional parent_id = folder to attach root under.
+router.post(
+  '/backup/import-json',
+  authenticateToken,
+  adminOnly,
+  uploadBackupJson.single('file'),
+  (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Missing file field (JSON export)' });
+    let data;
+    try {
+      data = JSON.parse(req.file.buffer.toString('utf8'));
+    } catch {
+      return res.status(400).json({ error: 'File is not valid JSON' });
+    }
+    const rawParent = req.body?.parent_id;
+    let parentId = null;
+    if (rawParent != null && String(rawParent).trim() !== '') {
+      parentId = parseInt(String(rawParent), 10);
+      if (!Number.isFinite(parentId)) return res.status(400).json({ error: 'Invalid parent_id' });
+    }
+    try {
+      const result = runImport(db, data, { parentId });
+      if (req.app.broadcast) {
+        req.app.broadcast({ type: 'notes_changed' });
+        req.app.broadcast({ type: 'connections_changed' });
+      }
+      res.json({ success: true, new_root_id: result.newRootId, counts: result.counts });
+    } catch (e) {
+      console.error('backup import:', e);
+      res.status(400).json({ error: e.message || 'Import failed' });
+    }
+  }
+);
 
 // In-memory cache for GitHub release check (avoids rate limits)
 const UPDATE_CHECK_CACHE_MS = 60 * 60 * 1000; // 1 hour
