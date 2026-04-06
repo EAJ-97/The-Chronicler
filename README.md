@@ -221,6 +221,7 @@ Admin  >  DM  >  Owner  >  Granted  >  Default
 
 ### Journal
 - **DM prep checklist** (per session) — **✓ Prep** button in the session header opens a modal to add items, check off, and uncheck all; visible only to DMs and admins for that campaign
+- **Session attendance** — **👥 Roll** in the session header opens a roster (present / absent / not marked); all party members can view, only DMs and admins can set marks
 - Session-based entries with multi-user authorship
 - Indent levels for nested discussion/debate
 - Markdown keyboard shortcuts

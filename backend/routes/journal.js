@@ -53,6 +53,63 @@ function loadSessionChecklistsGrouped(sessionIds) {
   return out;
 }
 
+/**
+ * Campaign root folder: all users who are DMs or have note_permissions on the campaign (for attendance roster).
+ * @param {number} folderId
+ * @returns {{ id: number, username: string, is_dm: number }[]}
+ */
+function getCampaignMembersForAttendance(folderId) {
+  if (!folderId) return [];
+  return db.prepare(`
+    SELECT DISTINCT u.id, u.username,
+      CASE WHEN EXISTS (SELECT 1 FROM folder_roles fr WHERE fr.folder_id = ? AND fr.user_id = u.id) THEN 1 ELSE 0 END as is_dm
+    FROM users u
+    WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = ? AND np.user_id = u.id)
+       OR EXISTS (SELECT 1 FROM folder_roles fr WHERE fr.folder_id = ? AND fr.user_id = u.id)
+    ORDER BY u.username ASC
+  `).all(folderId, folderId, folderId);
+}
+
+/**
+ * Per-session attendance merged with campaign roster. `attended` is null if no row yet, else boolean.
+ * @param {number[]} sessionIds
+ * @param {number|null} folderId
+ * @returns {Record<string, { user_id: number, username: string, is_dm: number, attended: boolean|null }[]>}
+ */
+function loadSessionAttendanceGrouped(sessionIds, folderId) {
+  const out = {};
+  if (!folderId || !sessionIds.length) return out;
+  const members = getCampaignMembersForAttendance(folderId);
+  for (const sid of sessionIds) {
+    const rows = db.prepare('SELECT user_id, attended FROM session_attendance WHERE session_id = ?').all(sid);
+    const map = {};
+    rows.forEach((r) => { map[r.user_id] = r.attended === 1; });
+    out[String(sid)] = members.map((m) => ({
+      user_id: m.id,
+      username: m.username,
+      is_dm: m.is_dm,
+      attended: map[m.id] === undefined ? null : map[m.id],
+    }));
+  }
+  return out;
+}
+
+/**
+ * True if user_id is a DM or granted member of the campaign root folder.
+ * @param {number} folderId
+ * @param {number} userId
+ */
+function isUserCampaignMember(folderId, userId) {
+  if (!folderId || !userId) return false;
+  return !!db.prepare(`
+    SELECT 1 FROM users u WHERE u.id = ?
+      AND (
+        EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = ? AND np.user_id = u.id)
+        OR EXISTS (SELECT 1 FROM folder_roles fr WHERE fr.folder_id = ? AND fr.user_id = u.id)
+      )
+  `).get(userId, folderId, folderId);
+}
+
 // GET journal entries + sessions for a folder
 router.get('/', authenticateToken, (req, res) => {
   const { folder_id } = req.query;
@@ -60,7 +117,9 @@ router.get('/', authenticateToken, (req, res) => {
   const admin = isAdmin(uid);
   const fid   = folder_id ? parseInt(folder_id) : null;
 
-  if (!canAccessFolder(uid, fid, admin)) return res.json({ sessions: [], entries: [], session_checklists: {} });
+  if (!canAccessFolder(uid, fid, admin)) {
+    return res.json({ sessions: [], entries: [], session_checklists: {}, session_attendance: {} });
+  }
 
   const sessions = db.prepare(`
     SELECT * FROM sessions
@@ -82,7 +141,12 @@ router.get('/', authenticateToken, (req, res) => {
     session_checklists = loadSessionChecklistsGrouped(sessions.map(s => s.id));
   }
 
-  res.json({ sessions, entries, session_checklists });
+  let session_attendance = {};
+  if (fid && sessions.length) {
+    session_attendance = loadSessionAttendanceGrouped(sessions.map(s => s.id), fid);
+  }
+
+  res.json({ sessions, entries, session_checklists, session_attendance });
 });
 
 // POST create a new journal entry
@@ -347,6 +411,41 @@ router.delete('/checklist-items/:itemId', authenticateToken, (req, res) => {
   db.prepare('DELETE FROM session_checklist_items WHERE id = ?').run(itemId);
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
   res.json({ success: true });
+});
+
+// PUT set one party member's attendance for a session (DM/admin). Body: { user_id, attended }.
+router.put('/sessions/:sessionId/attendance', authenticateToken, (req, res) => {
+  const sessionId = parseInt(req.params.sessionId, 10);
+  const session = sessionOr404(res, sessionId);
+  if (!session) return;
+
+  const uid = req.user.id;
+  const admin = isAdmin(uid);
+  const fid = session.folder_id;
+  if (fid == null) {
+    return res.status(403).json({ error: 'Attendance applies to campaign sessions only' });
+  }
+  if (!canDmPrepChecklist(uid, fid, admin)) {
+    return res.status(403).json({ error: 'Only the DM or an admin can update attendance' });
+  }
+
+  const targetUserId = parseInt(req.body?.user_id, 10);
+  const attended = req.body?.attended;
+  if (!Number.isFinite(targetUserId) || attended === undefined || typeof attended !== 'boolean') {
+    return res.status(400).json({ error: 'user_id (number) and attended (boolean) are required' });
+  }
+  if (!isUserCampaignMember(fid, targetUserId)) {
+    return res.status(400).json({ error: 'User is not a member of this campaign' });
+  }
+
+  db.prepare(`
+    INSERT INTO session_attendance (session_id, user_id, attended)
+    VALUES (?, ?, ?)
+    ON CONFLICT(session_id, user_id) DO UPDATE SET attended = excluded.attended
+  `).run(sessionId, targetUserId, attended ? 1 : 0);
+
+  if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: fid });
+  res.json({ success: true, session_id: sessionId, user_id: targetUserId, attended });
 });
 
 // PUT update entry content / indent (owner or admin)

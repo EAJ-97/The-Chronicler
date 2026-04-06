@@ -65,11 +65,15 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const [recapSession, setRecapSession]   = useState(null); // { id, num }
   /** DM-only prep checklist modal: which session is being edited. */
   const [prepSession, setPrepSession]       = useState(null); // { id, num } | null
+  /** Session attendance modal (read all; write DM/admin). */
+  const [attendanceSession, setAttendanceSession] = useState(null); // { id, num } | null
   const [aiEnabled, setAiEnabled]         = useState(false);
   const [recapServerReady, setRecapServerReady] = useState(false);
   const [usageCache, setUsageCache]       = useState({}); // { sessionId: usageObj }
   /** DM-only prep checklist rows from GET /journal `session_checklists` (string session id keys). */
   const [sessionChecklists, setSessionChecklists] = useState({});
+  /** Per-session party attendance from GET /journal `session_attendance` (string session id keys). */
+  const [sessionAttendance, setSessionAttendance] = useState({});
   /** Draft text for "add checklist item" per session id. */
   const [prepDrafts, setPrepDrafts]       = useState({});
   const inputRef     = useRef(null);
@@ -125,6 +129,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       }
       setEntries(res.data.entries || []);
       setSessionChecklists(res.data.session_checklists && typeof res.data.session_checklists === 'object' ? res.data.session_checklists : {});
+      setSessionAttendance(res.data.session_attendance && typeof res.data.session_attendance === 'object' ? res.data.session_attendance : {});
       // Load AI status
       try {
         const aiRes = await api.get('/admin/ai/status');
@@ -141,6 +146,12 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     if (!prepSession) return;
     if (!sessions.some((s) => s.id === prepSession.id)) setPrepSession(null);
   }, [sessions, prepSession]);
+
+  /** Close attendance modal if its session is no longer loaded. */
+  useEffect(() => {
+    if (!attendanceSession) return;
+    if (!sessions.some((s) => s.id === attendanceSession.id)) setAttendanceSession(null);
+  }, [sessions, attendanceSession]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -352,6 +363,19 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     } catch (err) { console.error(err); }
   };
 
+  /**
+   * Sets attendance for one campaign member (DM/admin). Reloads journal payload.
+   * @param {number} sessionId
+   * @param {number} userId
+   * @param {boolean} attended
+   */
+  const handleAttendanceSet = async (sessionId, userId, attended) => {
+    try {
+      await api.put(`/journal/sessions/${sessionId}/attendance`, { user_id: userId, attended });
+      loadEntries(true);
+    } catch (err) { console.error(err); }
+  };
+
   const groups = groupSessions(sessions, entries, serverNow);
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
@@ -517,6 +541,96 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         </div>
       )}
 
+      {/* Session attendance (read all party; DM/admin sets marks) */}
+      {attendanceSession && (
+        <div
+          role="dialog"
+          aria-labelledby="session-attendance-title"
+          style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setAttendanceSession(null); }}
+        >
+          <div style={{ background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(400px, calc(100vw - 32px))', maxHeight: 'min(70vh, 480px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
+              <div>
+                <div id="session-attendance-title" style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>SESSION ATTENDANCE</div>
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)' }}>
+                  Session {attendanceSession.num}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttendanceSession(null)}
+                style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
+                aria-label="Close attendance"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {(sessionAttendance[String(attendanceSession.id)] || []).length === 0 ? (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.28)', padding: '8px 0' }}>
+                  No party members on this campaign yet (add members via note permissions or DM roles).
+                </div>
+              ) : (
+                (sessionAttendance[String(attendanceSession.id)] || []).map((row) => (
+                  <div
+                    key={row.user_id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+                      padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.9)' }}>{row.username}</span>
+                      {!!row.is_dm && (
+                        <span style={{ marginLeft: '8px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)' }}>DM</span>
+                      )}
+                    </div>
+                    {canPrepForJournal ? (
+                      <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleAttendanceSet(attendanceSession.id, row.user_id, true)}
+                          style={{
+                            padding: '4px 10px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                            background: row.attended === true ? 'rgba(58,196,139,0.15)' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${row.attended === true ? 'rgba(58,196,139,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                            borderRadius: '3px', cursor: 'pointer', color: row.attended === true ? 'rgba(58,196,139,0.85)' : 'rgba(226,213,187,0.35)',
+                          }}
+                        >
+                          Present
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAttendanceSet(attendanceSession.id, row.user_id, false)}
+                          style={{
+                            padding: '4px 10px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                            background: row.attended === false ? 'rgba(224,112,112,0.12)' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${row.attended === false ? 'rgba(224,112,112,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                            borderRadius: '3px', cursor: 'pointer', color: row.attended === false ? 'rgba(224,112,112,0.8)' : 'rgba(226,213,187,0.35)',
+                          }}
+                        >
+                          Absent
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.4)' }}>
+                        {row.attended === true ? 'Present' : row.attended === false ? 'Absent' : '—'}
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            {!canPrepForJournal && (sessionAttendance[String(attendanceSession.id)] || []).length > 0 && (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.25)', marginTop: '12px' }}>
+                Only the DM can change attendance.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ padding: isMobile ? '12px 16px' : '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? '8px' : '12px', marginBottom: '6px' }}>
@@ -601,6 +715,23 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           title={prepTitle}
                         >
                           ✓ Prep{total ? ` ${done}/${total}` : ''}
+                        </button>
+                      );
+                    })()}
+                    {(() => {
+                      const attRows = sessionAttendance[String(session.id)] || [];
+                      const presentCount = attRows.filter((r) => r.attended === true).length;
+                      const attTitle = attRows.length
+                        ? `Who attended session ${sessionNum} — ${presentCount} present of ${attRows.length}`
+                        : 'Party attendance for this session';
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setAttendanceSession({ id: session.id, num: sessionNum })}
+                          style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.48)' }}
+                          title={attTitle}
+                        >
+                          👥 Roll{attRows.length ? ` ${presentCount}/${attRows.length}` : ''}
                         </button>
                       );
                     })()}
