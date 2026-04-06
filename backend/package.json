@@ -1,6 +1,6 @@
 {
   "name": "dnd-notes-backend",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
