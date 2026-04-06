@@ -2,8 +2,58 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
+const { buildRecapPromptsForSession } = require('../utils/recapPromptBuild');
 
 const router = express.Router();
+
+/**
+ * Shared quota / lock checks before generating or submitting a recap.
+ * @returns {{ ok: true } | { ok: false, status: number, error: string }}
+ */
+function assertRecapQuota(uid, sessionId) {
+  const admin = isAdmin(uid);
+  const dm = isDM(uid, sessionId);
+  const used = getUsage(uid, sessionId);
+  const allowed = getAllowedCount(uid, sessionId);
+  if (!admin && !dm && standardUserAlreadyGenerated(sessionId) && used === 0) {
+    return { ok: false, status: 403, error: 'Another party member has already generated a recap for this session.' };
+  }
+  if (allowed !== Infinity && used >= allowed) {
+    return { ok: false, status: 403, error: `You have used all ${allowed} recap generation${allowed > 1 ? 's' : ''} for this session.` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Persists recap row, bumps usage, broadcasts, returns recap row with author.
+ * @param {number} sessionId
+ * @param {number} folderId
+ * @param {number} uid
+ * @param {string} tone
+ * @param {string} content
+ * @param {import('express').Request} req
+ */
+function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res) {
+  const recapResult = db.prepare(`
+    INSERT INTO recaps (session_id, folder_id, generated_by, tone, content, is_dm_only)
+    VALUES (?, ?, ?, ?, ?, 0)
+  `).run(sessionId, folderId, uid, tone, content);
+
+  db.prepare(`
+    INSERT INTO recap_usage (session_id, user_id, count) VALUES (?, ?, 1)
+    ON CONFLICT(session_id, user_id) DO UPDATE SET count = count + 1
+  `).run(sessionId, uid);
+
+  const recap = db.prepare(
+    'SELECT r.*, u.username as author FROM recaps r JOIN users u ON u.id = r.generated_by WHERE r.id = ?'
+  ).get(recapResult.lastInsertRowid);
+
+  if (req.app.broadcast) {
+    req.app.broadcast({ type: 'recap_generated', session_id: sessionId, recap_id: recap.id, generated_by: uid });
+  }
+
+  res.json({ recap });
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -85,67 +135,22 @@ router.post('/generate', authenticateToken, async (req, res) => {
 
   if (!session_id) return res.status(400).json({ error: 'session_id required' });
 
-  const admin = isAdmin(uid);
-  const dm = isDM(uid, session_id);
-  const used = getUsage(uid, session_id);
-  const allowed = getAllowedCount(uid, session_id);
+  const q = assertRecapQuota(uid, session_id);
+  if (!q.ok) return res.status(q.status).json({ error: q.error });
 
-  // Check standard user lock — if another standard user already generated one
-  if (!admin && !dm && standardUserAlreadyGenerated(session_id) && used === 0) {
-    return res.status(403).json({ error: 'Another party member has already generated a recap for this session.' });
-  }
-
-  // Check personal limit
-  if (allowed !== Infinity && used >= allowed) {
-    return res.status(403).json({ error: `You have used all ${allowed} recap generation${allowed > 1 ? 's' : ''} for this session.` });
-  }
-
-  // Check AI is enabled and key exists
   const aiEnabled = db.prepare("SELECT value FROM settings WHERE key = 'ai_enabled'").get();
   if (aiEnabled?.value !== 'true') return res.status(503).json({ error: 'AI features are not enabled.' });
-  const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get()?.value?.trim();
-  if (!apiKey) return res.status(503).json({ error: 'No API key configured.' });
 
-  // Fetch session data
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(session_id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const t = tone === 'summary' ? 'summary' : 'chronicle';
+  const built = buildRecapPromptsForSession(session_id, t);
+  if (!built.ok) return res.status(built.status).json({ error: built.error });
 
-  const entries = db.prepare(`
-    SELECT je.content, je.indent_level, u.username as author
-    FROM journal_entries je
-    JOIN users u ON u.id = je.user_id
-    WHERE je.session_id = ? AND je.is_session_break = 0
-    ORDER BY je.sort_order ASC, je.id ASC
-  `).all(session_id);
-
-  if (entries.length === 0) return res.status(400).json({ error: 'This session has no entries to summarize.' });
-
-  // Get campaign name for context
-  const campaignFolder = session.folder_id
-    ? db.prepare('SELECT title FROM notes WHERE id = ?').get(getRootFolderId(session.folder_id))
-    : null;
-
-  // Build journal text for prompt
-  const journalText = entries.map(e => {
-    const indent = '  '.repeat(e.indent_level || 0);
-    return `${indent}[${e.author}]: ${e.content}`;
-  }).join('\n');
-
-  const sessionCount = db.prepare('SELECT COUNT(*) as c FROM sessions WHERE folder_id = ?').get(session.folder_id)?.c || 1;
-
-  const systemPrompt = tone === 'chronicle'
-    ? `You are a skilled scribe chronicling the adventures of a Dungeons & Dragons party. Write in an immersive, in-world narrative style — as if recording events in an official chronicle or historical record. Use past tense, third person. Include names, key events, discoveries, conflicts, and decisions. Be vivid but concise. Do not use bullet points. Write 2-4 paragraphs.`
-    : `You are summarizing a Dungeons & Dragons session for the players. Be clear, factual, and organized. Highlight: what happened, key NPCs encountered, decisions made, and any unresolved threads. Use bullet points where helpful. Keep it concise — 200-350 words.`;
-
-  const userPrompt = `Campaign: ${campaignFolder?.title || 'Unknown Campaign'}
-Session Number: ${sessionCount}
-
-Journal entries from this session:
-${journalText}
-
-Please write a ${tone === 'chronicle' ? 'narrative chronicle entry' : 'session summary'} for this session.`;
+  const { session, system_prompt: systemPrompt, user_prompt: userPrompt } = built;
 
   try {
+    const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get()?.value?.trim();
+    if (!apiKey) return res.status(503).json({ error: 'No Anthropic API key configured.' });
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -170,27 +175,7 @@ Please write a ${tone === 'chronicle' ? 'narrative chronicle entry' : 'session s
     const content = data.content?.[0]?.text?.trim();
     if (!content) return res.status(500).json({ error: 'Empty response from AI' });
 
-    // Save recap
-    const recapResult = db.prepare(`
-      INSERT INTO recaps (session_id, folder_id, generated_by, tone, content, is_dm_only)
-      VALUES (?, ?, ?, ?, ?, 0)
-    `).run(session_id, session.folder_id, uid, tone, content);
-
-    // Update usage
-    db.prepare(`
-      INSERT INTO recap_usage (session_id, user_id, count) VALUES (?, ?, 1)
-      ON CONFLICT(session_id, user_id) DO UPDATE SET count = count + 1
-    `).run(session_id, uid);
-
-    const recap = db.prepare('SELECT r.*, u.username as author FROM recaps r JOIN users u ON u.id = r.generated_by WHERE r.id = ?').get(recapResult.lastInsertRowid);
-
-    // Broadcast to other users
-    if (req.app.broadcast) {
-      req.app.broadcast({ type: 'recap_generated', session_id, recap_id: recap.id, generated_by: uid });
-    }
-
-    res.json({ recap });
-
+    insertRecapAndRespond(session_id, session.folder_id, uid, t, content, req, res);
   } catch (e) {
     console.error('[recap/generate]', e);
     res.status(500).json({ error: e.message });

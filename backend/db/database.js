@@ -75,7 +75,6 @@ db.exec(`
   INSERT OR IGNORE INTO settings (key, value) VALUES ('demo_seeded',       'false');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_enabled',        'false');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_api_key',        '');
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('gemini_icon_api_key', '');
 
   CREATE TABLE IF NOT EXISTS notes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -462,6 +461,32 @@ migrate('035_settings_gemini_icon_api_key', () => {
     db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('gemini_icon_api_key', '')");
   } catch (e) {
     console.error('[migrate 035]', e.message);
+  }
+});
+
+// Legacy: Ollama recap settings (no longer used by app code; rows may remain in upgraded DBs).
+migrate('036_settings_ollama_recaps', () => {
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_text_provider', 'anthropic');
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ollama_base_url', '');
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ollama_api_key', '');
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ollama_model', 'llama3.2');
+    `);
+  } catch (e) {
+    console.error('[migrate 036]', e.message);
+  }
+});
+
+// Sidebar icon AI: Gemini (default) vs Ollama image model (separate from recap chat model)
+migrate('037_settings_ai_icon_ollama', () => {
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_icon_provider', 'gemini');
+      INSERT OR IGNORE INTO settings (key, value) VALUES ('ollama_icon_model', '');
+    `);
+  } catch (e) {
+    console.error('[migrate 037]', e.message);
   }
 });
 

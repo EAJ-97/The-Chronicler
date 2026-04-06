@@ -91,10 +91,7 @@ This gives you a public HTTPS URL without opening firewall ports.
 | `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
-| `GEMINI_API_KEY` / `GEMINI_ICON_API_KEY` | (unset) | Optional. Enables DM/admin Gemini sidebar icon generation. Overrides the Admin → AI Gemini key when set. |
-| `GEMINI_ICON_MODEL` | `gemini-2.5-flash-image` | Gemini model id for icon generation (must support image output). |
-
-See `.env.example` for optional environment overrides.
+See `.env.example` for the minimal environment template. Session recaps use **Anthropic**; configure the API key in **Admin → AI** (stored in the database).
 
 ---
 
@@ -152,7 +149,6 @@ See `.env.example` for optional environment overrides.
 | **FTS (Full-Text Search)** | SQLite FTS5 virtual table powering note search. Indexes note titles and content. Search triggers at 3+ characters. `#` prefix routes to tag filtering instead. |
 | **JWT (JSON Web Token)** | The authentication token issued on login. Valid for 7 days. `JWT_SECRET` is auto-generated on first boot and persisted in the data volume. Wiping the volume regenerates the secret and invalidates all sessions. |
 | **Anthropic API Key** | The secret key used to authenticate AI recap requests. Stored only in the database. Never in source code, `.env` files, or Git. Stripped from all backup downloads. |
-| **Gemini API Key** | Optional Google key for DM/admin “Generate with Gemini” **sidebar icons only** (image models / “Nano Banana”). Can be set in **Admin → AI** (database) or via `GEMINI_API_KEY` / `GEMINI_ICON_API_KEY` in the environment (env wins). Stripped from backup downloads when stored in the DB. |
 | **Cloudflare Tunnel** | The recommended method for exposing the app publicly over HTTPS without opening firewall ports. Runs via `cloudflared`. |
 | **Auto-Migration** | Database schema changes that run automatically on container boot. New tables and columns are added safely without wiping existing data. No manual SQL required when updating. |
 | **Backup Hash** | An MD5 checksum of the database file used by the automated backup cron job. Only saves a new backup if the hash differs from the previous two, keeping storage minimal. |
@@ -214,7 +210,7 @@ Admin  >  DM  >  Owner  >  Granted  >  Default
 - Full-text search (SQLite FTS5) — triggers at 3+ characters
 - Note connections — link notes together for the knowledge graph
 - Trash / soft-delete with restore
-- Optional **Gemini**-powered list icons (DM/admin): generate small sidebar icons from a short theme when the host configures a Gemini API key
+- **Sidebar list icons** (DM/admin): emoji presets or a small **uploaded** image (server-enforced size limits).
 
 ### Knowledge Graph
 - 2D interactive graph (Cytoscape.js)
@@ -233,6 +229,7 @@ Admin  >  DM  >  Owner  >  Granted  >  Default
 
 ### AI Features
 - Session recap — Chronicle (narrative) or Summary (bullet point) style
+- **Anthropic (cloud)** for recap text (Claude Haiku via Messages API)
 - Per-role usage limits
 - Admin-controlled toggle with API key management
 
@@ -242,7 +239,7 @@ Tabs: PARTY · VAULT · DEMO · AI · BACKUP · PASSWORD
 - **PARTY** — create/delete users, toggle open registration
 - **VAULT** — browse and restore campaign snapshots
 - **DEMO** — generate or wipe demo campaign data
-- **AI** — manage Anthropic API key, enable/disable AI features, test key
+- **AI** — Anthropic API key for session recaps, test key, enable toggle
 - **BACKUP** — download full database backup (API key stripped)
 - **PASSWORD** — change admin password
 
@@ -277,7 +274,13 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 
 ## AI Features
 
-AI features use the [Anthropic API](https://console.anthropic.com) — billed per token, **not included** in Claude Pro or any subscription.
+### Session recaps
+
+- **Anthropic** — [Anthropic API](https://console.anthropic.com), billed per token (**not** included in Claude Pro). The server calls the Messages API with session journal context.
+
+### Sidebar list icons (DM/admin)
+
+- **Emoji presets** and **image upload** (small file, server-enforced limits). There is no built-in cloud image generation for icons.
 
 ### Cost estimates (Claude Haiku)
 | Action | Approx. cost |
@@ -430,7 +433,7 @@ Take a fresh snapshot after updating to the latest version — old snapshots tak
 | Graph 3D | 3d-force-graph + Three.js |
 | Auth | JWT + bcryptjs |
 | Real-time | WebSockets |
-| AI | Anthropic API (Claude Haiku) |
+| AI | Anthropic (Claude Haiku) for session recaps |
 | Images | multer |
 | Mobile / PWA | Web App Manifest + Service Worker |
 | Container | Docker + Docker Compose |

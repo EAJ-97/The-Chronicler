@@ -1,10 +1,18 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
 import { notesByIdMap } from '../utils/campaignTree.js';
-import { getFolderTreeKind, iconChoicesForFolderKind, NOTE_ICONS, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
+import {
+  getFolderTreeKind,
+  iconChoicesForFolderKind,
+  NOTE_ICON_CATEGORIES,
+  allUniqueNotePresetIcons,
+  defaultNoteIconEmoji,
+  isManagedSidebarIconUrl,
+} from '../utils/displayIcons.js';
 
 const CATEGORIES = [
   { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
@@ -165,12 +173,6 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   /** Hidden file input for DM/admin sidebar icon uploads (folders + notes). */
   const sidebarIconInputRef = useRef(null);
   const [uploadingSidebarIcon, setUploadingSidebarIcon] = useState(false);
-  /** Optional short theme for Gemini-generated list icons (DM/admin). */
-  const [sidebarIconGenPrompt, setSidebarIconGenPrompt] = useState('');
-  const sidebarIconGenPromptRef = useRef('');
-  const [generatingGeminiIcon, setGeneratingGeminiIcon] = useState(false);
-  const [geminiIconConfigured, setGeminiIconConfigured] = useState(false);
-  const [geminiIconError, setGeminiIconError] = useState(null);
   const titleInputRef = useRef(null);
   // Permissions
   const [noteVisibility, setNoteVisibility] = useState(note?.visibility || 'hidden');
@@ -182,6 +184,9 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   /** Optional emoji + short blurb for sidebar tree (saved to display_icon / display_summary) */
   const [displayIcon, setDisplayIcon] = useState(note?.display_icon || '');
   const [displaySummary, setDisplaySummary] = useState(note?.display_summary || '');
+  /** Modal: pick note sidebar emoji from categorized + all-icons grid */
+  const [noteIconMenuOpen, setNoteIconMenuOpen] = useState(false);
+  const uniqueNotePresetIcons = useMemo(() => allUniqueNotePresetIcons(), []);
   // Campaign member management (root folder only)
   const [addMemberSearch, setAddMemberSearch] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
@@ -252,15 +257,6 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   narrativeWeightRef.current = narrativeWeight;
   dirtyRef.current = dirty;
   noteIdRef.current = note?.id;
-  sidebarIconGenPromptRef.current = sidebarIconGenPrompt;
-
-  // Whether admin configured Gemini for sidebar icons (any authenticated user can read this flag)
-  useEffect(() => {
-    api.get('/admin/ai/status')
-      .then((r) => setGeminiIconConfigured(!!r.data?.gemini_icon_configured))
-      .catch(() => setGeminiIconConfigured(false));
-  }, []);
-
   // Note connections
   const myConns = connections.filter(c =>
     c.source_note_id === note?.id || c.target_note_id === note?.id
@@ -284,7 +280,6 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     setIsDmOnly(!!note?.is_dm_only);
     setDisplayIcon(note?.display_icon || '');
     setDisplaySummary(note?.display_summary || '');
-    setGeminiIconError(null);
     setTagInput('');
     setDirty(false);
     setSavedAt(null);
@@ -297,7 +292,17 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     serverUpdatedAt.current = note?.updated_at || null;
     setConflict(null);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setNoteIconMenuOpen(false);
   }, [note?.id]);
+
+  useEffect(() => {
+    if (!noteIconMenuOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setNoteIconMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [noteIconMenuOpen]);
 
   // Sync tags + permissions when server data updates
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -430,7 +435,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
   }, [isOwner, onSave]);
 
   /**
-   * Persists a new sidebar icon URL (emoji preset, upload, or Gemini) and syncs server timestamp.
+   * Persists a new sidebar icon URL (emoji preset, upload, or AI-generated) and syncs server timestamp.
    * @param {string} url
    */
   const persistSidebarIconUrl = useCallback(async (url) => {
@@ -443,6 +448,31 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
     });
     serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
     if (onSave) onSave(res.data);
+  }, [onSave]);
+
+  /**
+   * Saves a note sidebar emoji or clears to category default (null `display_icon` on server).
+   * @param {string|null|undefined} emoji
+   * @param {{ closeMenu?: boolean }} [opts]
+   */
+  const persistNoteDisplayIcon = useCallback(async (emoji, opts = {}) => {
+    const { closeMenu = true } = opts;
+    if (!noteIdRef.current) return;
+    const cleared = emoji === null || emoji === undefined || emoji === '';
+    const nextStr = cleared ? '' : String(emoji);
+    setDisplayIcon(nextStr);
+    try {
+      const res = await api.put(`/notes/${noteIdRef.current}`, {
+        client_updated_at: serverUpdatedAt.current,
+        display_icon: cleared ? null : nextStr,
+        display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
+      });
+      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+      if (onSave) onSave(res.data);
+      if (closeMenu) setNoteIconMenuOpen(false);
+    } catch (e) {
+      console.error(e);
+    }
   }, [onSave]);
 
   /**
@@ -462,36 +492,13 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
       const url = up.data?.url;
       if (!url) return;
       await persistSidebarIconUrl(url);
+      setNoteIconMenuOpen(false);
     } catch (err) {
       console.error('Sidebar icon upload failed', err);
     } finally {
       setUploadingSidebarIcon(false);
     }
   }, [isDM, persistSidebarIconUrl]);
-
-  /**
-   * DM/admin: Gemini image model generates a small list icon; server saves under /api/images/files/*.
-   */
-  const handleGenerateGeminiSidebarIcon = useCallback(async () => {
-    if (!noteIdRef.current || !isDM || !geminiIconConfigured) return;
-    setGeminiIconError(null);
-    setGeneratingGeminiIcon(true);
-    try {
-      const r = await api.post('/images/generate-sidebar-icon', {
-        note_id: noteIdRef.current,
-        prompt: sidebarIconGenPromptRef.current.trim() || undefined,
-      });
-      const url = r.data?.url;
-      if (!url) return;
-      await persistSidebarIconUrl(url);
-    } catch (err) {
-      const msg = err.response?.data?.error || err.message || 'Generation failed';
-      setGeminiIconError(msg);
-      console.error('Gemini sidebar icon failed', err);
-    } finally {
-      setGeneratingGeminiIcon(false);
-    }
-  }, [isDM, geminiIconConfigured, persistSidebarIconUrl]);
 
   const markDirty = () => {
     setDirty(true);
@@ -969,97 +976,148 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
             <option value="detail">○ Detail</option>
           </select>}
 
-          {/* Note icon — scroll / parchment presets (optional; sidebar default follows category if unset) */}
+          {/* Note sidebar icon — toolbar button opens modal (all icons + themed suggestions); no preset → category default in tree */}
           {!note?.is_folder && canEdit && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }} title="Sidebar icon">
-              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
-              <button
-                type="button"
-                onClick={async () => {
-                  setDisplayIcon('');
-                  try {
-                    const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: null, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
-                    serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
-                    if (onSave) onSave(res.data);
-                  } catch (e) { console.error(e); }
-                }}
-                style={{
-                  width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: 'pointer',
-                  border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.45)' : 'rgba(255,255,255,0.08)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent',
-                }}
-                title="Default (category icon)"
-              >◌</button>
-              {NOTE_ICONS.map((ic) => (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }} title="Sidebar icon">
+                <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
                 <button
-                  key={ic}
                   type="button"
-                  onClick={async () => {
-                    setDisplayIcon(ic);
-                    try {
-                      const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: ic, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
-                      serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
-                      if (onSave) onSave(res.data);
-                    } catch (e) { console.error(e); }
-                  }}
+                  onClick={() => setNoteIconMenuOpen(true)}
+                  title={!displayIcon ? 'Using category default — click to choose an icon' : 'Change sidebar icon'}
                   style={{
-                    width: '28px', height: '28px', fontSize: '15px', borderRadius: '4px', cursor: 'pointer',
-                    border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`, background: displayIcon === ic ? 'rgba(200,148,58,0.15)' : 'transparent',
+                    width: '30px', height: '30px', borderRadius: '4px', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: `1px ${!displayIcon ? 'dashed' : 'solid'} rgba(200,148,58,${!displayIcon ? '0.35' : '0.2'})`,
+                    background: 'rgba(255,255,255,0.03)',
                   }}
-                >{ic}</button>
-              ))}
-              {isDM && (
-                <>
-                  <input
-                    ref={sidebarIconInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/gif,image/webp"
-                    style={{ display: 'none' }}
-                    onChange={handleSidebarIconFile}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => sidebarIconInputRef.current?.click()}
-                    disabled={uploadingSidebarIcon || generatingGeminiIcon}
-                    title="Upload a small image (DM / admin, max 512KB)"
+                >
+                  {isManagedSidebarIconUrl(displayIcon) ? (
+                    <img src={displayIcon} alt="" style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} />
+                  ) : (
+                    <span style={{ fontSize: '17px', lineHeight: 1 }}>{displayIcon || defaultNoteIconEmoji(category)}</span>
+                  )}
+                </button>
+                {isDM && (
+                  <>
+                    <input
+                      ref={sidebarIconInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={handleSidebarIconFile}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => sidebarIconInputRef.current?.click()}
+                      disabled={uploadingSidebarIcon}
+                      title="Upload a small image (DM / admin, max 512KB)"
+                      style={{
+                        width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                        border: `1px solid ${isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`,
+                        background: isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.15)' : 'transparent',
+                        flexShrink: 0,
+                      }}
+                    >{uploadingSidebarIcon ? '…' : '🖼'}</button>
+                  </>
+                )}
+              </div>
+              {noteIconMenuOpen && createPortal(
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Choose sidebar icon"
+                  style={{
+                    position: 'fixed', inset: 0, zIndex: 4000,
+                    background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+                  }}
+                  onClick={() => setNoteIconMenuOpen(false)}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
                     style={{
-                      width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
-                      border: `1px solid ${isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`,
-                      background: isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.15)' : 'transparent',
-                      flexShrink: 0,
+                      width: '100%', maxWidth: '440px', maxHeight: '88vh', overflow: 'auto',
+                      background: 'linear-gradient(160deg, #0f1219 0%, #0a0c14 100%)',
+                      border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px',
+                      padding: '16px 18px 18px', boxShadow: '0 24px 90px rgba(0,0,0,0.92)',
                     }}
-                  >{uploadingSidebarIcon ? '…' : '🖼'}</button>
-                  <input
-                    type="text"
-                    value={sidebarIconGenPrompt}
-                    onChange={(e) => { setSidebarIconGenPrompt(e.target.value); setGeminiIconError(null); }}
-                    placeholder={geminiIconConfigured ? 'AI theme…' : '—'}
-                    disabled={!geminiIconConfigured}
-                    title={geminiIconConfigured ? 'Optional short theme for Gemini icon' : 'Admin: add Gemini key under Admin → AI'}
-                    style={{
-                      width: '90px', flexShrink: 0, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                      color: '#e2d5bb', fontSize: '11px', fontFamily: 'Crimson Pro, serif', padding: '4px 6px', outline: 'none', opacity: geminiIconConfigured ? 1 : 0.5,
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleGenerateGeminiSidebarIcon}
-                    disabled={!geminiIconConfigured || generatingGeminiIcon || uploadingSidebarIcon}
-                    title={geminiIconConfigured ? 'Generate list icon with Gemini' : 'Configure Gemini API key (Admin → AI)'}
-                    style={{
-                      width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px',
-                      cursor: (!geminiIconConfigured || generatingGeminiIcon) ? 'not-allowed' : 'pointer',
-                      border: '1px solid rgba(139,196,226,0.35)', background: generatingGeminiIcon ? 'rgba(139,196,226,0.12)' : 'transparent',
-                      flexShrink: 0, opacity: geminiIconConfigured ? 1 : 0.4,
-                    }}
-                  >{generatingGeminiIcon ? '…' : '✨'}</button>
-                </>
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.18em', color: '#c8943a' }}>SIDEBAR ICON</span>
+                      <button
+                        type="button"
+                        onClick={() => setNoteIconMenuOpen(false)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.35)', fontSize: '22px', lineHeight: 1, padding: '0 4px',
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.42)', margin: '0 0 12px', lineHeight: 1.5 }}>
+                      Themed groups match note categories, but you can choose <strong style={{ color: 'rgba(226,213,187,0.58)' }}>any</strong> icon. This note is <strong style={{ color: 'rgba(226,213,187,0.58)' }}>{CATEGORIES.find((c) => c.value === category)?.label || 'General'}</strong>.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => persistNoteDisplayIcon(null)}
+                      style={{
+                        width: '100%', marginBottom: '14px', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer',
+                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                        border: '1px solid rgba(200,148,58,0.3)', background: 'rgba(200,148,58,0.08)', color: 'rgba(200,148,58,0.85)',
+                      }}
+                    >
+                      USE CATEGORY DEFAULT ({defaultNoteIconEmoji(category)})
+                    </button>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>ALL ICONS</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '18px' }}>
+                      {uniqueNotePresetIcons.map((ic, idx) => (
+                        <button
+                          key={`all-${idx}`}
+                          type="button"
+                          onClick={() => persistNoteDisplayIcon(ic)}
+                          style={{
+                            width: '34px', height: '34px', fontSize: '18px', borderRadius: '4px', cursor: 'pointer',
+                            border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.1)'}`,
+                            background: displayIcon === ic ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)',
+                          }}
+                        >{ic}</button>
+                      ))}
+                    </div>
+                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>SUGGESTIONS BY THEME</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {NOTE_ICON_CATEGORIES.map(({ categoryKey, label, icons }) => (
+                        <div key={categoryKey}>
+                          <div
+                            style={{
+                              fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                              color: category === categoryKey ? 'rgba(200,148,58,0.6)' : 'rgba(226,213,187,0.28)',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            {label}
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {icons.map((ic, idx) => (
+                              <button
+                                key={`${categoryKey}-${idx}`}
+                                type="button"
+                                onClick={() => persistNoteDisplayIcon(ic)}
+                                style={{
+                                  width: '34px', height: '34px', fontSize: '18px', borderRadius: '4px', cursor: 'pointer',
+                                  border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.1)'}`,
+                                  background: displayIcon === ic ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)',
+                                }}
+                              >{ic}</button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>,
+                document.body,
               )}
-            </div>
-          )}
-          {!note?.is_folder && isDM && geminiIconError && (
-            <div style={{ flexBasis: '100%', width: '100%', fontFamily: 'Crimson Pro, serif', fontSize: '11px', color: 'rgba(224,112,112,0.85)', marginTop: '2px' }}>
-              {geminiIconError}
-            </div>
+            </>
           )}
 
           {/* DM Only badge — visible in toolbar when flag is set */}
@@ -1137,7 +1195,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
               Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
-              {isDM && ' DMs and admins can upload an image or generate one with Google Gemini (host configures the API key under Admin → AI) — icons only, tuned for small list display.'}
+              {isDM && ' DMs and admins can upload a small image for the sidebar (max 512KB); the server enforces size limits.'}
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
               <button
@@ -1177,37 +1235,6 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
             </div>
             {isDM && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="text"
-                    value={sidebarIconGenPrompt}
-                    onChange={(e) => { setSidebarIconGenPrompt(e.target.value); setGeminiIconError(null); }}
-                    placeholder={geminiIconConfigured ? 'Optional theme for AI icon (e.g. frozen citadel)…' : 'Gemini not configured — Admin → AI'}
-                    disabled={!geminiIconConfigured}
-                    style={{
-                      flex: '1 1 200px', minWidth: '160px', maxWidth: '400px',
-                      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                      color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '8px 10px', outline: 'none', opacity: geminiIconConfigured ? 1 : 0.55,
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleGenerateGeminiSidebarIcon}
-                    disabled={!geminiIconConfigured || generatingGeminiIcon || uploadingSidebarIcon}
-                    title={geminiIconConfigured ? 'Generate a small list icon (Gemini image model, icon-only instructions)' : 'Add Gemini API key in Admin → AI'}
-                    style={{
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px',
-                      cursor: (!geminiIconConfigured || generatingGeminiIcon) ? 'not-allowed' : 'pointer',
-                      border: '1px solid rgba(139,196,226,0.4)', borderRadius: '4px', background: 'rgba(139,196,226,0.1)', color: 'rgba(200,220,235,0.9)',
-                      opacity: geminiIconConfigured ? 1 : 0.5,
-                    }}
-                  >
-                    {generatingGeminiIcon ? 'Generating…' : '✨ Generate with Gemini'}
-                  </button>
-                </div>
-                {geminiIconError && (
-                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(224,112,112,0.85)' }}>{geminiIconError}</div>
-                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
                   <input
                     ref={sidebarIconInputRef}
@@ -1219,7 +1246,7 @@ export default function NoteEditor({ note, notes, connections, currentUser, dmCa
                   <button
                     type="button"
                     onClick={() => sidebarIconInputRef.current?.click()}
-                    disabled={uploadingSidebarIcon || generatingGeminiIcon}
+                    disabled={uploadingSidebarIcon}
                     style={{
                       fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
                       border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'rgba(226,213,187,0.75)',

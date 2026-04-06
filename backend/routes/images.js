@@ -7,8 +7,6 @@ const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf } = require('../utils/access');
 const { getImagesDataDir } = require('../utils/sidebarIcon');
-const { getGeminiIconApiKey } = require('../utils/geminiIconSettings');
-const { generateChronicleListIcon } = require('../services/geminiIconImage');
 
 const router = express.Router();
 
@@ -72,46 +70,6 @@ router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('im
   res.status(201).json({
     url: `/api/images/files/${req.file.filename}`,
   });
-});
-
-/**
- * POST JSON — Gemini image generation for sidebar icons only (DM/admin).
- * Body: { note_id, prompt? }. Saves PNG/JPEG/WebP under /api/images/files like manual uploads.
- */
-router.post('/generate-sidebar-icon', authenticateToken, async (req, res) => {
-  const noteId = parseInt(req.body?.note_id, 10);
-  const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim().slice(0, 400) : '';
-  if (!noteId || Number.isNaN(noteId)) return res.status(400).json({ error: 'note_id required' });
-
-  const note = db.prepare('SELECT id FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
-  if (!note) return res.status(404).json({ error: 'Note not found' });
-
-  if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {
-    return res.status(403).json({ error: 'Only campaign DMs and admins can generate sidebar icons' });
-  }
-
-  const apiKey = getGeminiIconApiKey();
-  if (!apiKey) {
-    return res.status(503).json({
-      error: 'Gemini API key is not configured. Set GEMINI_API_KEY (or GEMINI_ICON_API_KEY) on the server, or add a key in Admin → AI.',
-    });
-  }
-
-  try {
-    const { buffer, mimeType } = await generateChronicleListIcon(apiKey, prompt);
-    const maxBytes = 2 * 1024 * 1024;
-    if (buffer.length > maxBytes) {
-      return res.status(502).json({ error: 'Generated image too large; try a simpler prompt.' });
-    }
-    const ext = mimeType.includes('png') ? '.png' : mimeType.includes('webp') ? '.webp' : '.jpg';
-    const filename = crypto.randomBytes(16).toString('hex') + ext;
-    const fp = path.join(IMAGES_DIR, filename);
-    fs.writeFileSync(fp, buffer);
-    res.status(201).json({ url: `/api/images/files/${filename}` });
-  } catch (e) {
-    console.error('[images] Gemini sidebar icon:', e.message);
-    res.status(502).json({ error: e.message || 'Image generation failed' });
-  }
 });
 
 // POST upload image to a note

@@ -158,19 +158,25 @@ export default function AdminPanel({ currentUser, onClose }) {
   const [aiTestResult, setAiTestResult] = useState(null); // { ok: bool, msg: string }
   const [aiSaving, setAiSaving]         = useState(false);
   const [aiWarning, setAiWarning]       = useState('');
-  // Gemini (sidebar icons only — separate from Anthropic recaps)
-  const [geminiIconKeySet, setGeminiIconKeySet]     = useState(false);
-  const [geminiIconKeyMasked, setGeminiIconKeyMasked] = useState('');
-  const [geminiIconFromEnv, setGeminiIconFromEnv] = useState(false);
-  const [geminiIconKeyInput, setGeminiIconKeyInput] = useState('');
-  const [geminiIconTesting, setGeminiIconTesting] = useState(false);
-  const [geminiIconTestResult, setGeminiIconTestResult] = useState(null);
-  const [geminiIconSaving, setGeminiIconSaving]   = useState(false);
+  /** True when an Anthropic API key is stored (session recaps). */
+  const [recapGenerationReady, setRecapGenerationReady] = useState(false);
   // Password change
   const [curPwd, setCurPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [tab, setTab] = useState('users'); // 'users' | 'vault' | 'demo' | 'password'
   const [updateCheck, setUpdateCheck] = useState(null); // { updateAvailable, currentVersion, latestVersion, latestTag }
+
+  /**
+   * Applies a full /admin/ai/settings (or clear-key) JSON payload into React state.
+   * @param {Record<string, unknown>} d
+   */
+  const applyAiSettingsResponse = (d) => {
+    if (!d || typeof d !== 'object') return;
+    if ('ai_enabled' in d) setAiEnabled(!!d.ai_enabled);
+    if ('ai_key_set' in d) setAiKeySet(!!d.ai_key_set);
+    if ('ai_key_masked' in d) setAiKeyMasked(d.ai_key_masked || '');
+    if ('recap_generation_ready' in d) setRecapGenerationReady(!!d.recap_generation_ready);
+  };
 
   const loadData = async () => {
     try {
@@ -185,12 +191,7 @@ export default function AdminPanel({ currentUser, onClose }) {
       setUsers(usersRes.data);
       setRegOpen(settingsRes.data.registration_open);
       setDemoSeeded(demoRes.data.demo_seeded);
-      setAiEnabled(aiRes.data.ai_enabled);
-      setAiKeySet(aiRes.data.ai_key_set);
-      setAiKeyMasked(aiRes.data.ai_key_masked);
-      setGeminiIconKeySet(!!aiRes.data.gemini_icon_key_set);
-      setGeminiIconKeyMasked(aiRes.data.gemini_icon_key_masked || '');
-      setGeminiIconFromEnv(!!aiRes.data.gemini_icon_from_env);
+      applyAiSettingsResponse(aiRes.data);
       setBackupInfo(backupRes.data);
       if (updateRes && updateRes.data) setUpdateCheck(updateRes.data);
     } catch (err) {
@@ -459,25 +460,27 @@ export default function AdminPanel({ currentUser, onClose }) {
             <div style={S.section}>
               <div style={S.sectionTitle}>AI Features</div>
               <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)', lineHeight: '1.6', marginBottom: '16px' }}>
-                AI features use the <strong style={{ color: 'rgba(200,148,58,0.7)' }}>Anthropic API</strong> and are billed per use to your API account — not included in Claude Pro. Typical usage for a weekly group costs well under $1/month. You are responsible for all API costs incurred.
+                <strong style={{ color: 'rgba(200,148,58,0.7)' }}>Session recaps</strong> use <strong>Anthropic</strong> (cloud, billed per token). The server sends session context to the API; the key stays on your server.
               </div>
 
-              {/* Enable toggle */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', padding: '12px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div>
                   <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.6)', marginBottom: '3px' }}>AI FEATURES</div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: aiEnabled ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.3)' }}>
-                    {aiEnabled ? 'Enabled — AI features visible to all users' : 'Disabled — requires a valid API key to enable'}
+                    {aiEnabled ? 'Enabled — session recap generation' : 'Disabled — add Anthropic key below, then enable'}
                   </div>
+                  {aiEnabled && (
+                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '11px', color: recapGenerationReady ? 'rgba(80,200,120,0.45)' : 'rgba(220,140,100,0.5)', marginTop: '6px' }}>
+                      Anthropic API key: {recapGenerationReady ? 'configured' : 'missing — save a key below'}
+                    </div>
+                  )}
                 </div>
                 <div style={S.toggle(aiEnabled)} onClick={async () => {
                   setAiWarning('');
                   setAiSaving(true);
                   try {
                     const res = await api.post('/admin/ai/settings', { ai_enabled: !aiEnabled });
-                    setAiEnabled(res.data.ai_enabled);
-                    setAiKeySet(res.data.ai_key_set);
-                    setAiKeyMasked(res.data.ai_key_masked);
+                    applyAiSettingsResponse(res.data);
                     if (res.data.warning) setAiWarning(res.data.warning);
                   } finally { setAiSaving(false); }
                 }}>
@@ -485,7 +488,6 @@ export default function AdminPanel({ currentUser, onClose }) {
                 </div>
               </div>
 
-              {/* API Key section */}
               <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.4)', marginBottom: '8px' }}>
                 ANTHROPIC API KEY
               </div>
@@ -496,7 +498,8 @@ export default function AdminPanel({ currentUser, onClose }) {
                   <button onClick={async () => {
                     if (!window.confirm('Remove the saved API key? This will also disable AI features.')) return;
                     const res = await api.post('/admin/ai/clear-key');
-                    setAiEnabled(false); setAiKeySet(false); setAiKeyMasked(''); setAiTestResult(null);
+                    applyAiSettingsResponse(res.data);
+                    setAiTestResult(null);
                   }} style={{ background: 'none', border: '1px solid rgba(200,80,80,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,80,80,0.6)', padding: '3px 8px' }}>
                     REMOVE
                   </button>
@@ -517,9 +520,7 @@ export default function AdminPanel({ currentUser, onClose }) {
                     setAiSaving(true); setAiWarning(''); setAiTestResult(null);
                     try {
                       const res = await api.post('/admin/ai/settings', { ai_api_key: aiKeyInput.trim(), ai_enabled: aiEnabled });
-                      setAiEnabled(res.data.ai_enabled);
-                      setAiKeySet(res.data.ai_key_set);
-                      setAiKeyMasked(res.data.ai_key_masked);
+                      applyAiSettingsResponse(res.data);
                       setAiKeyInput('');
                       if (res.data.warning) setAiWarning(res.data.warning);
                     } finally { setAiSaving(false); }
@@ -529,7 +530,6 @@ export default function AdminPanel({ currentUser, onClose }) {
                 </button>
               </div>
 
-              {/* Test key button */}
               {aiKeySet && (
                 <button
                   onClick={async () => {
@@ -557,89 +557,6 @@ export default function AdminPanel({ currentUser, onClose }) {
                   ⚠ {aiWarning}
                 </div>
               )}
-
-              <div style={{ marginTop: '22px', paddingTop: '18px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.4)', marginBottom: '8px' }}>
-                  GOOGLE GEMINI — SIDEBAR ICONS (NANO BANANA)
-                </div>
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: 1.55, marginBottom: '14px' }}>
-                  Separate from Anthropic session recaps. Used only when a DM or admin clicks <strong style={{ color: 'rgba(139,196,226,0.65)' }}>Generate with Gemini</strong> on a note or folder — the server always sends strict &quot;small list icon only&quot; instructions plus an optional short theme you type. Billing is on your Google AI / Gemini plan.
-                </div>
-                {geminiIconFromEnv && (
-                  <div style={{ marginBottom: '12px', padding: '8px 12px', background: 'rgba(100,140,200,0.08)', border: '1px solid rgba(100,140,200,0.2)', borderRadius: '3px', fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(180,200,230,0.85)' }}>
-                    The server is using <code style={{ background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '2px' }}>GEMINI_API_KEY</code> or <code style={{ background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '2px' }}>GEMINI_ICON_API_KEY</code> from the environment. The database field below is ignored until the env var is removed.
-                  </div>
-                )}
-                {geminiIconKeySet && !geminiIconFromEnv && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', padding: '8px 12px', background: 'rgba(80,180,100,0.06)', border: '1px solid rgba(80,180,100,0.2)', borderRadius: '3px' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'rgba(226,213,187,0.5)', flex: 1, letterSpacing: '0.05em' }}>{geminiIconKeyMasked}</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!window.confirm('Remove the saved Gemini key from the database? (Environment variable key, if any, still applies.)')) return;
-                        const res = await api.post('/admin/ai/clear-gemini-icon-key');
-                        setGeminiIconKeySet(!!res.data.gemini_icon_key_set);
-                        setGeminiIconKeyMasked(res.data.gemini_icon_key_masked || '');
-                        setGeminiIconFromEnv(!!res.data.gemini_icon_from_env);
-                        setGeminiIconTestResult(null);
-                      }}
-                      style={{ background: 'none', border: '1px solid rgba(200,80,80,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,80,80,0.6)', padding: '3px 8px' }}
-                    >
-                      REMOVE
-                    </button>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                  <input
-                    style={{ ...S.input, flex: 1, minWidth: '200px', fontFamily: 'monospace', fontSize: '12px', letterSpacing: '0.03em', marginBottom: 0 }}
-                    type="password"
-                    placeholder={geminiIconKeySet && !geminiIconFromEnv ? 'Enter new Gemini key to replace…' : 'AI Studio API key…'}
-                    value={geminiIconKeyInput}
-                    onChange={(e) => { setGeminiIconKeyInput(e.target.value); setGeminiIconTestResult(null); }}
-                    disabled={geminiIconFromEnv}
-                  />
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!geminiIconKeyInput.trim() || geminiIconFromEnv) return;
-                      setGeminiIconSaving(true);
-                      try {
-                        const res = await api.post('/admin/ai/settings', { gemini_icon_api_key: geminiIconKeyInput.trim() });
-                        setGeminiIconKeySet(!!res.data.gemini_icon_key_set);
-                        setGeminiIconKeyMasked(res.data.gemini_icon_key_masked || '');
-                        setGeminiIconFromEnv(!!res.data.gemini_icon_from_env);
-                        setGeminiIconKeyInput('');
-                      } finally { setGeminiIconSaving(false); }
-                    }}
-                    disabled={geminiIconFromEnv || !geminiIconKeyInput.trim()}
-                    style={{ padding: '8px 14px', background: 'rgba(139,196,226,0.12)', border: '1px solid rgba(139,196,226,0.35)', borderRadius: '3px', cursor: geminiIconFromEnv ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(180,210,235,0.95)', whiteSpace: 'nowrap' }}
-                  >
-                    {geminiIconSaving ? 'SAVING…' : 'SAVE GEMINI KEY'}
-                  </button>
-                </div>
-                {geminiIconKeySet && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setGeminiIconTesting(true); setGeminiIconTestResult(null);
-                      try {
-                        await api.post('/admin/ai/test-gemini-icon-key');
-                        setGeminiIconTestResult({ ok: true, msg: 'Gemini API key is valid.' });
-                      } catch (e) {
-                        setGeminiIconTestResult({ ok: false, msg: e.response?.data?.error || 'Test failed.' });
-                      } finally { setGeminiIconTesting(false); }
-                    }}
-                    style={{ padding: '7px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)', marginBottom: '10px' }}
-                  >
-                    {geminiIconTesting ? 'TESTING…' : '⚡ TEST GEMINI KEY'}
-                  </button>
-                )}
-                {geminiIconTestResult && (
-                  <div style={{ padding: '8px 12px', borderRadius: '3px', marginBottom: '10px', background: geminiIconTestResult.ok ? 'rgba(80,180,100,0.08)' : 'rgba(200,80,80,0.08)', border: `1px solid ${geminiIconTestResult.ok ? 'rgba(80,180,100,0.25)' : 'rgba(200,80,80,0.25)'}`, fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: geminiIconTestResult.ok ? 'rgba(80,200,100,0.9)' : 'rgba(220,100,100,0.9)' }}>
-                    {geminiIconTestResult.ok ? '✓ ' : '✕ '}{geminiIconTestResult.msg}
-                  </div>
-                )}
-              </div>
 
               <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>SECURITY NOTICE</div>

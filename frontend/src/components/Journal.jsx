@@ -64,6 +64,7 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
   const [movingSession, setMovingSession] = useState(null);
   const [recapSession, setRecapSession]   = useState(null); // { id, num }
   const [aiEnabled, setAiEnabled]         = useState(false);
+  const [recapServerReady, setRecapServerReady] = useState(false);
   const [usageCache, setUsageCache]       = useState({}); // { sessionId: usageObj }
   const inputRef     = useRef(null);
   const bottomRef    = useRef(null);
@@ -113,7 +114,8 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
       // Load AI status
       try {
         const aiRes = await api.get('/admin/ai/status');
-        setAiEnabled(aiRes.data.ai_enabled);
+        setAiEnabled(!!aiRes.data.ai_enabled);
+        setRecapServerReady(!!aiRes.data.recap_generation_ready);
       } catch {}
     } catch (err) { console.error(err); } finally { if (!silent) setLoading(false); }
   }, [activeFolderId]);
@@ -292,8 +294,8 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
         <RecapViewer
           sessionId={recapSession.id}
           sessionNum={recapSession.num}
-          currentUser={currentUser}
           aiEnabled={aiEnabled}
+          recapServerReady={recapServerReady}
           onClose={async () => {
             setRecapSession(null);
             // Refresh usage cache for this session
