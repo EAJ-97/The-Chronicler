@@ -81,6 +81,18 @@ export function isCompletionScopeRootNote(note, notesById) {
 }
 
 /**
+ * True when this row is a folder marked completed (archived scope).
+ * Uses strict checks so SQLite 0/1 and JSON do not misread (avoid truthy string "0").
+ * @param {object|undefined} row
+ * @returns {boolean}
+ */
+export function isFolderMarkedCompleted(row) {
+  if (!row || !row.is_folder) return false;
+  const v = row.is_completed;
+  return v === 1 || v === true || v === '1';
+}
+
+/**
  * True when any ancestor folder has `is_completed` set (walks parent_id chain).
  * Used for client-side read-only UI before GET /notes/:id merges `under_completed_archive`.
  * @param {Array<object>} allNotes
@@ -92,7 +104,7 @@ export function isUnderCompletedArchive(allNotes, noteId) {
   const map = notesByIdMap(allNotes || []);
   let cur = map.get(noteId);
   while (cur) {
-    if (cur.is_folder && cur.is_completed) return true;
+    if (isFolderMarkedCompleted(cur)) return true;
     if (cur.parent_id == null) return false;
     cur = map.get(cur.parent_id);
   }

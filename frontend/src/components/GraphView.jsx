@@ -536,63 +536,69 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         </div>
       )}
 
-      {/* Campaign selector — always top-centre, highest z so nothing covers it */}
+      {/* Campaign selector + completed banner — column so the banner is never behind the dropdown */}
       {graphCampaignRoots.length > 0 && (
-        <div ref={campaignRef} style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}>
-          {graphCampaignRoots.length === 1 ? (
-            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', whiteSpace: 'nowrap' }}>
-              {activeCampaignName?.toUpperCase()}
-            </div>
-          ) : (
-            <select
-              value={activeCampaignId || ''}
-              onChange={e => setActiveCampaignId(parseInt(e.target.value))}
-              style={{
-                background: 'rgba(7,8,14,0.9)', border: '1px solid rgba(200,148,58,0.3)',
-                borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px',
-                letterSpacing: '0.1em', padding: '5px 28px 5px 12px', cursor: 'pointer',
-                outline: 'none', appearance: 'none',
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23c8943a' opacity='0.6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
-              }}
-            >
-              {graphCampaignRoots.map(f => (
-                <option key={f.id} value={f.id} style={{ background: '#0f1219', color: '#e2d5bb' }}>
-                  {f.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
-
-      {webReadOnly && (
         <div
+          ref={campaignRef}
           style={{
             position: 'absolute',
-            top: 8,
-            left: 16,
-            right: 16,
-            zIndex: 16,
+            top: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 8,
+            maxWidth: 'min(96vw, 520px)',
             pointerEvents: 'none',
-            textAlign: 'center',
           }}
         >
-          <span
-            style={{
-              display: 'inline-block',
-              fontFamily: 'Cinzel',
-              fontSize: '9px',
-              letterSpacing: '0.14em',
-              color: 'rgba(200,148,58,0.85)',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              border: '1px solid rgba(200,148,58,0.3)',
-              background: 'rgba(200,148,58,0.08)',
-            }}
-          >
-            Web view only — this campaign is marked completed
-          </span>
+          <div style={{ pointerEvents: 'auto' }}>
+            {graphCampaignRoots.length === 1 ? (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', whiteSpace: 'nowrap' }}>
+                {activeCampaignName?.toUpperCase()}
+              </div>
+            ) : (
+              <select
+                value={activeCampaignId || ''}
+                onChange={e => setActiveCampaignId(parseInt(e.target.value))}
+                style={{
+                  background: 'rgba(7,8,14,0.9)', border: '1px solid rgba(200,148,58,0.3)',
+                  borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px',
+                  letterSpacing: '0.1em', padding: '5px 28px 5px 12px', cursor: 'pointer',
+                  outline: 'none', appearance: 'none',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23c8943a' opacity='0.6'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+                }}
+              >
+                {graphCampaignRoots.map(f => (
+                  <option key={f.id} value={f.id} style={{ background: '#0f1219', color: '#e2d5bb' }}>
+                    {f.title}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          {webReadOnly && (
+            <span
+              style={{
+                display: 'inline-block',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.14em',
+                color: 'rgba(200,148,58,0.85)',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                border: '1px solid rgba(200,148,58,0.3)',
+                background: 'rgba(200,148,58,0.08)',
+                textAlign: 'center',
+                lineHeight: 1.35,
+              }}
+            >
+              Web view only — this campaign is marked completed
+            </span>
+          )}
         </div>
       )}
 

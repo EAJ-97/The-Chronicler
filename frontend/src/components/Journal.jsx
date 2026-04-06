@@ -114,8 +114,43 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     return (dmCampaignIds || []).includes(activeFolderId);
   }, [activeFolderId, currentUser?.is_admin, dmCampaignIds]);
 
-  /** True when this campaign is under a completed world/campaign root (read-only for non-admins). */
-  const journalLocked = activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId) && !currentUser?.is_admin;
+  /**
+   * Folder row for the selected journal campaign — used to re-sync archive state when notes list updates (e.g. completion toggled).
+   */
+  const activeJournalFolderRow = useMemo(
+    () => (activeFolderId != null ? (notes || []).find((n) => Number(n.id) === Number(activeFolderId)) : null),
+    [notes, activeFolderId],
+  );
+
+  /** GET /notes/:id `under_completed_archive` (DB walk); null until loaded. */
+  const [journalArchiveFromServer, setJournalArchiveFromServer] = useState(null);
+
+  useEffect(() => {
+    if (!activeFolderId) {
+      setJournalArchiveFromServer(null);
+      return;
+    }
+    let cancelled = false;
+    setJournalArchiveFromServer(null);
+    api
+      .get(`/notes/${activeFolderId}`)
+      .then((r) => {
+        if (!cancelled) setJournalArchiveFromServer(!!r.data?.under_completed_archive);
+      })
+      .catch(() => {
+        if (!cancelled) setJournalArchiveFromServer(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFolderId, activeJournalFolderRow?.updated_at, activeJournalFolderRow?.is_completed]);
+
+  /** Client walk (strict is_completed) while server flag is unknown; then prefer server result. */
+  const journalLockedClient = activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId);
+  const journalLocked =
+    activeFolderId != null &&
+    !currentUser?.is_admin &&
+    (journalArchiveFromServer !== null ? journalArchiveFromServer : journalLockedClient);
 
   /** localStorage key: whether the Lore So Far panel is open for this user + campaign. */
   const loreOpenKey = useMemo(() => {
@@ -797,9 +832,22 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             disabled={!activeFolderId}
           >📜 Lore So Far</button>
           <button
-            style={{ marginLeft: isMobile ? 0 : undefined, padding: isMobile ? '10px 16px' : '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(226,213,187,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.6)', ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}) }}
-            onClick={handleNewSession} title="Start a new session"
-            disabled={!activeFolderId}
+            style={{
+              marginLeft: isMobile ? 0 : undefined,
+              padding: isMobile ? '10px 16px' : '4px 12px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(226,213,187,0.2)',
+              borderRadius: '3px',
+              cursor: !activeFolderId || journalLocked ? 'not-allowed' : 'pointer',
+              fontFamily: 'Cinzel',
+              fontSize: '9px',
+              letterSpacing: '0.12em',
+              color: !activeFolderId || journalLocked ? 'rgba(226,213,187,0.25)' : 'rgba(226,213,187,0.6)',
+              ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}),
+            }}
+            onClick={handleNewSession}
+            title={journalLocked ? 'Journal is read-only while this campaign is marked completed' : 'Start a new session'}
+            disabled={!activeFolderId || journalLocked}
           >⚔ New Session</button>
         </div>
         {!isMobile && (
@@ -932,8 +980,19 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       <button
                         type="button"
                         onClick={() => handleContinueSession(session.id)}
-                        style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(139,196,58,0.25)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(139,196,58,0.6)' }}
-                        title={`Merge back into Session ${sessionNum - 1}`}
+                        disabled={journalLocked}
+                        style={{
+                          padding: '2px 8px',
+                          background: 'none',
+                          border: '1px solid rgba(139,196,58,0.25)',
+                          borderRadius: '3px',
+                          cursor: journalLocked ? 'not-allowed' : 'pointer',
+                          fontFamily: 'Cinzel',
+                          fontSize: '8px',
+                          letterSpacing: '0.1em',
+                          color: journalLocked ? 'rgba(139,196,58,0.2)' : 'rgba(139,196,58,0.6)',
+                        }}
+                        title={journalLocked ? 'Journal is read-only' : `Merge back into Session ${sessionNum - 1}`}
                       >
                         ↩ Continue Session {sessionNum - 1}
                       </button>
@@ -942,8 +1001,19 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       <button
                         type="button"
                         onClick={() => setMovingSession({ sessionId: session.id, sessionNum })}
-                        style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.45)' }}
-                        title="Move this session to another campaign"
+                        disabled={journalLocked}
+                        style={{
+                          padding: '2px 8px',
+                          background: 'none',
+                          border: '1px solid rgba(200,148,58,0.2)',
+                          borderRadius: '3px',
+                          cursor: journalLocked ? 'not-allowed' : 'pointer',
+                          fontFamily: 'Cinzel',
+                          fontSize: '8px',
+                          letterSpacing: '0.1em',
+                          color: journalLocked ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.45)',
+                        }}
+                        title={journalLocked ? 'Journal is read-only' : 'Move this session to another campaign'}
                       >
                         ↷ Move
                       </button>
@@ -1062,7 +1132,22 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         {!currentSessionId && activeFolderId && !loading && (
           <div style={{ marginBottom: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)' }}>
             No session yet —{' '}
-            <button onClick={handleNewSession} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.75)', textDecoration: 'underline', padding: 0 }}>
+            <button
+              type="button"
+              onClick={handleNewSession}
+              disabled={journalLocked}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: journalLocked ? 'not-allowed' : 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.12em',
+                color: journalLocked ? 'rgba(200,148,58,0.25)' : 'rgba(200,148,58,0.75)',
+                textDecoration: 'underline',
+                padding: 0,
+              }}
+            >
               start one
             </button>
           </div>
@@ -1070,19 +1155,21 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         {isMobile && activeFolderId && currentSessionId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <button
+              type="button"
               onMouseDown={e => e.preventDefault()}
               onClick={() => setIndentLevel(prev => Math.max(0, prev - 1))}
-              disabled={indentLevel === 0}
-              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: indentLevel === 0 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: indentLevel === 0 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              disabled={journalLocked || indentLevel === 0}
+              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: journalLocked || indentLevel === 0 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel === 0 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             >◀</button>
             <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flex: 1, textAlign: 'center' }}>
               {indentLevel === 0 ? 'TOP LEVEL' : `INDENT ${indentLevel}`}
             </span>
             <button
+              type="button"
               onMouseDown={e => e.preventDefault()}
               onClick={() => setIndentLevel(prev => Math.min(6, prev + 1))}
-              disabled={indentLevel >= 6}
-              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: indentLevel >= 6 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: indentLevel >= 6 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              disabled={journalLocked || indentLevel >= 6}
+              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: journalLocked || indentLevel >= 6 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel >= 6 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             >▶</button>
           </div>
         )}
@@ -1111,8 +1198,23 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           />
           {isMobile && inputValue.trim() && (
             <button
+              type="button"
               onClick={() => submitEntry(inputValue, indentLevel)}
-              style={{ background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '4px', cursor: 'pointer', color: '#c8943a', fontSize: '18px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              disabled={journalLocked || !activeFolderId || !currentSessionId}
+              style={{
+                background: 'rgba(200,148,58,0.15)',
+                border: '1px solid rgba(200,148,58,0.4)',
+                borderRadius: '4px',
+                cursor: journalLocked || !currentSessionId ? 'not-allowed' : 'pointer',
+                color: journalLocked || !currentSessionId ? 'rgba(200,148,58,0.25)' : '#c8943a',
+                fontSize: '18px',
+                minWidth: '44px',
+                minHeight: '44px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
             >↵</button>
           )}
         </div>
