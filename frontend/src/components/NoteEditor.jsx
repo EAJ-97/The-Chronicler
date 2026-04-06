@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -51,10 +51,32 @@ export function getCategoryColor(cat) {
 }
 
 /**
- * When the Connections / Tags / Images drawer is open, cap its height to ~1/3 of the viewport
- * (uses dvh where available so mobile keyboards don’t hide suggestion lists).
+ * Viewport-fixed box for a dropdown anchored above an input, used with createPortal(document.body)
+ * so lists are not clipped by drawer overflow or covered by the editor.
+ * @param {HTMLElement | null} inputEl - Anchor element (e.g. connection search input).
+ * @param {number} [minWidth=200] - Minimum dropdown width (tags use a smaller field).
+ * @returns {{ left: number, width: number, bottom: number, maxHeight: number } | null}
  */
-const DRAWER_EXPANDED_MAX_HEIGHT = 'min(33dvh, 33vh, 520px)';
+function getFixedDropdownAboveInput(inputEl, minWidth = 200) {
+  if (!inputEl || typeof inputEl.getBoundingClientRect !== 'function') return null;
+  const rect = inputEl.getBoundingClientRect();
+  const w = Math.max(minWidth, rect.width);
+  const left = Math.min(rect.left, Math.max(8, window.innerWidth - w - 8));
+  const maxH = Math.max(80, Math.min(240, rect.top - 8));
+  return {
+    left,
+    width: w,
+    bottom: window.innerHeight - rect.top + 4,
+    maxHeight: maxH,
+  };
+}
+
+/**
+ * Expanded bottom drawer height. Prefer vh-only clamp (not min(dvh,vh,px)) so the panel does not
+ * collapse when dvh shrinks with the on-screen keyboard. Connection/tag suggestion lists render via
+ * portal + fixed positioning above the input so they are not clipped by the drawer.
+ */
+const DRAWER_EXPANDED_MAX_HEIGHT = 'clamp(300px, 58vh, 680px)';
 
 const S = {
   wrap: {
@@ -175,8 +197,8 @@ const S = {
   dropdown: {
     position: 'absolute', bottom: '100%', left: 0, marginBottom: '4px',
     background: '#141820', border: '1px solid rgba(200,148,58,0.25)',
-    borderRadius: '3px', minWidth: '200px', zIndex: 100,
-    maxHeight: '160px', overflowY: 'auto',
+    borderRadius: '3px', minWidth: '200px', zIndex: 250,
+    maxHeight: 'min(240px, 42vh)', overflowY: 'auto',
     boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
   },
   dropItem: {
@@ -263,6 +285,12 @@ export default function NoteEditor({
   const mentionPopupRef = useRef(null);
   const mentionDebounceRef = useRef(null);
   const contentTextareaRef = useRef(null);
+  /** Anchors for portaled connection/tag suggestion dropdowns (fixed to viewport). */
+  const connInputRef = useRef(null);
+  const tagInputRef = useRef(null);
+  /** Layout rects for createPortal dropdowns; null when closed or not measured. */
+  const [connDropdownFixed, setConnDropdownFixed] = useState(null);
+  const [tagDropdownFixed, setTagDropdownFixed] = useState(null);
   useEffect(() => {
     mentionPopupRef.current = mentionPopup;
   }, [mentionPopup]);
@@ -530,10 +558,6 @@ export default function NoteEditor({
     c.source_note_id === note?.id || c.target_note_id === note?.id
   );
 
-  const connectedNoteIds = new Set(myConns.map(c =>
-    c.source_note_id === note?.id ? c.target_note_id : c.source_note_id
-  ));
-
   // Reset state when note changes (id or override linkage).
   const noteSlotKey = `${note?.id ?? ''}-${note?.source_note_id ?? ''}`;
   useEffect(() => {
@@ -774,6 +798,89 @@ export default function NoteEditor({
     }
   }, [isDM, persistSidebarIconUrl]);
 
+  const tagSuggestions = useMemo(
+    () => allTags.filter((t) => t.includes(tagInput.toLowerCase()) && !tags.includes(t)).slice(0, 6),
+    [allTags, tagInput, tags],
+  );
+
+  const filteredNotes = useMemo(() => {
+    const connsHere = connections.filter(
+      (c) => c.source_note_id === note?.id || c.target_note_id === note?.id,
+    );
+    const ids = new Set(
+      connsHere.map((c) => (c.source_note_id === note?.id ? c.target_note_id : c.source_note_id)),
+    );
+    return notes
+      .filter(
+        (n) =>
+          n.id !== note?.id &&
+          !ids.has(n.id) &&
+          n.title.toLowerCase().includes(connSearch.toLowerCase()),
+      )
+      .slice(0, 8);
+  }, [notes, note?.id, connSearch, connections]);
+
+  /**
+   * Updates fixed-position rect for the connection suggestion portal from connInputRef.
+   * Side effect: sets connDropdownFixed state.
+   */
+  const updateConnDropdownFixed = useCallback(() => {
+    if (!showDropdown || !connSearch || !filteredNotes.length) {
+      setConnDropdownFixed(null);
+      return;
+    }
+    setConnDropdownFixed(getFixedDropdownAboveInput(connInputRef.current));
+  }, [showDropdown, connSearch, filteredNotes.length]);
+
+  /**
+   * Updates fixed-position rect for the tag suggestion portal from tagInputRef.
+   * Side effect: sets tagDropdownFixed state.
+   */
+  const updateTagDropdownFixed = useCallback(() => {
+    if (!showTagSuggestions || !tagSuggestions.length) {
+      setTagDropdownFixed(null);
+      return;
+    }
+    setTagDropdownFixed(getFixedDropdownAboveInput(tagInputRef.current, 140));
+  }, [showTagSuggestions, tagSuggestions.length]);
+
+  useLayoutEffect(() => {
+    updateConnDropdownFixed();
+    if (!showDropdown || !connSearch || !filteredNotes.length) return undefined;
+    const onMove = () => updateConnDropdownFixed();
+    window.addEventListener('resize', onMove);
+    document.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      document.removeEventListener('scroll', onMove, true);
+    };
+  }, [
+    showDropdown,
+    connSearch,
+    filteredNotes.length,
+    drawerOpen,
+    drawerTab,
+    updateConnDropdownFixed,
+  ]);
+
+  useLayoutEffect(() => {
+    updateTagDropdownFixed();
+    if (!showTagSuggestions || !tagSuggestions.length) return undefined;
+    const onMove = () => updateTagDropdownFixed();
+    window.addEventListener('resize', onMove);
+    document.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      document.removeEventListener('scroll', onMove, true);
+    };
+  }, [
+    showTagSuggestions,
+    tagSuggestions.length,
+    drawerOpen,
+    drawerTab,
+    updateTagDropdownFixed,
+  ]);
+
   const markDirty = () => {
     setDirty(true);
     if (!skipUndoPush.current) {
@@ -980,14 +1087,6 @@ export default function NoteEditor({
       console.error(err);
     }
   };
-
-  const tagSuggestions = allTags.filter(t => t.includes(tagInput.toLowerCase()) && !tags.includes(t)).slice(0, 6);
-
-  const filteredNotes = notes.filter(n =>
-    n.id !== note?.id &&
-    !connectedNoteIds.has(n.id) &&
-    n.title.toLowerCase().includes(connSearch.toLowerCase())
-  ).slice(0, 8);
 
   if (!note) {
     return (
@@ -2233,6 +2332,7 @@ export default function NoteEditor({
               )}
               <div style={S.connSearch}>
                 <input
+                  ref={connInputRef}
                   style={S.connInput}
                   value={connSearch}
                   onChange={(e) => { setConnSearch(e.target.value); setShowDropdown(true); }}
@@ -2240,20 +2340,6 @@ export default function NoteEditor({
                   onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
                   placeholder="+ Link another note..."
                 />
-                {showDropdown && connSearch && filteredNotes.length > 0 && (
-                  <div style={{ ...S.dropdown, bottom: 'auto', top: '100%', marginTop: '4px', marginBottom: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.6)' }}>
-                    {filteredNotes.map(n => (
-                      <div key={n.id} style={S.dropItem}
-                        onMouseDown={() => handleAddConnection(n)}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(200,148,58,0.08)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: getCategoryColor(n.category), flexShrink: 0 }} />
-                        {n.title}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -2275,6 +2361,7 @@ export default function NoteEditor({
               {canEdit && (
                 <div style={{ position: 'relative' }}>
                   <input
+                    ref={tagInputRef}
                     style={{ ...S.connInput, width: '120px', paddingLeft: '8px' }}
                     value={tagInput}
                     onChange={e => { setTagInput(e.target.value); setShowTagSuggestions(true); }}
@@ -2283,17 +2370,6 @@ export default function NoteEditor({
                     onBlur={() => setTimeout(() => setShowTagSuggestions(false), 150)}
                     placeholder="+ add tag..."
                   />
-                  {showTagSuggestions && tagSuggestions.length > 0 && (
-                    <div style={{ ...S.dropdown, bottom: 'auto', top: '100%', marginTop: '4px', minWidth: '140px' }}>
-                      {tagSuggestions.map(t => (
-                        <div key={t} style={S.dropItem}
-                          onMouseDown={() => handleAddTag(t)}
-                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,148,58,0.08)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        >#{t}</div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
               {tags.length === 0 && !canEdit && <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.25)', fontStyle: 'italic' }}>No tags.</span>}
@@ -2629,6 +2705,88 @@ export default function NoteEditor({
           </div>
         </div>
       </div>
+
+      {showDropdown && connSearch && filteredNotes.length > 0 && connDropdownFixed &&
+        createPortal(
+          <div
+            role="listbox"
+            style={{
+              ...S.dropdown,
+              position: 'fixed',
+              left: connDropdownFixed.left,
+              width: connDropdownFixed.width,
+              bottom: connDropdownFixed.bottom,
+              top: 'auto',
+              marginBottom: 0,
+              maxHeight: connDropdownFixed.maxHeight,
+              zIndex: 10000,
+              boxShadow: '0 -8px 28px rgba(0,0,0,0.75)',
+            }}
+          >
+            {filteredNotes.map((n) => (
+              <div
+                key={n.id}
+                style={S.dropItem}
+                onMouseDown={() => handleAddConnection(n)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(200,148,58,0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: getCategoryColor(n.category),
+                    flexShrink: 0,
+                  }}
+                />
+                {n.title}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+
+      {showTagSuggestions && tagSuggestions.length > 0 && tagDropdownFixed &&
+        createPortal(
+          <div
+            role="listbox"
+            style={{
+              ...S.dropdown,
+              position: 'fixed',
+              left: tagDropdownFixed.left,
+              width: tagDropdownFixed.width,
+              bottom: tagDropdownFixed.bottom,
+              top: 'auto',
+              marginBottom: 0,
+              maxHeight: tagDropdownFixed.maxHeight,
+              minWidth: '140px',
+              zIndex: 10000,
+              boxShadow: '0 -8px 28px rgba(0,0,0,0.75)',
+            }}
+          >
+            {tagSuggestions.map((t) => (
+              <div
+                key={t}
+                style={S.dropItem}
+                onMouseDown={() => handleAddTag(t)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(200,148,58,0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                #{t}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
 
       {conflict && (
         <ConflictModal
