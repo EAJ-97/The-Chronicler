@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
-import { notesByIdMap } from '../utils/campaignTree.js';
+import { notesByIdMap, getCampaignFolderIdForSelection } from '../utils/campaignTree.js';
 import {
   getFolderTreeKind,
   iconChoicesForFolderKind,
@@ -55,9 +55,25 @@ const S = {
     display: 'flex', flexDirection: 'column', height: '100%',
     background: '#0a0c14', position: 'relative', overflow: 'hidden',
   },
+  /** Scrolls title bar + folder tools + editor when the header is taller than the viewport (e.g. DM AI Tools on campaign/world). */
+  mainScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    WebkitOverflowScrolling: 'touch',
+  },
   header: {
     padding: '20px 24px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
     paddingBottom: '16px', flexShrink: 0,
+  },
+  /** Editor column when nested inside mainScroll — fixed clamp height so inner textarea can scroll. */
+  bodyInScroll: {
+    flex: '0 0 auto',
+    height: 'clamp(260px, 58vh, 720px)',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
   },
   titleRow: { display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '12px' },
   titleInput: {
@@ -177,6 +193,8 @@ export default function NoteEditor({
   onBackToList,
   /** Open a referenced note in the side peek stack (e.g. `note:` link in preview or “Open source note”). */
   onOpenReferenceNote,
+  /** After AI creates a note (NPC / continuity), select it in the sidebar and refresh the list. */
+  onSelectNote,
 }) {
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
@@ -277,6 +295,207 @@ export default function NoteEditor({
     if (!note?.is_folder) return 'note';
     return getFolderTreeKind(note, notesByIdMap(notes || []));
   }, [note, notes]);
+
+  /** DM AI Tools (NPC / location / item / continuity) only on world or campaign roots — not nested subfolders. */
+  const dmAiRootOnly = folderTreeKind === 'world' || folderTreeKind === 'campaign';
+
+  /**
+   * Root folder for AI corpus: world root, or playable campaign folder for descendants.
+   * Used for DM-only continuity + NPC folder listing.
+   */
+  const continuityFolderId = useMemo(() => {
+    if (!note?.is_folder) return null;
+    if (note.is_world && !note.parent_id) return note.id;
+    const cid = getCampaignFolderIdForSelection(notes, note.id);
+    return cid ?? note.id;
+  }, [note, notes]);
+
+  /**
+   * All descendant folders under continuityFolderId (recursive), sorted by title — NPC target picker.
+   */
+  const descendantFolders = useMemo(() => {
+    if (!continuityFolderId || !notes?.length) return [];
+    const out = [];
+    /** @param {number} pid */
+    const walk = (pid) => {
+      (notes || []).filter((n) => n.parent_id === pid && n.is_folder).forEach((n) => {
+        out.push(n);
+        walk(n.id);
+      });
+    };
+    walk(continuityFolderId);
+    return out.sort((a, b) => a.title.localeCompare(b.title));
+  }, [notes, continuityFolderId]);
+
+  const [aiAdminStatus, setAiAdminStatus] = useState({ ai_enabled: false });
+  const [npcPrompt, setNpcPrompt] = useState('');
+  const [npcParentId, setNpcParentId] = useState(null);
+  const [npcDmOnly, setNpcDmOnly] = useState(false);
+  const [npcBusy, setNpcBusy] = useState(false);
+  const [npcErr, setNpcErr] = useState('');
+  const [locPrompt, setLocPrompt] = useState('');
+  const [locParentId, setLocParentId] = useState(null);
+  const [locDmOnly, setLocDmOnly] = useState(false);
+  const [locBusy, setLocBusy] = useState(false);
+  const [locErr, setLocErr] = useState('');
+  const [itemPrompt, setItemPrompt] = useState('');
+  const [itemParentId, setItemParentId] = useState(null);
+  const [itemDmOnly, setItemDmOnly] = useState(false);
+  const [itemBusy, setItemBusy] = useState(false);
+  const [itemErr, setItemErr] = useState('');
+  const [contBusy, setContBusy] = useState(false);
+  const [contErr, setContErr] = useState('');
+
+  useEffect(() => {
+    if (!note?.is_folder || !isDM) return;
+    api.get('/admin/ai/status').then((r) => setAiAdminStatus(r.data)).catch(() => {});
+  }, [note?.is_folder, isDM, note?.id]);
+
+  useEffect(() => {
+    setNpcParentId(null);
+    setLocParentId(null);
+    setItemParentId(null);
+  }, [note?.id]);
+
+  useEffect(() => {
+    if (npcParentId != null) return;
+    if (!continuityFolderId) return;
+    const def = descendantFolders.find((f) => /^npcs?$/i.test(String(f.title || '').trim()))?.id
+      ?? descendantFolders[0]?.id
+      ?? continuityFolderId;
+    setNpcParentId(def ?? null);
+  }, [npcParentId, descendantFolders, continuityFolderId]);
+
+  useEffect(() => {
+    if (locParentId != null) return;
+    if (!continuityFolderId) return;
+    const def = descendantFolders.find((f) => /^locations?$/i.test(String(f.title || '').trim()))?.id
+      ?? descendantFolders[0]?.id
+      ?? continuityFolderId;
+    setLocParentId(def ?? null);
+  }, [locParentId, descendantFolders, continuityFolderId]);
+
+  useEffect(() => {
+    if (itemParentId != null) return;
+    if (!continuityFolderId) return;
+    const def = descendantFolders.find((f) =>
+      /items?|artifacts?/i.test(String(f.title || '').trim())
+    )?.id
+      ?? descendantFolders[0]?.id
+      ?? continuityFolderId;
+    setItemParentId(def ?? null);
+  }, [itemParentId, descendantFolders, continuityFolderId]);
+
+  /**
+   * POST /api/ai/npc-generate — creates a note under the chosen folder; optional onSelectNote.
+   */
+  const handleNpcGenerate = async () => {
+    if (!npcParentId || !npcPrompt.trim()) {
+      setNpcErr('Choose a folder and enter a prompt.');
+      return;
+    }
+    if (!aiAdminStatus.ai_enabled) {
+      setNpcErr('AI is disabled in Admin settings.');
+      return;
+    }
+    setNpcBusy(true);
+    setNpcErr('');
+    try {
+      const res = await api.post('/ai/npc-generate', {
+        parent_id: npcParentId,
+        prompt: npcPrompt.trim(),
+        category: 'npc',
+        is_dm_only: npcDmOnly,
+      });
+      if (onSelectNote && res.data?.note?.id) onSelectNote(res.data.note.id);
+      else if (onSave) onSave(res.data?.note);
+    } catch (e) {
+      setNpcErr(e.response?.data?.error || e.message || 'NPC generation failed');
+    } finally {
+      setNpcBusy(false);
+    }
+  };
+
+  /**
+   * POST /api/ai/continuity/:folderId/generate — DM-only report note under the campaign/world root.
+   */
+  const handleContinuityGenerate = async () => {
+    if (!continuityFolderId) return;
+    if (!aiAdminStatus.ai_enabled) {
+      setContErr('AI is disabled in Admin settings.');
+      return;
+    }
+    setContBusy(true);
+    setContErr('');
+    try {
+      const res = await api.post(`/ai/continuity/${continuityFolderId}/generate`);
+      if (onSelectNote && res.data?.note?.id) onSelectNote(res.data.note.id);
+      else if (onSave) onSave();
+    } catch (e) {
+      setContErr(e.response?.data?.error || e.message || 'Continuity generation failed');
+    } finally {
+      setContBusy(false);
+    }
+  };
+
+  /**
+   * POST /api/ai/location-generate — location note under chosen folder.
+   */
+  const handleLocationGenerate = async () => {
+    if (!locParentId || !locPrompt.trim()) {
+      setLocErr('Choose a folder and enter a prompt.');
+      return;
+    }
+    if (!aiAdminStatus.ai_enabled) {
+      setLocErr('AI is disabled in Admin settings.');
+      return;
+    }
+    setLocBusy(true);
+    setLocErr('');
+    try {
+      const res = await api.post('/ai/location-generate', {
+        parent_id: locParentId,
+        prompt: locPrompt.trim(),
+        is_dm_only: locDmOnly,
+      });
+      if (onSelectNote && res.data?.note?.id) onSelectNote(res.data.note.id);
+      else if (onSave) onSave(res.data?.note);
+    } catch (e) {
+      setLocErr(e.response?.data?.error || e.message || 'Location generation failed');
+    } finally {
+      setLocBusy(false);
+    }
+  };
+
+  /**
+   * POST /api/ai/item-generate — item / artifact note under chosen folder.
+   */
+  const handleItemGenerate = async () => {
+    if (!itemParentId || !itemPrompt.trim()) {
+      setItemErr('Choose a folder and enter a prompt.');
+      return;
+    }
+    if (!aiAdminStatus.ai_enabled) {
+      setItemErr('AI is disabled in Admin settings.');
+      return;
+    }
+    setItemBusy(true);
+    setItemErr('');
+    try {
+      const res = await api.post('/ai/item-generate', {
+        parent_id: itemParentId,
+        prompt: itemPrompt.trim(),
+        is_dm_only: itemDmOnly,
+      });
+      if (onSelectNote && res.data?.note?.id) onSelectNote(res.data.note.id);
+      else if (onSave) onSave(res.data?.note);
+    } catch (e) {
+      setItemErr(e.response?.data?.error || e.message || 'Item generation failed');
+    } finally {
+      setItemBusy(false);
+    }
+  };
+
   const autoSaveTimer = useRef(null);
   const [appendContent, setAppendContent] = useState('');
   const [appendSaving, setAppendSaving] = useState(false);
@@ -1032,6 +1251,7 @@ export default function NoteEditor({
           onClose={() => setShowMove(false)}
         />
       )}
+      <div style={S.mainScroll}>
       <div style={S.header}>
         {showSourceNoteCallout && (
           <div
@@ -1488,6 +1708,237 @@ export default function NoteEditor({
           </div>
         )}
 
+        {/* DM AI Tools — only on world or campaign root folders (not nested organizers) */}
+        {note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (
+          <div style={{
+            marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(139,196,226,0.12)',
+          }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(139,196,226,0.65)', marginBottom: '6px' }}>
+              DM AI TOOLS
+            </div>
+            <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.38)', margin: '0 0 14px', lineHeight: 1.45 }}>
+              Select a <strong style={{ color: 'rgba(226,213,187,0.55)' }}>world</strong> or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>campaign</strong> folder to use generators. In each prompt, paste <strong style={{ color: 'rgba(226,213,187,0.55)' }}>[Title](note:id)</strong> links (from @mentions in notes) or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>note:123</strong> so the AI can use those notes as context.
+            </p>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                NPC / CHARACTER
+              </div>
+              <textarea
+                value={npcPrompt}
+                onChange={(e) => setNpcPrompt(e.target.value)}
+                placeholder="NPC-only: role, voice, goals… Paste [Title](note:id) to tie to existing notes."
+                rows={4}
+                disabled={!aiAdminStatus.ai_enabled}
+                style={{
+                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                }}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                  Folder
+                  <select
+                    value={npcParentId ?? ''}
+                    onChange={(e) => setNpcParentId(parseInt(e.target.value, 10) || null)}
+                    style={{
+                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                    }}
+                  >
+                    <option value={continuityFolderId}>
+                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                    </option>
+                    {descendantFolders.map((f) => (
+                      <option key={f.id} value={f.id}>{f.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                  <input
+                    type="checkbox"
+                    checked={npcDmOnly}
+                    onChange={(e) => setNpcDmOnly(e.target.checked)}
+                  />
+                  DM-only note
+                </label>
+              </div>
+              {npcErr && (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{npcErr}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleNpcGenerate}
+                disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim()}
+                style={{
+                  padding: '8px 16px', borderRadius: '4px', cursor: npcBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(139,196,226,0.4)'}`,
+                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(139,196,226,0.12)',
+                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.95)',
+                }}
+              >
+                {npcBusy ? 'Generating…' : 'Create NPC note'}
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(58,196,139,0.45)', marginBottom: '8px' }}>
+                LOCATION
+              </div>
+              <textarea
+                value={locPrompt}
+                onChange={(e) => setLocPrompt(e.target.value)}
+                placeholder="Place-only: settlement, dungeon, region… Use [Title](note:id) for canon ties."
+                rows={4}
+                disabled={!aiAdminStatus.ai_enabled}
+                style={{
+                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                }}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                  Folder
+                  <select
+                    value={locParentId ?? ''}
+                    onChange={(e) => setLocParentId(parseInt(e.target.value, 10) || null)}
+                    style={{
+                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                    }}
+                  >
+                    <option value={continuityFolderId}>
+                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                    </option>
+                    {descendantFolders.map((f) => (
+                      <option key={`loc-${f.id}`} value={f.id}>{f.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                  <input type="checkbox" checked={locDmOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
+                  DM-only note
+                </label>
+              </div>
+              {locErr && (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{locErr}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleLocationGenerate}
+                disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim()}
+                style={{
+                  padding: '8px 16px', borderRadius: '4px', cursor: locBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(58,196,139,0.4)'}`,
+                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(58,196,139,0.1)',
+                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(58,196,139,0.95)',
+                }}
+              >
+                {locBusy ? 'Generating…' : 'Create location note'}
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(107,58,196,0.55)', marginBottom: '8px' }}>
+                ITEM / ARTIFACT
+              </div>
+              <textarea
+                value={itemPrompt}
+                onChange={(e) => setItemPrompt(e.target.value)}
+                placeholder="Object-only: weapon, relic, consumable… Link notes with [Title](note:id)."
+                rows={4}
+                disabled={!aiAdminStatus.ai_enabled}
+                style={{
+                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                }}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                  Folder
+                  <select
+                    value={itemParentId ?? ''}
+                    onChange={(e) => setItemParentId(parseInt(e.target.value, 10) || null)}
+                    style={{
+                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                    }}
+                  >
+                    <option value={continuityFolderId}>
+                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                    </option>
+                    {descendantFolders.map((f) => (
+                      <option key={`item-${f.id}`} value={f.id}>{f.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                  <input type="checkbox" checked={itemDmOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
+                  DM-only note
+                </label>
+              </div>
+              {itemErr && (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{itemErr}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleItemGenerate}
+                disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim()}
+                style={{
+                  padding: '8px 16px', borderRadius: '4px', cursor: itemBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(107,58,196,0.45)'}`,
+                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(107,58,196,0.12)',
+                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(200,180,240,0.95)',
+                }}
+              >
+                {itemBusy ? 'Generating…' : 'Create item note'}
+              </button>
+            </div>
+
+            <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '6px' }}>
+                CONTINUITY CHECKER
+              </div>
+              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                Runs only on this world/campaign root. Builds a visibility-safe corpus, then writes or updates a DM-only note titled <strong style={{ color: 'rgba(226,213,187,0.65)' }}>AI Continuity Report</strong> under{' '}
+                <strong style={{ color: 'rgba(226,213,187,0.65)' }}>{(notes || []).find((n) => n.id === continuityFolderId)?.title || 'this folder'}</strong>.
+              </p>
+              {contErr && (
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{contErr}</div>
+              )}
+              <button
+                type="button"
+                onClick={handleContinuityGenerate}
+                disabled={contBusy || !aiAdminStatus.ai_enabled}
+                style={{
+                  padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
+                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(200,148,58,0.1)',
+                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : '#c8943a',
+                }}
+              >
+                {contBusy ? 'Analyzing…' : 'Generate / update continuity report'}
+              </button>
+            </div>
+
+            {!aiAdminStatus.ai_enabled && (
+              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
+                Enable AI in Admin → AI to use these tools.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Optional sidebar blurb for notes (same column as folders; icon row is in toolbar) */}
         {!note?.is_folder && canEdit && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
@@ -1507,7 +1958,7 @@ export default function NoteEditor({
         )}
       </div>
 
-      <div style={S.body}>
+      <div style={{ ...S.body, ...S.bodyInScroll }}>
         {viewMode === 'edit' ? (
           <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <textarea
@@ -1703,6 +2154,7 @@ export default function NoteEditor({
             </button>
           </div>
         )}
+      </div>
       </div>
 
       {/* ── Bottom Drawer: handle bar ── */}

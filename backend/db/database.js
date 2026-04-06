@@ -508,6 +508,22 @@ migrate('038_connections_connection_kind', () => {
   }
 });
 
+// Per-user cached "Lore So Far" text per campaign folder (Journal AI)
+migrate('039_ai_lore_cache', () => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_lore_cache (
+      user_id     INTEGER NOT NULL,
+      campaign_id INTEGER NOT NULL,
+      content     TEXT    NOT NULL DEFAULT '',
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, campaign_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (campaign_id) REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_lore_cache_campaign ON ai_lore_cache(campaign_id);
+  `);
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

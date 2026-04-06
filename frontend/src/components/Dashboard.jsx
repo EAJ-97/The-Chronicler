@@ -935,6 +935,10 @@ export default function Dashboard({ user, onLogout }) {
                   isMobile={isMobile}
                   onBackToList={() => setMobileSidebarOpen(true)}
                   onOpenReferenceNote={openReferenceNote}
+                  onSelectNote={(id) => {
+                    setSelectedNoteId(id);
+                    loadData();
+                  }}
                 />
               </div>
               {refStack.length > 0 && (

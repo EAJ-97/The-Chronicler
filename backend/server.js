@@ -15,6 +15,7 @@ const imagesRoutes      = require('./routes/images');
 const snapshotsRoutes   = require('./routes/snapshots');
 const recapsRoutes      = require('./routes/recaps');
 const backupRoutes      = require('./routes/backup');
+const aiToolsRoutes     = require('./routes/aiTools');
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use('/api/images',      imagesRoutes);
 app.use('/api/snapshots',   snapshotsRoutes);
 app.use('/api/recaps',      recapsRoutes);
 app.use('/api/backup',      backupRoutes);
+app.use('/api/ai',          aiToolsRoutes);
 
 // Server time — used by clients for consistent "Today/Yesterday" grouping
 app.get('/api/server-time', (req, res) => {

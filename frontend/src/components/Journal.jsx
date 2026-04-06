@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../api.js';
 import PromoteModal from './PromoteModal.jsx';
 import RecapViewer from './RecapViewer.jsx';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { getGraphCampaignRoots } from '../utils/campaignTree.js';
+import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 
 function parseSQLiteDate(dateStr) {
   if (!dateStr) return new Date(NaN);
@@ -70,6 +73,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const [aiEnabled, setAiEnabled]         = useState(false);
   const [recapServerReady, setRecapServerReady] = useState(false);
   const [usageCache, setUsageCache]       = useState({}); // { sessionId: usageObj }
+  /** Lore So Far panel: cached markdown per user+campaign (server) + UI state. */
+  const [lorePanelOpen, setLorePanelOpen] = useState(false);
+  const [loreText, setLoreText]           = useState('');
+  const [loreUpdatedAt, setLoreUpdatedAt] = useState(null);
+  const [loreLoading, setLoreLoading]     = useState(false);
+  const [loreBusy, setLoreBusy]           = useState(false);
+  const [loreErr, setLoreErr]             = useState('');
   /** DM-only prep checklist rows from GET /journal `session_checklists` (string session id keys). */
   const [sessionChecklists, setSessionChecklists] = useState({});
   /** Per-session party attendance from GET /journal `session_attendance` (string session id keys). */
@@ -103,6 +113,96 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     if (currentUser?.is_admin) return true;
     return (dmCampaignIds || []).includes(activeFolderId);
   }, [activeFolderId, currentUser?.is_admin, dmCampaignIds]);
+
+  /** localStorage key: whether the Lore So Far panel is open for this user + campaign. */
+  const loreOpenKey = useMemo(() => {
+    if (!currentUser?.id || !activeFolderId) return null;
+    return `chronicler_lore_panel_open_${currentUser.id}_${activeFolderId}`;
+  }, [currentUser?.id, activeFolderId]);
+
+  /** Restore open/closed Lore panel preference when the active campaign changes. */
+  useEffect(() => {
+    if (!loreOpenKey) {
+      setLorePanelOpen(false);
+      return;
+    }
+    try {
+      setLorePanelOpen(localStorage.getItem(loreOpenKey) === '1');
+    } catch {
+      setLorePanelOpen(false);
+    }
+  }, [loreOpenKey]);
+
+  /**
+   * Persists Lore panel visibility and updates React state.
+   * @param {boolean} open - Next open state.
+   */
+  const persistLorePanelOpen = useCallback((open) => {
+    setLorePanelOpen(open);
+    if (!loreOpenKey) return;
+    try {
+      localStorage.setItem(loreOpenKey, open ? '1' : '0');
+    } catch { /* ignore quota */ }
+  }, [loreOpenKey]);
+
+  /** When the panel is open, load cached lore from GET /api/ai/lore/:campaignId. */
+  useEffect(() => {
+    if (!lorePanelOpen || !activeFolderId) return;
+    let cancelled = false;
+    setLoreLoading(true);
+    setLoreErr('');
+    api.get(`/ai/lore/${activeFolderId}`)
+      .then((r) => {
+        if (!cancelled) {
+          setLoreText(r.data.content || '');
+          setLoreUpdatedAt(r.data.updated_at || null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setLoreErr(e.response?.data?.error || e.message || 'Failed to load lore');
+      })
+      .finally(() => {
+        if (!cancelled) setLoreLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [lorePanelOpen, activeFolderId]);
+
+  /**
+   * Calls POST /api/ai/lore/:id/generate (does not persist unless user clicks Save).
+   */
+  const handleLoreGenerate = async () => {
+    if (!activeFolderId) return;
+    if (!aiEnabled) {
+      setLoreErr('AI is disabled in Admin settings.');
+      return;
+    }
+    setLoreBusy(true);
+    setLoreErr('');
+    try {
+      const r = await api.post(`/ai/lore/${activeFolderId}/generate`, { save: false });
+      setLoreText(r.data.content || '');
+      setLoreUpdatedAt(r.data.updated_at || null);
+    } catch (e) {
+      setLoreErr(e.response?.data?.error || e.message || 'Generation failed');
+    } finally {
+      setLoreBusy(false);
+    }
+  };
+
+  /** Persists current lore text with PUT /api/ai/lore/:id. */
+  const handleLoreSave = async () => {
+    if (!activeFolderId) return;
+    setLoreBusy(true);
+    setLoreErr('');
+    try {
+      const r = await api.put(`/ai/lore/${activeFolderId}`, { content: loreText });
+      setLoreUpdatedAt(r.data.updated_at || null);
+    } catch (e) {
+      setLoreErr(e.response?.data?.error || e.message || 'Save failed');
+    } finally {
+      setLoreBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (journalCampaignRoots.length === 0) return;
@@ -647,7 +747,22 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)' }}>Create a root folder to begin</span>
           )}
           <button
-            style={{ marginLeft: isMobile ? 0 : 'auto', padding: isMobile ? '10px 16px' : '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(226,213,187,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.6)', ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}) }}
+            type="button"
+            style={{
+              marginLeft: isMobile ? 0 : 'auto',
+              padding: isMobile ? '10px 16px' : '4px 12px',
+              background: lorePanelOpen ? 'rgba(139,196,226,0.12)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'rgba(226,213,187,0.2)'}`,
+              borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em',
+              color: lorePanelOpen ? 'rgba(139,196,226,0.85)' : 'rgba(226,213,187,0.6)',
+              ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}),
+            }}
+            onClick={() => persistLorePanelOpen(!lorePanelOpen)}
+            title="AI summary of visible campaign notes + journal (per-user cache)"
+            disabled={!activeFolderId}
+          >📜 Lore So Far</button>
+          <button
+            style={{ marginLeft: isMobile ? 0 : undefined, padding: isMobile ? '10px 16px' : '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(226,213,187,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.6)', ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}) }}
             onClick={handleNewSession} title="Start a new session"
             disabled={!activeFolderId}
           >⚔ New Session</button>
@@ -658,6 +773,102 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           </div>
         )}
       </div>
+
+      {/* Lore So Far — visibility-safe AI summary; per-user cache on server */}
+      {lorePanelOpen && activeFolderId && (
+        <div style={{
+          flexShrink: 0,
+          maxHeight: 'min(42vh, 480px)',
+          display: 'flex',
+          flexDirection: 'column',
+          borderBottom: '1px solid rgba(139,196,226,0.15)',
+          background: 'linear-gradient(180deg, rgba(139,196,226,0.06) 0%, rgba(7,8,14,0.4) 100%)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+            padding: isMobile ? '10px 14px' : '10px 20px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+          }}>
+            <span style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.18em', color: 'rgba(139,196,226,0.85)' }}>LORE SO FAR</span>
+            {loreUpdatedAt && (
+              <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.35)' }}>
+                Saved {parseSQLiteDate(loreUpdatedAt).toLocaleString()}
+              </span>
+            )}
+            <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={loreBusy || !aiEnabled}
+                onClick={handleLoreGenerate}
+                style={{
+                  padding: '5px 12px', borderRadius: '3px', cursor: loreBusy || !aiEnabled ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  border: `1px solid ${!aiEnabled ? 'rgba(226,213,187,0.1)' : 'rgba(139,196,226,0.35)'}`,
+                  background: !aiEnabled ? 'transparent' : 'rgba(139,196,226,0.12)',
+                  color: !aiEnabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.9)',
+                }}
+                title={!aiEnabled ? 'Enable AI in Admin' : 'Regenerate from visible notes + journal'}
+              >{loreBusy ? '…' : 'Generate / Refresh'}</button>
+              <button
+                type="button"
+                disabled={loreBusy}
+                onClick={handleLoreSave}
+                style={{
+                  padding: '5px 12px', borderRadius: '3px', cursor: loreBusy ? 'default' : 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  border: '1px solid rgba(200,148,58,0.35)', background: 'rgba(200,148,58,0.1)', color: '#c8943a',
+                }}
+                title="Save current text as your cached lore for this campaign"
+              >Save</button>
+              <button
+                type="button"
+                onClick={() => persistLorePanelOpen(false)}
+                style={{
+                  padding: '5px 12px', borderRadius: '3px', cursor: 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'rgba(226,213,187,0.45)',
+                }}
+              >Close</button>
+            </div>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '12px 14px 16px' : '14px 24px 18px' }}>
+            {loreLoading ? (
+              <div style={{ fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(139,196,226,0.45)', letterSpacing: '0.12em' }}>Loading saved lore…</div>
+            ) : loreErr ? (
+              <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(224,112,112,0.85)' }}>{loreErr}</div>
+            ) : (
+              <>
+                {!aiEnabled && (
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.4)', marginBottom: '10px' }}>
+                    AI is disabled — enable it in Admin → AI to generate lore.
+                  </div>
+                )}
+                <textarea
+                  value={loreText}
+                  onChange={(e) => setLoreText(e.target.value)}
+                  placeholder="Click Generate / Refresh to build lore from notes and journal entries you can see, or type here and Save."
+                  style={{
+                    width: '100%', minHeight: '120px', boxSizing: 'border-box', resize: 'vertical',
+                    background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(139,196,226,0.15)', borderRadius: '4px',
+                    color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', lineHeight: 1.6,
+                    padding: '12px 14px', marginBottom: '14px', outline: 'none',
+                  }}
+                />
+                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(139,196,226,0.45)', marginBottom: '8px' }}>PREVIEW</div>
+                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', lineHeight: 1.65, color: '#e2d5bb' }}>
+                  {loreText.trim() ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={chroniclerUrlTransform}>
+                      {loreText}
+                    </ReactMarkdown>
+                  ) : (
+                    <span style={{ color: 'rgba(226,213,187,0.35)' }}>No lore yet.</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Entries */}
       <div ref={scrollAreaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '0 12px 16px' : '0 24px 16px' }}>

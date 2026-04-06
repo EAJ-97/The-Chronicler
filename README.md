@@ -281,6 +281,21 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 
 - **Anthropic** — [Anthropic API](https://console.anthropic.com), billed per token (**not** included in Claude Pro). The server calls the Messages API with session journal context.
 
+### Lore So Far (Journal)
+
+- **Journal → “Lore So Far”** — AI summary of what is known in the campaign from **notes you can see**, journal entries, and connections, plus linked **`note:<id>`** context when those notes are visible. **Cached per user per campaign** (not shared), so hidden DM-only notes never leak into another user’s lore.
+- **Generate / Refresh** then **Save** to store your latest text.
+
+### DM-only tools (world or campaign folder selected)
+
+These panels appear only when a **world root** or **campaign root** folder is selected (not nested organizer subfolders). You still choose which **child folder** receives each generated note (e.g. NPCs, Locations).
+
+- **NPC / Character** — Creates an **NPC-only** note (category NPC). Optional **DM-only** flag.
+- **Location** — Creates a **place-only** note (category Location).
+- **Item / Artifact** — Creates an **object-only** note (category Item).
+- In any prompt, paste **`[Title](note:id)`** links (same format as @mentions in notes) or **`note:123`** so the AI can load those notes as context (visibility rules apply).
+- **Continuity Checker** — **Generate / update continuity report** only on the **world/campaign root**; writes a DM-only note titled **AI Continuity Report** there (updates on re-run). Uses the same visibility-safe corpus rules as Lore.
+
 ### Sidebar list icons (DM/admin)
 
 - **Emoji presets** and **image upload** (small file, server-enforced limits). There is no built-in cloud image generation for icons.
