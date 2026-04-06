@@ -5,7 +5,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isDMOf } = require('../utils/access');
+const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
 const { buildLoreCorpus, buildJournalCorpusText, buildAttachmentContextFromPrompt } = require('../utils/aiCorpus');
 const {
   loreSoFarPrompts,
@@ -13,6 +13,7 @@ const {
   locationGeneratorPrompts,
   itemGeneratorPrompts,
   continuityPrompts,
+  playerLoreSummaryPrompts,
 } = require('../utils/aiPrompts');
 
 const router = express.Router();
@@ -60,6 +61,21 @@ function canAccessFolder(uid, folderId, admin) {
 function isAiGloballyEnabled() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'ai_enabled'").get();
   return row?.value === 'true';
+}
+
+/**
+ * Mirrors notes route visibility for a single note (for summarize).
+ * @param {number} noteId
+ * @param {number} userId
+ * @param {boolean} adminUser
+ */
+function canSeeNoteForAi(noteId, userId, adminUser) {
+  if (adminUser) return true;
+  const note = db.prepare('SELECT user_id, visibility FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
+  if (!note) return false;
+  if (note.user_id === userId) return true;
+  if (note.visibility === 'shared') return true;
+  return isGrantedUser(noteId, userId);
 }
 
 /**
@@ -138,6 +154,9 @@ router.post('/lore/:campaignId/generate', authenticateToken, async (req, res) =>
   if (!isAiGloballyEnabled()) return res.status(503).json({ error: 'AI features are not enabled.' });
   if (!getAnthropicApiKey()) return res.status(503).json({ error: 'No Anthropic API key configured.' });
   if (!canAccessFolder(uid, campaignId, admin)) return res.status(403).json({ error: 'Access denied' });
+  if (!admin && isNoteUnderCompletedArchive(campaignId)) {
+    return res.status(403).json({ error: 'Lore So Far generation is disabled while this campaign or world is marked completed.' });
+  }
 
   const folder = db.prepare('SELECT title FROM notes WHERE id = ? AND is_folder = 1 AND deleted_at IS NULL').get(campaignId);
   if (!folder) return res.status(400).json({ error: 'Campaign folder not found' });
@@ -186,6 +205,9 @@ router.put('/lore/:campaignId', authenticateToken, (req, res) => {
   const uid = req.user.id;
   const admin = isAdmin(uid);
   if (!canAccessFolder(uid, campaignId, admin)) return res.status(403).json({ error: 'Access denied' });
+  if (!admin && isNoteUnderCompletedArchive(campaignId)) {
+    return res.status(403).json({ error: 'Saving lore cache is disabled while this campaign or world is marked completed.' });
+  }
 
   db.prepare(
     `
@@ -201,6 +223,48 @@ router.put('/lore/:campaignId', authenticateToken, (req, res) => {
     .prepare('SELECT updated_at FROM ai_lore_cache WHERE user_id = ? AND campaign_id = ?')
     .get(uid, campaignId);
   res.json({ success: true, updated_at: row?.updated_at });
+});
+
+/**
+ * POST per-note player lore summary — only when note sits under a completed world/campaign.
+ */
+router.post('/summarize/:noteId', authenticateToken, async (req, res) => {
+  const noteId = parseInt(req.params.noteId, 10);
+  if (!Number.isFinite(noteId)) return res.status(400).json({ error: 'Invalid note id' });
+
+  const uid = req.user.id;
+  const admin = isAdmin(uid);
+  if (!isAiGloballyEnabled()) return res.status(503).json({ error: 'AI features are not enabled.' });
+  if (!getAnthropicApiKey()) return res.status(503).json({ error: 'No Anthropic API key configured.' });
+
+  if (!isNoteUnderCompletedArchive(noteId)) {
+    return res.status(403).json({
+      error: 'Lore summary is only available when the campaign or world is marked completed.',
+    });
+  }
+
+  if (!canSeeNoteForAi(noteId, uid, admin)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const note = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
+  if (!note || note.is_folder) {
+    return res.status(400).json({ error: 'Only notes can be summarized' });
+  }
+
+  if (note.is_dm_only && !admin && !isDMOf(noteId, uid)) {
+    return res.status(403).json({ error: 'DM-only notes cannot be summarized for players.' });
+  }
+
+  const bodyText = note.content || '';
+  try {
+    const { system, user } = playerLoreSummaryPrompts(note.title, bodyText);
+    const summary = await callAnthropic(system, user, 1024);
+    res.json({ summary });
+  } catch (e) {
+    console.error('[ai/summarize]', e);
+    res.status(500).json({ error: e.message || 'Summarization failed' });
+  }
 });
 
 // ── NPC Generator (DM or admin) ─────────────────────────────────────────────
@@ -225,6 +289,9 @@ router.post('/npc-generate', authenticateToken, async (req, res) => {
 
   if (!admin && !isDMOf(pid, uid)) {
     return res.status(403).json({ error: 'Only DMs or admins can generate NPC notes here' });
+  }
+  if (!admin && isNoteUnderCompletedArchive(pid)) {
+    return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
   }
 
   const cat = category === 'character' ? 'character' : 'npc';
@@ -282,6 +349,9 @@ router.post('/location-generate', authenticateToken, async (req, res) => {
   if (!admin && !isDMOf(pid, uid)) {
     return res.status(403).json({ error: 'Only DMs or admins can generate location notes here' });
   }
+  if (!admin && isNoteUnderCompletedArchive(pid)) {
+    return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
+  }
 
   const dmOnly = !!is_dm_only;
 
@@ -336,6 +406,9 @@ router.post('/item-generate', authenticateToken, async (req, res) => {
 
   if (!admin && !isDMOf(pid, uid)) {
     return res.status(403).json({ error: 'Only DMs or admins can generate item notes here' });
+  }
+  if (!admin && isNoteUnderCompletedArchive(pid)) {
+    return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
   }
 
   const dmOnly = !!is_dm_only;
@@ -395,6 +468,9 @@ router.post('/continuity/:folderId/generate', authenticateToken, async (req, res
 
   if (!admin && !isDMOf(folderId, uid)) {
     return res.status(403).json({ error: 'Only DMs or admins can run continuity analysis' });
+  }
+  if (!admin && isNoteUnderCompletedArchive(folderId)) {
+    return res.status(403).json({ error: 'Continuity generation is disabled while this campaign or world is marked completed.' });
   }
 
   try {

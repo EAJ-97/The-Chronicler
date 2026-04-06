@@ -5,7 +5,12 @@ import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
-import { notesByIdMap, getCampaignFolderIdForSelection } from '../utils/campaignTree.js';
+import {
+  notesByIdMap,
+  getCampaignFolderIdForSelection,
+  isCompletionScopeRootNote,
+  isUnderCompletedArchive,
+} from '../utils/campaignTree.js';
 import {
   getFolderTreeKind,
   iconChoicesForFolderKind,
@@ -322,7 +327,18 @@ export default function NoteEditor({
   const canFullEdit = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isGranted);
   const canManage   = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isDM); // rename, delete, move, perms
   const canAppend   = isDM && !isOwner && !isGranted && !isAdminUser; // DM on someone else's note
-  const canEdit     = canFullEdit; // kept for backward compat with existing refs
+  const notesByIdForArchive = useMemo(() => notesByIdMap(notes || []), [notes]);
+  const underArchive =
+    note?.under_completed_archive ??
+    (note?.id != null ? isUnderCompletedArchive(notes, note.id) : false);
+  /** Full edit of title/body (blocked when subtree is in completed archive, except admins). */
+  const canEditContent = canFullEdit && (!underArchive || isAdminUser);
+  /** DM append to another user's note — disabled in archived campaigns (non-admin). */
+  const canAppendEffective = canAppend && (!underArchive || isAdminUser);
+  /** Move, delete, permissions — disabled when archived for non-admin. */
+  const canManageUi = canManage && (!underArchive || isAdminUser);
+  /** Same as legacy `canEdit`: full content edit only (DM append uses a separate textarea). */
+  const canEdit = canEditContent;
   /** Folders: icon + description when user can manage or fully edit the folder */
   const canFolderStyle = !!(note?.is_folder && (canManage || canFullEdit));
   const folderTreeKind = useMemo(() => {
@@ -332,6 +348,12 @@ export default function NoteEditor({
 
   /** DM AI Tools (NPC / location / item / continuity) only on world or campaign roots — not nested subfolders. */
   const dmAiRootOnly = folderTreeKind === 'world' || folderTreeKind === 'campaign';
+
+  /** Only world/campaign scope roots may store `is_completed` (matches backend). */
+  const scopeRootForCompletion = !!(note?.is_folder && isCompletionScopeRootNote(note, notesByIdForArchive));
+  /** DM or admin may flip completion on that root (including to clear archive). */
+  const canToggleCompletion =
+    scopeRootForCompletion && (isAdminUser || (dmCampaignIds || []).includes(note.id));
 
   /**
    * Root folder for AI corpus: world root, or playable campaign folder for descendants.
@@ -379,11 +401,16 @@ export default function NoteEditor({
   const [itemErr, setItemErr] = useState('');
   const [contBusy, setContBusy] = useState(false);
   const [contErr, setContErr] = useState('');
+  /** Player lore summary (POST /ai/summarize) for archived campaigns. */
+  const [summarizeBusy, setSummarizeBusy] = useState(false);
+  const [summarizeErr, setSummarizeErr] = useState('');
+  const [summarizeText, setSummarizeText] = useState('');
+  const [completionBusy, setCompletionBusy] = useState(false);
 
   useEffect(() => {
-    if (!note?.is_folder || !isDM) return;
+    if (!note?.id) return;
     api.get('/admin/ai/status').then((r) => setAiAdminStatus(r.data)).catch(() => {});
-  }, [note?.is_folder, isDM, note?.id]);
+  }, [note?.id]);
 
   useEffect(() => {
     setNpcParentId(null);
@@ -530,6 +557,41 @@ export default function NoteEditor({
     }
   };
 
+  /**
+   * Sets `is_completed` on a world/campaign scope root; descendants become read-only until cleared.
+   * @param {boolean} nextChecked - Target completed flag from the checkbox.
+   */
+  const handleCompletionToggle = async (nextChecked) => {
+    if (!note?.id || !canToggleCompletion) return;
+    setCompletionBusy(true);
+    try {
+      const res = await api.put(`/notes/${note.id}`, { is_completed: nextChecked ? 1 : 0 });
+      if (onSave) onSave(res.data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCompletionBusy(false);
+    }
+  };
+
+  /**
+   * POST /api/ai/summarize/:noteId — player-safe lore recap when the scope is marked completed.
+   */
+  const handlePlayerSummarize = async () => {
+    if (!note?.id || note.is_folder) return;
+    setSummarizeBusy(true);
+    setSummarizeErr('');
+    setSummarizeText('');
+    try {
+      const res = await api.post(`/ai/summarize/${note.id}`);
+      setSummarizeText(res.data?.summary || '');
+    } catch (e) {
+      setSummarizeErr(e.response?.data?.error || e.message || 'Summarization failed');
+    } finally {
+      setSummarizeBusy(false);
+    }
+  };
+
   const autoSaveTimer = useRef(null);
   const [appendContent, setAppendContent] = useState('');
   const [appendSaving, setAppendSaving] = useState(false);
@@ -587,6 +649,8 @@ export default function NoteEditor({
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setNoteIconMenuOpen(false);
     setMentionPopup(null);
+    setSummarizeText('');
+    setSummarizeErr('');
   }, [noteSlotKey]);
 
   useEffect(() => () => {
@@ -1405,6 +1469,23 @@ export default function NoteEditor({
             )}
           </div>
         )}
+        {underArchive && !isAdminUser && (
+          <div
+            style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(200,148,58,0.28)',
+              background: 'rgba(200,148,58,0.07)',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '13px',
+              color: 'rgba(226,213,187,0.82)',
+              lineHeight: 1.45,
+            }}
+          >
+            This campaign or world is marked <strong style={{ color: '#c8943a' }}>completed</strong>. Notes and journal are read-only. A DM can clear completion on the world or campaign root folder.
+          </div>
+        )}
         {isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', marginLeft: '-8px' }}>
             <button
@@ -1424,7 +1505,7 @@ export default function NoteEditor({
             placeholder="Note title..."
             disabled={!canEdit}
           />
-          {canEdit && (
+          {canManageUi && (
             <div style={isMobile ? { display: 'flex', gap: '8px', flexWrap: 'wrap' } : { display: 'contents' }}>
               {isMobile && (
                 <button
@@ -1656,7 +1737,7 @@ export default function NoteEditor({
           )}
 
           {/* Permissions button — owner or admin can manage */}
-          {canManage && (
+          {canManageUi && (
             <button
               style={{ ...S.toggleShared(noteVisibility === 'shared'), position: 'relative' }}
               onClick={() => { setDrawerTab('permissions'); setDrawerOpen(true); }}
@@ -1719,8 +1800,56 @@ export default function NoteEditor({
 
         </div>
 
+        {/* Player lore summary — gated on completed campaign/world (server + underArchive). */}
+        {!note?.is_folder && underArchive && aiAdminStatus.ai_enabled && (!note?.is_dm_only || isDM || isAdminUser) && (
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+              LORE SUMMARY (AI)
+            </div>
+            <button
+              type="button"
+              onClick={handlePlayerSummarize}
+              disabled={summarizeBusy}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '4px',
+                cursor: summarizeBusy ? 'wait' : 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.12em',
+                border: '1px solid rgba(139,196,226,0.45)',
+                background: 'rgba(139,196,226,0.1)',
+                color: 'rgba(200,220,240,0.95)',
+                marginBottom: summarizeErr || summarizeText ? '10px' : 0,
+              }}
+            >
+              {summarizeBusy ? 'Summarizing…' : 'Summarize (AI)'}
+            </button>
+            {summarizeErr && (
+              <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{summarizeErr}</div>
+            )}
+            {summarizeText && (
+              <div
+                style={{
+                  fontFamily: 'Crimson Pro, serif',
+                  fontSize: '14px',
+                  lineHeight: 1.65,
+                  color: 'rgba(226,213,187,0.88)',
+                  padding: '12px 14px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(200,148,58,0.2)',
+                  background: 'rgba(0,0,0,0.2)',
+                  maxWidth: '640px',
+                }}
+              >
+                {summarizeText}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Folder appearance: icon palette by world / campaign / subfolder + sidebar blurb */}
-        {canFolderStyle && (
+        {canFolderStyle && canEditContent && (
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
@@ -1813,8 +1942,34 @@ export default function NoteEditor({
           </div>
         )}
 
+        {/* Mark world/campaign complete — DM/admin on scope root only */}
+        {canToggleCompletion && (
+          <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                cursor: completionBusy ? 'wait' : 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.1em',
+                color: note?.is_completed ? 'rgba(200,148,58,0.9)' : 'rgba(226,213,187,0.65)',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!!note?.is_completed}
+                disabled={completionBusy}
+                onChange={(e) => handleCompletionToggle(e.target.checked)}
+              />
+              Mark {folderTreeKind === 'world' ? 'world' : 'campaign'} as completed (archives subtree — read-only for players)
+            </label>
+          </div>
+        )}
+
         {/* DM AI Tools — only on world or campaign root folders (not nested organizers) */}
-        {note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (
+        {note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (!underArchive || isAdminUser) && (
           <div style={{
             marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(139,196,226,0.12)',
           }}>
@@ -2215,7 +2370,7 @@ export default function NoteEditor({
         )}
 
         {/* DM Append section — shown when DM is viewing someone else's note */}
-        {canAppend && (
+        {canAppendEffective && (
           <div style={{ borderTop: '1px solid rgba(200,148,58,0.2)', padding: '12px 20px', background: 'rgba(200,148,58,0.04)' }}>
             <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '8px' }}>
               ⚔ DM ADDITION — appended with your name and date
@@ -2276,7 +2431,7 @@ export default function NoteEditor({
           { id: 'connections', label: `Connections${myConns.length ? ` (${myConns.length})` : ''}` },
           { id: 'tags',        label: `Tags${tags.length ? ` (${tags.length})` : ''}` },
           { id: 'images',      label: `Images${images.length ? ` (${images.length})` : ''}` },
-          ...(canManage ? [{ id: 'permissions', label: noteVisibility === 'shared' ? '⚔ Party Shared' : '🔒 Access' }] : []),
+          ...(canManageUi ? [{ id: 'permissions', label: noteVisibility === 'shared' ? '⚔ Party Shared' : '🔒 Access' }] : []),
         ].map(tab => (
           <button key={tab.id}
             onClick={() => { setDrawerTab(tab.id); setDrawerOpen(o => drawerTab === tab.id ? !o : true); }}

@@ -65,3 +65,36 @@ export function getGraphCampaignRoots(allNotes) {
     return !!(p && p.is_world);
   });
 }
+
+/**
+ * True when this folder row is a world root, standalone campaign root, or campaign folder directly under a world
+ * (matches backend `isCompletionScopeRoot` — only these rows may store `is_completed`).
+ * @param {object} note - Row from /api/notes
+ * @param {Map<number, object>} notesById - From {@link notesByIdMap}
+ * @returns {boolean}
+ */
+export function isCompletionScopeRootNote(note, notesById) {
+  if (!note?.is_folder) return false;
+  if (!note.parent_id) return true;
+  const p = notesById.get(note.parent_id);
+  return !!(p && p.is_world);
+}
+
+/**
+ * True when any ancestor folder has `is_completed` set (walks parent_id chain).
+ * Used for client-side read-only UI before GET /notes/:id merges `under_completed_archive`.
+ * @param {Array<object>} allNotes
+ * @param {number|null|undefined} noteId
+ * @returns {boolean}
+ */
+export function isUnderCompletedArchive(allNotes, noteId) {
+  if (noteId == null) return false;
+  const map = notesByIdMap(allNotes || []);
+  let cur = map.get(noteId);
+  while (cur) {
+    if (cur.is_folder && cur.is_completed) return true;
+    if (cur.parent_id == null) return false;
+    cur = map.get(cur.parent_id);
+  }
+  return false;
+}

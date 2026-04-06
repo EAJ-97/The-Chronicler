@@ -4,6 +4,8 @@ import NoteEditor from './NoteEditor.jsx';
 import GraphView from './GraphView.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import Journal from './Journal.jsx';
+import TimelineView from './TimelineView.jsx';
+import IntegrityPanel from './IntegrityPanel.jsx';
 import NotePanel from './NotePanel.jsx';
 import ReferencePeekPanel from './ReferencePeekPanel.jsx';
 import SnapshotPanel from './SnapshotPanel.jsx';
@@ -154,6 +156,7 @@ export default function Dashboard({ user, onLogout }) {
   const [viewAsUserId, setViewAsUserId] = useState(null); // admin: full visibility as another user (exclusive with simulatedRole)
   const [viewAsUserList, setViewAsUserList] = useState([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [showIntegrity, setShowIntegrity] = useState(false);
   const [campaignModalOpts, setCampaignModalOpts] = useState({});
   const simulatedRoleRef = useRef(null);
   const viewAsUserIdRef = useRef(null);
@@ -654,7 +657,18 @@ export default function Dashboard({ user, onLogout }) {
             <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
             <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
             <button style={S.viewBtn(view === 'journal')} onClick={() => setView('journal')}>⚡ Journal</button>
+            <button style={S.viewBtn(view === 'timeline')} onClick={() => setView('timeline')}>⏱ Timeline</button>
           </div>
+          {(effectiveDmCampaignIds.length > 0 || user.is_admin) && (
+            <button
+              type="button"
+              style={{ ...S.topBtn, marginLeft: '10px' }}
+              onClick={() => setShowIntegrity(true)}
+              title="Scan campaign folder for data issues"
+            >
+              Integrity
+            </button>
+          )}
           {!!user.is_admin && (
             isNarrow ? (
               <div style={{ position: 'relative', marginLeft: '10px' }} ref={viewAsRef}>
@@ -837,6 +851,11 @@ export default function Dashboard({ user, onLogout }) {
             <button style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
             </button>
+            {(effectiveDmCampaignIds.length > 0 || user.is_admin) && (
+              <button style={S.mobileMenuBtn} onClick={() => { setShowIntegrity(true); setMobileMenuOpen(false); }}>
+                <span>⚙</span> Integrity scan
+              </button>
+            )}
             {!!user.is_admin && (
               <button style={{ ...S.mobileMenuBtn, color: 'rgba(200,148,58,0.85)' }} onClick={() => { setShowAdmin(true); setMobileMenuOpen(false); }}>
                 <span>⚙</span> Admin
@@ -891,6 +910,15 @@ export default function Dashboard({ user, onLogout }) {
         )}
 
         {/* Campaign creation modal */}
+        {showIntegrity && (
+          <IntegrityPanel
+            onClose={() => setShowIntegrity(false)}
+            notes={notes}
+            currentUser={user}
+            dmCampaignIds={effectiveDmCampaignIds}
+          />
+        )}
+
         {showCampaignModal && (
           <CampaignModal
             key={`${campaignModalOpts.initialCreationType ?? ''}-${campaignModalOpts.underWorldId ?? ''}`}
@@ -1014,6 +1042,10 @@ export default function Dashboard({ user, onLogout }) {
           {view === 'journal' && (
             <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} dmCampaignIds={effectiveDmCampaignIds} />
           )}
+
+          {view === 'timeline' && (
+            <TimelineView notes={notes} currentUser={user} />
+          )}
         </div>
       </div>
 
@@ -1031,6 +1063,10 @@ export default function Dashboard({ user, onLogout }) {
           <button style={S.bottomNavBtn(view === 'journal')} onClick={() => setView('journal')}>
             <span style={S.bottomNavIcon}>⚡</span>
             <span style={S.bottomNavLabel}>JOURNAL</span>
+          </button>
+          <button style={S.bottomNavBtn(view === 'timeline')} onClick={() => setView('timeline')}>
+            <span style={S.bottomNavIcon}>⏱</span>
+            <span style={S.bottomNavLabel}>TIME</span>
           </button>
           <button style={S.bottomNavBtn(mobileMenuOpen)} onClick={() => setMobileMenuOpen(v => !v)}>
             <span style={S.bottomNavIcon}>☰</span>

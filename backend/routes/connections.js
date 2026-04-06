@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isDMOf, isGrantedUser } = require('../utils/access');
+const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
 
 const router = express.Router();
 
@@ -82,6 +82,14 @@ router.post('/', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
+  const admin = isAdmin(req.user.id);
+  if (
+    !admin &&
+    (isNoteUnderCompletedArchive(source_note_id) || isNoteUnderCompletedArchive(target_note_id))
+  ) {
+    return res.status(403).json({ error: 'This campaign or world is marked completed; connections are read-only.' });
+  }
+
   let is_speculative = connection_kind === 'canon' ? 0 : 1;
 
   if (connection_kind === 'ship') {
@@ -126,6 +134,12 @@ router.put('/:id', authenticateToken, (req, res) => {
   const isCreator = conn.created_by === req.user.id;
   const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
   if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });
+  if (
+    !admin &&
+    (isNoteUnderCompletedArchive(conn.source_note_id) || isNoteUnderCompletedArchive(conn.target_note_id))
+  ) {
+    return res.status(403).json({ error: 'This campaign or world is marked completed; connections are read-only.' });
+  }
   db.prepare('UPDATE connections SET label = ? WHERE id = ?').run(label, req.params.id);
   const updated = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (req.app.broadcast) req.app.broadcast({ type: 'connections_changed' });
@@ -140,6 +154,12 @@ router.delete('/:id', authenticateToken, (req, res) => {
   const isCreator = conn.created_by === req.user.id;
   const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
   if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });
+  if (
+    !admin &&
+    (isNoteUnderCompletedArchive(conn.source_note_id) || isNoteUnderCompletedArchive(conn.target_note_id))
+  ) {
+    return res.status(403).json({ error: 'This campaign or world is marked completed; connections are read-only.' });
+  }
   db.prepare('DELETE FROM connections WHERE id = ?').run(req.params.id);
   if (req.app.broadcast) req.app.broadcast({ type: 'connections_changed' });
   res.json({ success: true });

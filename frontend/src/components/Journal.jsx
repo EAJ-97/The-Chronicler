@@ -5,7 +5,7 @@ import api from '../api.js';
 import PromoteModal from './PromoteModal.jsx';
 import RecapViewer from './RecapViewer.jsx';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
-import { getGraphCampaignRoots } from '../utils/campaignTree.js';
+import { getGraphCampaignRoots, isUnderCompletedArchive } from '../utils/campaignTree.js';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 
 function parseSQLiteDate(dateStr) {
@@ -114,6 +114,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     return (dmCampaignIds || []).includes(activeFolderId);
   }, [activeFolderId, currentUser?.is_admin, dmCampaignIds]);
 
+  /** True when this campaign is under a completed world/campaign root (read-only for non-admins). */
+  const journalLocked = activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId) && !currentUser?.is_admin;
+
   /** localStorage key: whether the Lore So Far panel is open for this user + campaign. */
   const loreOpenKey = useMemo(() => {
     if (!currentUser?.id || !activeFolderId) return null;
@@ -171,6 +174,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * Calls POST /api/ai/lore/:id/generate (does not persist unless user clicks Save).
    */
   const handleLoreGenerate = async () => {
+    if (journalLocked) return;
     if (!activeFolderId) return;
     if (!aiEnabled) {
       setLoreErr('AI is disabled in Admin settings.');
@@ -191,6 +195,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
   /** Persists current lore text with PUT /api/ai/lore/:id. */
   const handleLoreSave = async () => {
+    if (journalLocked) return;
     if (!activeFolderId) return;
     setLoreBusy(true);
     setLoreErr('');
@@ -298,6 +303,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const currentSessionId = sessions.length > 0 ? sessions[sessions.length - 1].id : null;
 
   const submitEntry = async (content, indent) => {
+    if (journalLocked) return;
     if (!content.trim() || !currentSessionId) return;
     try {
       const res = await api.post('/journal', {
@@ -323,6 +329,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleKeyDown = async (e) => {
+    if (journalLocked) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       await submitEntry(inputValue, indentLevel);
@@ -336,6 +343,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleNewSession = async () => {
+    if (journalLocked) return;
     try {
       const res = await api.post('/journal/sessions', { folder_id: activeFolderId });
       setSessions(prev => [...prev, res.data]);
@@ -343,6 +351,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleContinueSession = async (sessionId) => {
+    if (journalLocked) return;
     // Delete session — backend merges its entries into previous
     try {
       await api.delete(`/journal/sessions/${sessionId}`);
@@ -356,6 +365,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const saveEdit = async (id) => {
+    if (journalLocked) return;
     const content = editValue.trim();
     if (!content) return;
     try {
@@ -366,6 +376,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleChangeIndent = async (entry, delta) => {
+    if (journalLocked) return;
     const newLevel = Math.max(0, Math.min(6, (entry.indent_level || 0) + delta));
     try {
       const res = await api.put(`/journal/${entry.id}`, { indent_level: newLevel });
@@ -374,6 +385,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleDelete = async (id) => {
+    if (journalLocked) return;
     try {
       await api.delete(`/journal/${id}`);
       setEntries(prev => prev.filter(e => e.id !== id));
@@ -401,6 +413,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handlePromoteConfirm = async ({ title, category, parent_id, entryId, mode, target_note_id, markdown_content }) => {
+    if (journalLocked) return;
     try {
       await api.post(`/journal/${entryId}/promote`, { title, category, parent_id, mode, target_note_id, markdown_content });
       setPromoteEntry(null);
@@ -408,6 +421,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   const handleMoveSession = async (targetFolderId) => {
+    if (journalLocked) return;
     if (!movingSession) return;
     try {
       await api.put(`/journal/sessions/${movingSession.sessionId}/move`, { target_folder_id: targetFolderId });
@@ -421,6 +435,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * @param {number} sessionId
    */
   const handlePrepAdd = async (sessionId) => {
+    if (journalLocked) return;
     const draft = (prepDrafts[sessionId] || '').trim();
     if (!draft) return;
     try {
@@ -435,6 +450,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * @param {{ id: number, is_checked?: number }} item
    */
   const handlePrepToggleChecked = async (item) => {
+    if (journalLocked) return;
     try {
       await api.put(`/journal/checklist-items/${item.id}`, { is_checked: !item.is_checked });
       loadEntries(true);
@@ -446,6 +462,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * @param {number} itemId
    */
   const handlePrepDelete = async (itemId) => {
+    if (journalLocked) return;
     try {
       await api.delete(`/journal/checklist-items/${itemId}`);
       loadEntries(true);
@@ -457,6 +474,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * @param {number} sessionId
    */
   const handlePrepResetChecks = async (sessionId) => {
+    if (journalLocked) return;
     try {
       await api.post(`/journal/sessions/${sessionId}/checklist-items/reset-checks`);
       loadEntries(true);
@@ -470,6 +488,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
    * @param {boolean} attended
    */
   const handleAttendanceSet = async (sessionId, userId, attended) => {
+    if (journalLocked) return;
     try {
       await api.put(`/journal/sessions/${sessionId}/attendance`, { user_id: userId, attended });
       loadEntries(true);
@@ -481,6 +500,22 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
+      {journalLocked && (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '8px 16px',
+            borderBottom: '1px solid rgba(200,148,58,0.2)',
+            background: 'rgba(200,148,58,0.07)',
+            fontFamily: 'Crimson Pro, serif',
+            fontSize: '13px',
+            color: 'rgba(226,213,187,0.85)',
+            lineHeight: 1.45,
+          }}
+        >
+          This campaign is marked <strong style={{ color: '#c8943a' }}>completed</strong>. The journal is read-only. A DM can clear completion on the campaign or world root folder.
+        </div>
+      )}
       {recapSession && (
         <RecapViewer
           sessionId={recapSession.id}
@@ -992,6 +1027,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           editValue={editValue}
                           editRef={editRef}
                           currentUser={currentUser}
+                          journalLocked={journalLocked}
                           isInsertTarget={insertAfterId === entry.id}
                           onEdit={() => { setEditingId(entry.id); setEditValue(entry.content); }}
                           onEditChange={setEditValue}
@@ -1070,7 +1106,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={!activeFolderId ? 'Select a campaign above first...' : !currentSessionId ? 'Start a session first...' : insertAfterId ? 'Insert entry here...' : indentLevel === 0 ? 'Log an entry...' : 'Sub-note...'}
-            disabled={!activeFolderId || !currentSessionId}
+            disabled={!activeFolderId || !currentSessionId || journalLocked}
             autoFocus
           />
           {isMobile && inputValue.trim() && (
@@ -1085,13 +1121,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   );
 }
 
-function EntryRow({ entry, isEditing, editValue, editRef, currentUser, isInsertTarget, onEdit, onEditChange, onEditKeyDown, onEditBlur, onDelete, onPromote, onInsertAfter, onIndentMore, onIndentLess, isMobile }) {
+function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLocked = false, isInsertTarget, onEdit, onEditChange, onEditKeyDown, onEditBlur, onDelete, onPromote, onInsertAfter, onIndentMore, onIndentLess, isMobile }) {
   const [hovered, setHovered] = useState(false);
   const [mobileShowControls, setMobileShowControls] = useState(false);
   const isIndented = entry.indent_level > 0;
   const isOwner = entry.user_id === currentUser?.id;
   const isAdmin = !!currentUser?.is_admin;
-  const canEdit = isOwner || isAdmin;
+  const canEdit = (isOwner || isAdmin) && !journalLocked;
   const showControls = isMobile ? mobileShowControls : hovered;
 
   return (

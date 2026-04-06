@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape';
 import { getCategoryColor } from './NoteEditor.jsx';
 import GraphView3D from './GraphView3D.jsx';
 import api from '../api.js';
-import { getGraphCampaignRoots } from '../utils/campaignTree.js';
+import { getGraphCampaignRoots, isUnderCompletedArchive } from '../utils/campaignTree.js';
 
 function useContainerWidth(ref) {
   const [width, setWidth] = useState(9999);
@@ -176,6 +176,18 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   const dmViewKey = `chronicler_graph_dmview_${currentUser?.id || 'anon'}`;
   const isAdminUser = !simulatedRole && !!currentUser?.is_admin;
   const isDMOfActiveCampaign = isAdminUser || (dmCampaignIds || []).includes(activeCampaignId);
+  /** Completed campaign/world: no new graph edges or label edits for non-admins. */
+  const webReadOnly =
+    activeCampaignId != null && isUnderCompletedArchive(allNotes || [], activeCampaignId) && !isAdminUser;
+
+  const safeCreateConnection = useCallback(
+    (sourceId, targetId, opts) => {
+      if (webReadOnly) return;
+      onCreateConnection(sourceId, targetId, opts);
+    },
+    [webReadOnly, onCreateConnection]
+  );
+
   const [dmView, setDmViewRaw] = useState(() => {
     try { return localStorage.getItem(dmViewKey) === 'true'; } catch { return false; }
   });
@@ -210,26 +222,27 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   editingEdgeRef.current = editingEdge;
 
   const handleEdgeLabelSave = useCallback(async (connId, label) => {
+    if (webReadOnly) return;
     setEditingEdge(null);
     try {
       await api.put(`/connections/${connId}`, { label });
       onUpdateConnection();
     } catch (err) { console.error(err); }
-  }, [onUpdateConnection]);
+  }, [onUpdateConnection, webReadOnly]);
 
   /**
    * Deletes a theory or ship edge from the graph (API); closes the editor on success.
    * @param {number} connId
    */
   const handleGimmickEdgeDelete = useCallback(async (connId) => {
-    if (!onDeleteConnection) return;
+    if (webReadOnly || !onDeleteConnection) return;
     try {
       const result = await onDeleteConnection(connId);
       if (result !== false) setEditingEdge(null);
     } catch (err) {
       console.error(err);
     }
-  }, [onDeleteConnection]);
+  }, [onDeleteConnection, webReadOnly]);
 
   /** Clears the two-tap link pick state (connect / theory / ship) and node highlight classes. */
   const clearLinkPick = () => {
@@ -256,6 +269,15 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     else if (shipModeRef.current) exitShipMode();
     else exitConnectMode();
   };
+
+  useEffect(() => {
+    if (!webReadOnly) return;
+    exitConnectMode();
+    exitTheoryMode();
+    exitShipMode();
+    exitPathMode();
+    setEditingEdge(null);
+  }, [webReadOnly, exitPathMode]);
 
   // Position key for localStorage per campaign
   const posKey = `chronicler_graph_positions_${activeCampaignId || 'all'}`;
@@ -337,7 +359,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       cy.one('layoutstop', () => separateLabels(cy, posKey));
     }
 
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
+    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
 
     return () => {
       clearTimeout(hoverTimerRef.current);
@@ -417,7 +439,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     };
     cy.on('dragfree', 'node', savePositions);
     cy.on('layoutstop', savePositions);
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
+    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
   }, [visibleNotes, visibleConnections]);
 
   // Tiered highlight
@@ -541,6 +563,36 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               ))}
             </select>
           )}
+        </div>
+      )}
+
+      {webReadOnly && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 16,
+            right: 16,
+            zIndex: 16,
+            pointerEvents: 'none',
+            textAlign: 'center',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              fontFamily: 'Cinzel',
+              fontSize: '9px',
+              letterSpacing: '0.14em',
+              color: 'rgba(200,148,58,0.85)',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(200,148,58,0.3)',
+              background: 'rgba(200,148,58,0.08)',
+            }}
+          >
+            Web view only — this campaign is marked completed
+          </span>
         </div>
       )}
 
@@ -687,7 +739,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
             activeCampaignId={activeCampaignId}
             connectMode={connectMode}
             onExitConnectMode={exitConnectMode}
-            onCreateConnection={onCreateConnection}
+            onCreateConnection={safeCreateConnection}
             pathMode={pathMode}
             pathSource={pathSource}
             onPathSourceSet={(src) => setPathSource(src)}

@@ -524,6 +524,15 @@ migrate('039_ai_lore_cache', () => {
   `);
 });
 
+// World / campaign root: mark scope "completed" → subtree read-only + unlocks per-note lore summary
+migrate('040_notes_is_completed', () => {
+  try {
+    db.exec('ALTER TABLE notes ADD COLUMN is_completed INTEGER DEFAULT 0');
+  } catch {
+    /* already exists */
+  }
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

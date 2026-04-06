@@ -1,7 +1,16 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, getRootFolderId, getCampaignFolderId, isDMOf, isDMOfFolder, isGrantedUser } = require('../utils/access');
+const {
+  isAdmin,
+  getRootFolderId,
+  getCampaignFolderId,
+  isDMOf,
+  isDMOfFolder,
+  isGrantedUser,
+  isCompletionScopeRoot,
+  isNoteUnderCompletedArchive,
+} = require('../utils/access');
 const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 
 const router = express.Router();
@@ -125,7 +134,7 @@ router.get('/', authenticateToken, (req, res) => {
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
     n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id,
-    n.display_icon, n.display_summary, u.username AS author`;
+    n.display_icon, n.display_summary, n.is_completed, u.username AS author`;
 
   let notes;
   if (listingAdminAll) {
@@ -447,7 +456,8 @@ router.get('/:id', authenticateToken, (req, res) => {
   const note = db.prepare('SELECT n.*, u.username AS author FROM notes n JOIN users u ON n.user_id = u.id WHERE n.id = ?').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
   if (!canSee(note.id, req.user.id, admin)) return res.status(403).json({ error: 'Access denied' });
-  res.json({ ...withPermissions(withTags(note)) });
+  const under_completed_archive = !!isNoteUnderCompletedArchive(note.id);
+  res.json({ ...withPermissions(withTags(note)), under_completed_archive });
 });
 
 // GET permissions for a note (owner, DM, or admin)
@@ -464,6 +474,7 @@ router.get('/:id/permissions', authenticateToken, (req, res) => {
 
 // POST create note or folder
 router.post('/', authenticateToken, (req, res) => {
+  const admin = isAdmin(req.user.id);
   const {
     title, content = '', is_shared = false,
     is_folder = false, category = 'general',
@@ -494,7 +505,10 @@ router.post('/', authenticateToken, (req, res) => {
     if (!isDMOf(parent_id, req.user.id)) {
       return res.status(403).json({ error: 'Must be DM of campaign to create an override' });
     }
-    
+    if (isNoteUnderCompletedArchive(parent_id) && !admin) {
+      return res.status(403).json({ error: 'This campaign or world is marked completed; editing is disabled.' });
+    }
+
     // Create override note using source as template
     const visibility = 'hidden'; // Inherited from campaign
     const result = db.prepare(`
@@ -516,6 +530,9 @@ router.post('/', authenticateToken, (req, res) => {
   if (parent_id) {
     const parent = db.prepare('SELECT id, user_id, visibility FROM notes WHERE id = ?').get(parent_id);
     if (!parent) return res.status(404).json({ error: 'Parent folder not found' });
+    if (isNoteUnderCompletedArchive(parent_id) && !isAdmin(req.user.id)) {
+      return res.status(403).json({ error: 'This campaign or world is marked completed; creating notes is disabled.' });
+    }
     visibility = parent.visibility;
     // Inherit parent's permission grants
     inheritedGrants = db.prepare('SELECT user_id FROM note_permissions WHERE note_id = ?').all(parent_id).map(r => r.user_id);
@@ -587,6 +604,30 @@ router.put('/:id', authenticateToken, (req, res) => {
   const note = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
 
+  const archived = isNoteUnderCompletedArchive(note.id);
+  if (archived && !admin) {
+    const body = req.body || {};
+    const keys = Object.keys(body).filter((k) => body[k] !== undefined && k !== 'client_updated_at');
+    if (
+      keys.length === 1 &&
+      keys[0] === 'is_completed' &&
+      note.is_folder &&
+      isCompletionScopeRoot(note) &&
+      isDMOfFolder(note.id, req.user.id)
+    ) {
+      const v = body.is_completed;
+      const next = v === true || v === 1 || v === '1' ? 1 : 0;
+      db.prepare('UPDATE notes SET is_completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, note.id);
+      const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(note.id);
+      res.json(withPermissions(withTags(updated)));
+      if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
+      return;
+    }
+    return res.status(403).json({
+      error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+    });
+  }
+
   const isOwner   = note.user_id === req.user.id;
   const isGranted = !isOwner && isGrantedUser(note.id, req.user.id);
   const isDM      = !isOwner && isDMOf(note.id, req.user.id);
@@ -596,7 +637,7 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
   const canAppend    = isDM && !canFullEdit;           // DM on another user's note
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed } = req.body;
 
   // Conflict detection — only for content/title edits, not structural ops
   if (client_updated_at && (content !== undefined || (title !== undefined && title !== note.title))) {
@@ -840,6 +881,10 @@ router.put('/:id', authenticateToken, (req, res) => {
     ).run(nextIcon, nextSummary, req.params.id);
   }
 
+  if (is_completed !== undefined && canManage && isCompletionScopeRoot(note) && (isDMOfFolder(note.id, req.user.id) || admin)) {
+    db.prepare('UPDATE notes SET is_completed = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(is_completed ? 1 : 0, req.params.id);
+  }
+
   const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   res.json(withPermissions(withTags(updated)));
   if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
@@ -850,6 +895,10 @@ router.delete('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const note  = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
+
+  if (isNoteUnderCompletedArchive(note.id) && !admin) {
+    return res.status(403).json({ error: 'This campaign or world is marked completed; delete is disabled.' });
+  }
 
   const isOwner = note.user_id === req.user.id;
   const isDM    = isDMOf(note.id, req.user.id);

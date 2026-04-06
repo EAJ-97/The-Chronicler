@@ -103,4 +103,42 @@ function isGrantedUser(noteId, userId) {
   return false;
 }
 
-module.exports = { isAdmin, getRootFolderId, getCampaignFolderId, isDMOf, isDMOfFolder, isGrantedUser };
+/**
+ * True if this folder row may hold the "completed" toggle (world root, standalone campaign root,
+ * or campaign folder directly under a world layer).
+ * @param {{ is_folder?: number, parent_id?: number|null }} note
+ * @returns {boolean}
+ */
+function isCompletionScopeRoot(note) {
+  if (!note || !note.is_folder) return false;
+  if (note.parent_id == null) return true;
+  const p = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(note.parent_id);
+  return !!(p && p.is_world === 1);
+}
+
+/**
+ * Walks ancestors (including self): true if any folder has is_completed set (archived scope).
+ * @param {number} noteId
+ * @returns {boolean}
+ */
+function isNoteUnderCompletedArchive(noteId) {
+  if (!noteId) return false;
+  let cur = db.prepare('SELECT id, parent_id, is_folder, is_completed FROM notes WHERE id = ?').get(noteId);
+  while (cur) {
+    if (cur.is_folder && cur.is_completed) return true;
+    if (!cur.parent_id) return false;
+    cur = db.prepare('SELECT id, parent_id, is_folder, is_completed FROM notes WHERE id = ?').get(cur.parent_id);
+  }
+  return false;
+}
+
+module.exports = {
+  isAdmin,
+  getRootFolderId,
+  getCampaignFolderId,
+  isDMOf,
+  isDMOfFolder,
+  isGrantedUser,
+  isCompletionScopeRoot,
+  isNoteUnderCompletedArchive,
+};

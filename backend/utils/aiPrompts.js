@@ -115,10 +115,29 @@ Produce a continuity report.`;
   return { system, user };
 }
 
+/**
+ * Per-note player-facing lore summary (used when campaign/world is marked completed).
+ * @param {string} title
+ * @param {string} bodyText - visible note body only (callers strip DM-only when needed).
+ */
+function playerLoreSummaryPrompts(title, bodyText) {
+  const system = `You write short, clear summaries for tabletop RPG players. Only use the provided note text. Do not invent facts. If the text is sparse, say so briefly.`;
+
+  const user = `Note title: ${title || 'Untitled'}
+
+Note content:
+${bodyText || '(empty)'}
+
+Give a concise 3–5 sentence summary for a player who wants to recall this lore. No spoilers beyond what is in the text.`;
+
+  return { system, user };
+}
+
 module.exports = {
   loreSoFarPrompts,
   npcGeneratorPrompts,
   locationGeneratorPrompts,
   itemGeneratorPrompts,
   continuityPrompts,
+  playerLoreSummaryPrompts,
 };
