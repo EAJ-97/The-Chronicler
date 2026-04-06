@@ -394,7 +394,7 @@ export default function Journal({ notes, selectedNoteId, currentUser }) {
                       title={`Merge back into Session ${sessionNum - 1}`}
                     >↩ Continue Session {sessionNum - 1}</button>
                   )}
-                  {rootFolders.length > 1 && (
+                  {journalCampaignRoots.length > 1 && (
                     <button
                       onClick={() => setMovingSession({ sessionId: session.id, sessionNum })}
                       style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.45)' }}
