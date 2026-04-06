@@ -676,7 +676,7 @@ export default function Dashboard({ user, onLogout }) {
               <button style={S.viewBtn(view === 'timeline')} onClick={() => setView('timeline')}>⏱ Timeline</button>
             )}
           </div>
-          {(effectiveDmCampaignIds.length > 0 || user.is_admin) && (
+          {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
             <button
               type="button"
               style={{ ...S.topBtn, marginLeft: '10px' }}
@@ -868,7 +868,7 @@ export default function Dashboard({ user, onLogout }) {
             <button style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
             </button>
-            {(effectiveDmCampaignIds.length > 0 || user.is_admin) && (
+            {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
               <button style={S.mobileMenuBtn} onClick={() => { setShowIntegrity(true); setMobileMenuOpen(false); }}>
                 <span>⚙</span> Integrity scan
               </button>

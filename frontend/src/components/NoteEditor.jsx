@@ -1977,7 +1977,7 @@ export default function NoteEditor({
         </div>
 
         {/* Player lore summary — gated on completed campaign/world (server + underArchive). */}
-        {!note?.is_folder && underArchive && aiAdminStatus.ai_enabled && (!note?.is_dm_only || isDM || isAdminUser) && (
+        {!note?.is_folder && underArchive && !!aiAdminStatus.ai_enabled && (!note?.is_dm_only || isDM || isAdminUser) && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
               LORE SUMMARY (AI)
