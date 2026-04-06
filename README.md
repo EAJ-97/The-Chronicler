@@ -91,6 +91,8 @@ This gives you a public HTTPS URL without opening firewall ports.
 | `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
+| `GEMINI_API_KEY` / `GEMINI_ICON_API_KEY` | (unset) | Optional. Enables DM/admin Gemini sidebar icon generation. Overrides the Admin → AI Gemini key when set. |
+| `GEMINI_ICON_MODEL` | `gemini-2.5-flash-image` | Gemini model id for icon generation (must support image output). |
 
 See `.env.example` for optional environment overrides.
 
@@ -150,6 +152,7 @@ See `.env.example` for optional environment overrides.
 | **FTS (Full-Text Search)** | SQLite FTS5 virtual table powering note search. Indexes note titles and content. Search triggers at 3+ characters. `#` prefix routes to tag filtering instead. |
 | **JWT (JSON Web Token)** | The authentication token issued on login. Valid for 7 days. `JWT_SECRET` is auto-generated on first boot and persisted in the data volume. Wiping the volume regenerates the secret and invalidates all sessions. |
 | **Anthropic API Key** | The secret key used to authenticate AI recap requests. Stored only in the database. Never in source code, `.env` files, or Git. Stripped from all backup downloads. |
+| **Gemini API Key** | Optional Google key for DM/admin “Generate with Gemini” **sidebar icons only** (image models / “Nano Banana”). Can be set in **Admin → AI** (database) or via `GEMINI_API_KEY` / `GEMINI_ICON_API_KEY` in the environment (env wins). Stripped from backup downloads when stored in the DB. |
 | **Cloudflare Tunnel** | The recommended method for exposing the app publicly over HTTPS without opening firewall ports. Runs via `cloudflared`. |
 | **Auto-Migration** | Database schema changes that run automatically on container boot. New tables and columns are added safely without wiping existing data. No manual SQL required when updating. |
 | **Backup Hash** | An MD5 checksum of the database file used by the automated backup cron job. Only saves a new backup if the hash differs from the previous two, keeping storage minimal. |
@@ -211,6 +214,7 @@ Admin  >  DM  >  Owner  >  Granted  >  Default
 - Full-text search (SQLite FTS5) — triggers at 3+ characters
 - Note connections — link notes together for the knowledge graph
 - Trash / soft-delete with restore
+- Optional **Gemini**-powered list icons (DM/admin): generate small sidebar icons from a short theme when the host configures a Gemini API key
 
 ### Knowledge Graph
 - 2D interactive graph (Cytoscape.js)

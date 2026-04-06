@@ -75,6 +75,7 @@ db.exec(`
   INSERT OR IGNORE INTO settings (key, value) VALUES ('demo_seeded',       'false');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_enabled',        'false');
   INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_api_key',        '');
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('gemini_icon_api_key', '');
 
   CREATE TABLE IF NOT EXISTS notes (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -454,6 +455,15 @@ migrate('032_notes_source_note_id', () => { try { db.exec("ALTER TABLE notes ADD
 // Sidebar / tree: optional emoji icon + short blurb (folders: world / campaign / subfolder styling; notes: scroll-style defaults)
 migrate('033_notes_display_icon', () => { try { db.exec("ALTER TABLE notes ADD COLUMN display_icon TEXT DEFAULT NULL"); } catch {} });
 migrate('034_notes_display_summary', () => { try { db.exec("ALTER TABLE notes ADD COLUMN display_summary TEXT DEFAULT NULL"); } catch {} });
+
+// Optional Gemini API key for DM sidebar icon generation (Nano Banana / image models); env GEMINI_API_KEY overrides
+migrate('035_settings_gemini_icon_api_key', () => {
+  try {
+    db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('gemini_icon_api_key', '')");
+  } catch (e) {
+    console.error('[migrate 035]', e.message);
+  }
+});
 
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();

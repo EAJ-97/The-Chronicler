@@ -7,6 +7,7 @@ const path    = require('path');
 const os      = require('os');
 
 const router = express.Router();
+const { getGeminiIconApiKey, geminiIconKeyFromEnv } = require('../utils/geminiIconSettings');
 
 // Middleware: admin only
 function adminOnly(req, res, next) {
@@ -134,20 +135,30 @@ router.get('/ai/settings', authenticateToken, adminOnly, (req, res) => {
   const enabled = db.prepare("SELECT value FROM settings WHERE key = 'ai_enabled'").get();
   const keyRow  = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get();
   const rawKey  = keyRow?.value || '';
+  const gemRow  = db.prepare("SELECT value FROM settings WHERE key = 'gemini_icon_api_key'").get();
+  const rawGem  = gemRow?.value || '';
+  const envGem  = geminiIconKeyFromEnv();
   res.json({
     ai_enabled: enabled?.value === 'true',
     ai_key_set: rawKey.length > 0,
     ai_key_masked: maskKey(rawKey),
+    gemini_icon_key_set: envGem || rawGem.trim().length > 0,
+    gemini_icon_key_masked: envGem ? '(GEMINI_API_KEY on server — not stored in DB)' : maskKey(rawGem),
+    gemini_icon_from_env: envGem,
   });
 });
 
 // POST save AI settings
 router.post('/ai/settings', authenticateToken, adminOnly, async (req, res) => {
-  const { ai_enabled, ai_api_key } = req.body;
+  const { ai_enabled, ai_api_key, gemini_icon_api_key } = req.body;
 
   // If a new key was provided, save it
   if (typeof ai_api_key === 'string' && ai_api_key.trim().length > 0) {
     db.prepare("UPDATE settings SET value = ? WHERE key = 'ai_api_key'").run(ai_api_key.trim());
+  }
+
+  if (typeof gemini_icon_api_key === 'string' && gemini_icon_api_key.trim().length > 0) {
+    db.prepare("UPDATE settings SET value = ? WHERE key = 'gemini_icon_api_key'").run(gemini_icon_api_key.trim());
   }
 
   // Check if a key exists at all
@@ -159,10 +170,16 @@ router.post('/ai/settings', authenticateToken, adminOnly, async (req, res) => {
   db.prepare("UPDATE settings SET value = ? WHERE key = 'ai_enabled'").run(shouldEnable ? 'true' : 'false');
 
   const rawKey = keyRow?.value || '';
+  const gemRow = db.prepare("SELECT value FROM settings WHERE key = 'gemini_icon_api_key'").get();
+  const rawGem = gemRow?.value || '';
+  const envGem = geminiIconKeyFromEnv();
   res.json({
     ai_enabled: shouldEnable,
     ai_key_set: hasKey,
     ai_key_masked: maskKey(rawKey),
+    gemini_icon_key_set: envGem || rawGem.trim().length > 0,
+    gemini_icon_key_masked: envGem ? '(GEMINI_API_KEY on server — not stored in DB)' : maskKey(rawGem),
+    gemini_icon_from_env: envGem,
     warning: ai_enabled && !hasKey ? 'API key required to enable AI features. AI has been left disabled.' : null,
   });
 });
@@ -172,6 +189,18 @@ router.post('/ai/clear-key', authenticateToken, adminOnly, (req, res) => {
   db.prepare("UPDATE settings SET value = '' WHERE key = 'ai_api_key'").run();
   db.prepare("UPDATE settings SET value = 'false' WHERE key = 'ai_enabled'").run();
   res.json({ success: true, ai_enabled: false, ai_key_set: false });
+});
+
+/** Clears the database copy of the Gemini icon key only (environment variable still applies). */
+router.post('/ai/clear-gemini-icon-key', authenticateToken, adminOnly, (req, res) => {
+  db.prepare("UPDATE settings SET value = '' WHERE key = 'gemini_icon_api_key'").run();
+  const envGem = geminiIconKeyFromEnv();
+  res.json({
+    success: true,
+    gemini_icon_key_set: envGem,
+    gemini_icon_key_masked: envGem ? '(GEMINI_API_KEY on server — not stored in DB)' : '',
+    gemini_icon_from_env: envGem,
+  });
 });
 
 // POST test API key — makes a minimal call to Anthropic to verify it works
@@ -207,11 +236,39 @@ router.post('/ai/test-key', authenticateToken, adminOnly, async (req, res) => {
   }
 });
 
+/**
+ * Verifies the configured Gemini key with a minimal models list call (no image generation).
+ */
+router.post('/ai/test-gemini-icon-key', authenticateToken, adminOnly, async (req, res) => {
+  const apiKey = getGeminiIconApiKey();
+  if (!apiKey) {
+    return res.status(400).json({ error: 'No Gemini API key configured (environment or database).' });
+  }
+  try {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', {
+      headers: { 'x-goog-api-key': apiKey },
+    });
+    if (response.ok) {
+      return res.json({ success: true, message: 'Gemini API key is valid.' });
+    }
+    const err = await response.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${response.status}`;
+    return res.status(400).json({ error: `Gemini rejected the key: ${msg}` });
+  } catch (e) {
+    return res.status(500).json({ error: `Connection failed: ${e.message}` });
+  }
+});
+
 // GET AI enabled status — exposed to all authenticated users (not admin-only)
 // Used by frontend to show/hide AI features
 router.get('/ai/status', authenticateToken, (req, res) => {
   const enabled = db.prepare("SELECT value FROM settings WHERE key = 'ai_enabled'").get();
-  res.json({ ai_enabled: enabled?.value === 'true' });
+  const gemDb = db.prepare("SELECT value FROM settings WHERE key = 'gemini_icon_api_key'").get()?.value?.trim();
+  const geminiConfigured = geminiIconKeyFromEnv() || !!gemDb;
+  res.json({
+    ai_enabled: enabled?.value === 'true',
+    gemini_icon_configured: geminiConfigured,
+  });
 });
 
 // ── BACKUP ────────────────────────────────────────────────────────────────
@@ -237,7 +294,7 @@ router.get('/backup/download', authenticateToken, adminOnly, (req, res) => {
   let tmpDb;
   try {
     tmpDb = new Database(tmpPath);
-    tmpDb.prepare("UPDATE settings SET value = '' WHERE key = 'ai_api_key'").run();
+    tmpDb.prepare("UPDATE settings SET value = '' WHERE key IN ('ai_api_key', 'gemini_icon_api_key')").run();
     tmpDb.close();
   } catch (e) {
     try { tmpDb?.close(); } catch {}
