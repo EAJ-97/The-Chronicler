@@ -81,7 +81,7 @@ export default function ReferencePeekPanel({
         top: 'calc(52px + env(safe-area-inset-top))',
         left: 0,
         right: 0,
-        bottom: 'calc(50px + env(safe-area-inset-bottom))',
+        bottom: 'calc(44px + env(safe-area-inset-bottom))',
         zIndex: 350,
         display: 'flex',
         flexDirection: 'column',

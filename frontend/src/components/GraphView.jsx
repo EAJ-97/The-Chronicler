@@ -468,6 +468,12 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   const [isNarrowGraph, setIsNarrowGraph] = useState(false);
   const [showToolMenu, setShowToolMenu] = useState(false);
 
+  /**
+   * Mobile UX: force the graph action bar into an overflow menu.
+   * On vertical mobile screens, the action set is too wide to fit without overflow.
+   */
+  const shouldCollapseToolbar = isMobile || isNarrowGraph;
+
   // Collapse toolbar to dropdown if it would overlap the campaign selector
   useEffect(() => {
     const campaign = campaignRef.current;
@@ -610,12 +616,12 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         {/* Action buttons — always rendered for collision measurement; dropdown overlays when narrow */}
         <div style={{ position: 'relative' }}>
           {/* ··· dropdown trigger — shown when inline buttons would collide with campaign selector */}
-          {isNarrowGraph && (
+          {shouldCollapseToolbar && (
             <div style={{ position: 'absolute', top: 0, right: 0, zIndex: 2 }}>
               <button
                 onClick={() => setShowToolMenu(v => !v)}
                 style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', padding: isMobile ? '10px 16px' : '6px 12px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', background: showToolMenu ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)' }}
-              >···</button>
+              >{isMobile ? 'MENU' : '···'}</button>
               {showToolMenu && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: isMobile ? '160px' : '140px', boxShadow: '0 6px 24px rgba(0,0,0,0.7)' }}>
                   <button onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); }}
@@ -660,7 +666,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           )}
 
           {/* Inline buttons — always rendered so ref can measure width; hidden when narrow */}
-          <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: isNarrowGraph ? 'hidden' : 'visible', pointerEvents: isNarrowGraph ? 'none' : 'auto' }}>
+          <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: shouldCollapseToolbar ? 'hidden' : 'visible', pointerEvents: shouldCollapseToolbar ? 'none' : 'auto' }}>
             <button
               onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
