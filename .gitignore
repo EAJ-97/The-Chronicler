@@ -31,9 +31,8 @@ plans/
 # One-off release notes (used for GitHub release, not committed)
 release-*-notes.txt
 
-# Cursor IDE — track rules, ignore everything else
+# Cursor IDE — ignore everything
 .cursor/*
-!.cursor/rules/
 
 # OS / editor
 .DS_Store
