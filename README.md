@@ -482,4 +482,8 @@ Take a fresh snapshot after updating to the latest version — old snapshots tak
 
 ---
 
+## License
+
+MIT — see `LICENSE`.
+
 *The Chronicler — built for adventurers, run by dungeon masters.*
