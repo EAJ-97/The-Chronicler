@@ -1,7 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-
-All edits must respect the Notesapp project structure. Backend code is in the backend folder, frontend code is in frontend, .git stores the repository, docker-compose.yml defines the container, Dockerfile contains build instructions, data is a Docker volume, and README.md and CONTEXT.md must reflect the structure. Subagents should validate edits against this structure and prompt for documentation updates if it changes.
