@@ -803,7 +803,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
       {/* Header */}
       <div style={{ padding: isMobile ? '12px 16px' : '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? '8px' : '12px', marginBottom: '6px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: isMobile ? '10px' : '8px', marginBottom: '6px' }}>
           <span style={{ fontFamily: 'Cinzel', fontSize: '12px', letterSpacing: '0.15em', color: '#c8943a' }}>SESSION JOURNAL</span>
           {journalCampaignRoots.length > 0 ? (
             <select
@@ -816,39 +816,50 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           ) : (
             <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)' }}>Create a root folder to begin</span>
           )}
-          <button
-            type="button"
-            style={{
-              marginLeft: isMobile ? 0 : 'auto',
-              padding: isMobile ? '10px 16px' : '4px 12px',
-              background: lorePanelOpen ? 'rgba(139,196,226,0.12)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'rgba(226,213,187,0.2)'}`,
-              borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em',
-              color: lorePanelOpen ? 'rgba(139,196,226,0.85)' : 'rgba(226,213,187,0.6)',
-              ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}),
-            }}
-            onClick={() => persistLorePanelOpen(!lorePanelOpen)}
-            title="AI summary of visible campaign notes + journal (per-user cache)"
-            disabled={!activeFolderId}
-          >📜 Lore So Far</button>
-          <button
-            style={{
-              marginLeft: isMobile ? 0 : undefined,
-              padding: isMobile ? '10px 16px' : '4px 12px',
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(226,213,187,0.2)',
-              borderRadius: '3px',
-              cursor: !activeFolderId || journalLocked ? 'not-allowed' : 'pointer',
-              fontFamily: 'Cinzel',
-              fontSize: '9px',
-              letterSpacing: '0.12em',
-              color: !activeFolderId || journalLocked ? 'rgba(226,213,187,0.25)' : 'rgba(226,213,187,0.6)',
-              ...(isMobile ? { alignSelf: 'flex-end', minHeight: '40px' } : {}),
-            }}
-            onClick={handleNewSession}
-            title={journalLocked ? 'Journal is read-only while this campaign is marked completed' : 'Start a new session'}
-            disabled={!activeFolderId || journalLocked}
-          >⚔ New Session</button>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'nowrap' }}>
+            <button
+              type="button"
+              style={{
+                flex: 1,
+                padding: '10px 12px',
+                minHeight: '40px',
+                background: lorePanelOpen ? 'rgba(139,196,226,0.12)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'rgba(226,213,187,0.2)'}`,
+                borderRadius: '3px',
+                cursor: activeFolderId ? 'pointer' : 'not-allowed',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.12em',
+                color: lorePanelOpen ? 'rgba(139,196,226,0.85)' : 'rgba(226,213,187,0.6)',
+              }}
+              onClick={() => persistLorePanelOpen(!lorePanelOpen)}
+              title="AI summary of visible campaign notes + journal (per-user cache)"
+              disabled={!activeFolderId}
+            >
+              📜 Lore So Far
+            </button>
+            <button
+              type="button"
+              style={{
+                flex: 1,
+                padding: '10px 12px',
+                minHeight: '40px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(226,213,187,0.2)',
+                borderRadius: '3px',
+                cursor: !activeFolderId || journalLocked ? 'not-allowed' : 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '9px',
+                letterSpacing: '0.12em',
+                color: !activeFolderId || journalLocked ? 'rgba(226,213,187,0.25)' : 'rgba(226,213,187,0.6)',
+              }}
+              onClick={handleNewSession}
+              title={journalLocked ? 'Journal is read-only while this campaign is marked completed' : 'Start a new session'}
+              disabled={!activeFolderId || journalLocked}
+            >
+              ⚔ New Session
+            </button>
+          </div>
         </div>
         {!isMobile && (
           <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.25)' }}>

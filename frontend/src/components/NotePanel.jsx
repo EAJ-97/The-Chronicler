@@ -2,18 +2,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getCategoryColor } from './NoteEditor.jsx';
 
-export default function NotePanel({ note, notes, connections, onClose }) {
+/**
+ * Graph-side note preview panel.
+ * - Desktop: fixed 300px side panel.
+ * - Mobile: the parent renders it inside a full-width bottom sheet.
+ * @param {{ note: any, notes: any[], connections: any[], onClose: () => void, isMobile?: boolean }} props
+ */
+export default function NotePanel({ note, notes, connections, onClose, isMobile = false }) {
   const color = getCategoryColor(note?.category);
 
   return (
     <div style={{
-      width: '300px',
+      width: isMobile ? '100%' : '300px',
       flexShrink: 0,
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
       background: '#0a0c14',
-      borderRight: '1px solid rgba(200,148,58,0.15)',
+      borderRight: isMobile ? 'none' : '1px solid rgba(200,148,58,0.15)',
       overflow: 'hidden',
     }}>
       {/* Colored accent bar */}

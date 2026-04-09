@@ -529,7 +529,7 @@ export default function NoteList({
 
       {/* Tree or search results */}
       <div
-        style={{ flex: 1, overflowY: 'auto', padding: '6px 4px', paddingBottom: isMobile ? 'env(safe-area-inset-bottom)' : '6px' }}
+        style={{ flex: 1, overflowY: 'auto', padding: '6px 4px', paddingBottom: '6px' }}
         onClick={e => { if (e.target === e.currentTarget) onDeselect?.(); }}
       >
         {search && !search.startsWith('#') && search.trim().length >= 3 ? (
