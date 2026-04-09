@@ -64,7 +64,7 @@ cd dnd-chronicler
 ### 2. Start the app
 
 A `JWT_SECRET` is auto-generated on first boot and saved to the data volume (`/data/.jwt_secret`).
-To override it, set `JWT_SECRET` in the `environment` section of `docker-compose.yml` or in a `.env` file.
+To override it, set `JWT_SECRET` via your container runtime’s environment configuration.
 
 ### 3. Build and run
 ```bash
@@ -88,7 +88,7 @@ This gives you a public HTTPS URL without opening firewall ports.
 
 | Variable | Default | Description |
 |---|---|---|
-| `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment or `.env` file. |
+| `JWT_SECRET` | auto-generated | Signing key for auth tokens. Auto-generated and persisted in `/data/.jwt_secret`. Override via environment variables. |
 | `ADMIN_RECOVERY_TOKEN` | auto-generated | Emergency admin password reset. Auto-generated on first boot and saved to `/data/.admin_recovery_token` on the data volume (same pattern as JWT). Override via environment if you want a fixed value. Read the file inside the container: `docker compose exec chronicler cat /data/.admin_recovery_token` (service name may be `chronicler-dev` in dev). |
 | `PORT` | `3001` | Port the app listens on |
 | `DB_DIR` | `/data` | Path inside container for SQLite database |
@@ -149,7 +149,7 @@ See `.env.example` for the minimal environment template. Session recaps use **An
 | **WAL (Write-Ahead Log)** | SQLite's write-ahead log files (`dnd_notes.db-shm`, `dnd_notes.db-wal`). These exist alongside the main DB file during normal operation. Always back up all three files together. |
 | **FTS (Full-Text Search)** | SQLite FTS5 virtual table powering note search. Indexes note titles and content. Search triggers at 3+ characters. `#` prefix routes to tag filtering instead. |
 | **JWT (JSON Web Token)** | The authentication token issued on login. Valid for 7 days. `JWT_SECRET` is auto-generated on first boot and persisted in the data volume. Wiping the volume regenerates the secret and invalidates all sessions. |
-| **Anthropic API Key** | The secret key used to authenticate AI recap requests. Stored only in the database. Never in source code, `.env` files, or Git. Stripped from all backup downloads. |
+| **Anthropic API Key** | The secret key used to authenticate AI recap requests. Stored only in the database. Never in source code or Git. Stripped from all backup downloads. |
 | **Cloudflare Tunnel** | The recommended method for exposing the app publicly over HTTPS without opening firewall ports. Runs via `cloudflared`. |
 | **Auto-Migration** | Database schema changes that run automatically on container boot. New tables and columns are added safely without wiping existing data. No manual SQL required when updating. |
 | **Backup Hash** | An MD5 checksum of the database file used by the automated backup cron job. Only saves a new backup if the hash differs from the previous two, keeping storage minimal. |
@@ -334,7 +334,7 @@ On a **world** root, **standalone campaign** root, or **campaign under a world**
 1. **`chronicler-export-….json`** — Pretty-printed archive (`chronicler_export_version: 1`): notes, tags, permissions, connections, journal sessions/entries, recaps, attendance, checklist items, image metadata. **Give this file to an admin** for re-import (**Admin → BACKUP → Chronicler JSON import**). Opening the `.json` in VS Code or in a browser tab only shows raw text — that is normal.
 2. **`chronicler-viewer-….html`** — **Self-contained read-only snapshot** of the same data. **Double-click** this file (or open it via **File → Open** in your browser). It does not talk to your Chronicler server; everything is embedded in the file. Use **Notes**, **Journal**, and **Recaps** tabs. Markdown uses CDN scripts (jsDelivr) when you’re online; offline, bodies fall back to plain text.
 
-**User images:** filenames are in the export; copy binaries from the old server’s `data/images` if you need gallery thumbnails after admin import.
+**User images:** filenames are in the export; if you want thumbnails after an import, transfer the stored image binaries from the old server’s persistent storage.
 
 ### In-app Campaign Snapshots
 - Hover a campaign folder in the sidebar → click 📷
@@ -436,7 +436,7 @@ The React build is memory-intensive. Increase VM RAM to 4GB minimum before rebui
    ```bash
    docker compose exec chronicler cat /data/.admin_recovery_token
    ```
-   (Use your actual service/container name, e.g. `chronicler-dev` for the dev compose file.) Then open the app → **Admin locked out? → Reset admin password**, paste the token, and set a new admin password. If several admins exist, fill in **Admin username**; otherwise the first admin (lowest id) is updated. To use your own token instead, set `ADMIN_RECOVERY_TOKEN` in the service `environment` before first boot, or replace the file and restart.
+   (Use your actual service/container name.) Then open the app → **Admin locked out? → Reset admin password**, paste the token, and set a new admin password. If several admins exist, fill in **Admin username**; otherwise the first admin (lowest id) is updated. To use your own token instead, set `ADMIN_RECOVERY_TOKEN` in the service `environment` before first boot, or replace the file and restart.
 
 2. **Admin changing a player password:** Sign in as admin → **Admin Panel → PARTY** → **Set password** next to the user.
 

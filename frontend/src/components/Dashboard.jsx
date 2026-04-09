@@ -66,7 +66,7 @@ const S = {
   },
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 400,
-    height: 'calc(50px + env(safe-area-inset-bottom))', background: '#0a0c14',
+    height: 'calc(44px + env(safe-area-inset-bottom))', background: '#0a0c14',
     borderTop: '1px solid rgba(200,148,58,0.15)',
     display: 'flex', alignItems: 'stretch', paddingBottom: 'env(safe-area-inset-bottom)',
   },
@@ -627,7 +627,7 @@ export default function Dashboard({ user, onLogout }) {
 
       {/* Undo toast */}
       {undoToast && (
-        <div style={{ position: 'fixed', bottom: isMobile ? '72px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '5px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+        <div style={{ position: 'fixed', bottom: isMobile ? '66px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '5px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
           <span style={{ color: 'rgba(226,213,187,0.6)' }}>"{undoToast.title}" moved to trash</span>
           <button onClick={handleUndoDelete} style={{ background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', padding: '3px 10px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em' }}>
             UNDO
@@ -899,7 +899,7 @@ export default function Dashboard({ user, onLogout }) {
       )}
 
       {/* ── BODY ── */}
-      <div style={{ ...S.body, paddingBottom: isMobile ? 'calc(50px + env(safe-area-inset-bottom))' : 0 }}>
+      <div style={{ ...S.body, paddingTop: isMobile ? '6px' : 0, paddingBottom: isMobile ? 'calc(44px + env(safe-area-inset-bottom))' : 0 }}>
         {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
         {!isMobile && view !== 'journal' && (
           <NoteList
