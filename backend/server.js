@@ -67,6 +67,12 @@ app.get('/api/version', (req, res) => {
 // In production, serve the built React app
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, '../frontend/dist');
+  // PWA/Safari caching can be aggressive. Force these entry files to always revalidate.
+  // This helps ensure dev/prod clients pick up UI/layout changes promptly.
+  app.get(['/sw.js', '/manifest.json', '/'], (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    return next();
+  });
   app.use(express.static(distPath));
   app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }

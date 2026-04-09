@@ -62,13 +62,24 @@ const S = {
     width: '85vw', maxWidth: '320px',
     background: '#0a0c14', borderRight: '1px solid rgba(200,148,58,0.15)',
     display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    paddingTop: 'env(safe-area-inset-top)',
     height: '100%',
   },
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 400,
     height: 'calc(44px + env(safe-area-inset-bottom))', background: '#0a0c14',
     borderTop: '1px solid rgba(200,148,58,0.15)',
-    display: 'flex', alignItems: 'stretch', paddingBottom: 'env(safe-area-inset-bottom)',
+    display: 'flex', flexDirection: 'column',
+  },
+  bottomNavRow: {
+    height: '44px',
+    display: 'flex',
+    alignItems: 'stretch',
+  },
+  bottomNavSafeFill: {
+    height: 'env(safe-area-inset-bottom)',
+    background: '#0a0c14',
+    flexShrink: 0,
   },
   bottomNavBtn: (active) => ({
     flex: 1, display: 'flex', flexDirection: 'column',
@@ -103,6 +114,9 @@ export default function Dashboard({ user, onLogout }) {
   const windowWidth = useWindowWidth();
   const isNarrow = windowWidth <= 960;
   const isMobile = windowWidth <= 600;
+  const isDevPort = (() => {
+    try { return window.location.port === '3002'; } catch { return false; }
+  })();
 
   // Sidebar collapse — default open on wide, collapsed on narrow, persisted
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -660,14 +674,16 @@ export default function Dashboard({ user, onLogout }) {
             ☰
           </button>
           <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-            <span style={{ ...S.brand, marginRight: 0, fontSize: '13px' }}>The Chronicler</span>
+            <span style={{ ...S.brand, marginRight: 0, fontSize: '13px' }}>
+              The Chronicler{isDevPort ? ' (DEV)' : ''}
+            </span>
           </div>
           <div style={{ minWidth: '44px' }} />
         </div>
       ) : (
         /* Desktop topbar: unchanged */
         <div style={S.topbar}>
-          <span style={S.brand}>The Chronicler</span>
+          <span style={S.brand}>The Chronicler{isDevPort ? ' (DEV)' : ''}</span>
           <div style={S.viewToggle}>
             <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
             <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
@@ -899,7 +915,14 @@ export default function Dashboard({ user, onLogout }) {
       )}
 
       {/* ── BODY ── */}
-      <div style={{ ...S.body, paddingTop: isMobile ? '6px' : 0, paddingBottom: isMobile ? 'calc(44px + env(safe-area-inset-bottom))' : 0 }}>
+      <div
+        style={{
+          ...S.body,
+          paddingTop: isMobile ? '6px' : 0,
+          // Reserve space so inputs/drawers never sit under the bottom nav in mobile/PWA.
+          paddingBottom: isMobile ? 'calc(44px + env(safe-area-inset-bottom))' : 0,
+        }}
+      >
         {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
         {!isMobile && view !== 'journal' && (
           <NoteList
@@ -1039,7 +1062,7 @@ export default function Dashboard({ user, onLogout }) {
               {/* Mobile graph note panel — bottom sheet */}
               {isMobile && graphPanelNoteId && (
                 <div style={{
-                  position: 'fixed', bottom: '56px', left: 0, right: 0,
+                  position: 'fixed', bottom: 'calc(44px + env(safe-area-inset-bottom))', left: 0, right: 0,
                   height: '45vh', zIndex: 300,
                   background: '#0a0c14',
                   borderTop: '1px solid rgba(200,148,58,0.2)',
@@ -1049,6 +1072,7 @@ export default function Dashboard({ user, onLogout }) {
                     note={notes.find(n => n.id === graphPanelNoteId)}
                     notes={notes}
                     connections={connections}
+                    isMobile
                     onClose={() => setGraphPanelNoteId(null)}
                   />
                 </div>
@@ -1069,28 +1093,31 @@ export default function Dashboard({ user, onLogout }) {
       {/* ── MOBILE BOTTOM NAVIGATION BAR ── */}
       {isMobile && (
         <div style={S.bottomNav}>
-          <button style={S.bottomNavBtn(view === 'notes')} onClick={() => setView('notes')}>
-            <span style={S.bottomNavIcon}>📜</span>
-            <span style={S.bottomNavLabel}>NOTES</span>
-          </button>
-          <button style={S.bottomNavBtn(view === 'graph')} onClick={() => setView('graph')}>
-            <span style={S.bottomNavIcon}>🕸</span>
-            <span style={S.bottomNavLabel}>WEB</span>
-          </button>
-          <button style={S.bottomNavBtn(view === 'journal')} onClick={() => setView('journal')}>
-            <span style={S.bottomNavIcon}>⚡</span>
-            <span style={S.bottomNavLabel}>JOURNAL</span>
-          </button>
-          {SHOW_TIMELINE_TAB && (
-            <button style={S.bottomNavBtn(view === 'timeline')} onClick={() => setView('timeline')}>
-              <span style={S.bottomNavIcon}>⏱</span>
-              <span style={S.bottomNavLabel}>TIME</span>
+          <div style={S.bottomNavRow}>
+            <button style={S.bottomNavBtn(view === 'notes')} onClick={() => setView('notes')}>
+              <span style={S.bottomNavIcon}>📜</span>
+              <span style={S.bottomNavLabel}>NOTES</span>
             </button>
-          )}
-          <button style={S.bottomNavBtn(mobileMenuOpen)} onClick={() => setMobileMenuOpen(v => !v)}>
-            <span style={S.bottomNavIcon}>☰</span>
-            <span style={S.bottomNavLabel}>MENU</span>
-          </button>
+            <button style={S.bottomNavBtn(view === 'graph')} onClick={() => setView('graph')}>
+              <span style={S.bottomNavIcon}>🕸</span>
+              <span style={S.bottomNavLabel}>WEB</span>
+            </button>
+            <button style={S.bottomNavBtn(view === 'journal')} onClick={() => setView('journal')}>
+              <span style={S.bottomNavIcon}>⚡</span>
+              <span style={S.bottomNavLabel}>JOURNAL</span>
+            </button>
+            {SHOW_TIMELINE_TAB && (
+              <button style={S.bottomNavBtn(view === 'timeline')} onClick={() => setView('timeline')}>
+                <span style={S.bottomNavIcon}>⏱</span>
+                <span style={S.bottomNavLabel}>TIME</span>
+              </button>
+            )}
+            <button style={S.bottomNavBtn(mobileMenuOpen)} onClick={() => setMobileMenuOpen(v => !v)}>
+              <span style={S.bottomNavIcon}>☰</span>
+              <span style={S.bottomNavLabel}>MENU</span>
+            </button>
+          </div>
+          <div style={S.bottomNavSafeFill} />
         </div>
       )}
     </div>
