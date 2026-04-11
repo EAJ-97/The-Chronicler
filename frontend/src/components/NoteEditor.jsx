@@ -270,6 +270,10 @@ export default function NoteEditor({
   /** Optional emoji + short blurb for sidebar tree (saved to display_icon / display_summary) */
   const [displayIcon, setDisplayIcon] = useState(note?.display_icon || '');
   const [displaySummary, setDisplaySummary] = useState(note?.display_summary || '');
+  /** DM-only body for world/campaign root folders (server: `folder_dm_content`); omitted for players. */
+  const [folderDmContent, setFolderDmContent] = useState(note?.folder_dm_content || '');
+  /** Tab under toolbar: icons / AI tools / continuity (root campaign & world folders). */
+  const [rootToolsTab, setRootToolsTab] = useState(() => localStorage.getItem('chronicler_rootFolderToolsTab') || 'icons');
   /** Modal: pick note sidebar emoji from categorized + all-icons grid */
   const [noteIconMenuOpen, setNoteIconMenuOpen] = useState(false);
   const uniqueNotePresetIcons = useMemo(() => allUniqueNotePresetIcons(), []);
@@ -284,7 +288,8 @@ export default function NoteEditor({
   // Server version tracking for conflict detection
   const serverUpdatedAt = useRef(note?.updated_at || null);
   // Conflict state
-  const [conflict, setConflict] = useState(null); // { serverTitle, serverContent, serverUpdatedAt, myTitle, myContent }
+  const [conflict, setConflict] = useState(null);
+  /** @type {null | { serverTitle: string, serverContent: string, serverFolderDmContent?: string, serverUpdatedAt: string, serverUpdatedBy?: string, myTitle: string, myContent: string, myFolderDmContent?: string, hasFolderDmSplit?: boolean }} */
   /** @mention dropdown: items from API, replace range, highlight index; `field` is body or DM AI prompt key. */
   const [mentionPopup, setMentionPopup] = useState(null);
   const mentionPopupRef = useRef(null);
@@ -370,6 +375,24 @@ export default function NoteEditor({
   }, [note, notes]);
 
   /**
+   * World/campaign root folders show a two-column editor for DMs/admins: party-visible `content` vs DM-only notes.
+   * Players see a single column (`content` only).
+   */
+  const showCampaignRootSplit =
+    dmAiRootOnly && !!note?.is_folder && (isDM || isAdminUser);
+
+  const showIconsTab = !!(canFolderStyle && canEditContent && dmAiRootOnly);
+  const showAiToolsTab = !!(
+    note?.is_folder &&
+    isDM &&
+    continuityFolderId &&
+    dmAiRootOnly &&
+    (!underArchive || isAdminUser)
+  );
+  const showContinuityTab = showAiToolsTab;
+  const showRootToolsTabBar = showIconsTab || showAiToolsTab;
+
+  /**
    * All descendant folders under continuityFolderId (recursive), sorted by title — NPC target picker.
    */
   const descendantFolders = useMemo(() => {
@@ -385,6 +408,18 @@ export default function NoteEditor({
     walk(continuityFolderId);
     return out.sort((a, b) => a.title.localeCompare(b.title));
   }, [notes, continuityFolderId]);
+
+  /**
+   * Keeps the root-folder tools tab on a visible option when permissions or note change.
+   */
+  useEffect(() => {
+    const ids = [];
+    if (showIconsTab) ids.push('icons');
+    if (showAiToolsTab) ids.push('ai');
+    if (showContinuityTab) ids.push('continuity');
+    if (ids.length === 0) return;
+    setRootToolsTab((cur) => (ids.includes(cur) ? cur : ids[0]));
+  }, [note?.id, showIconsTab, showAiToolsTab, showContinuityTab]);
 
   const [aiAdminStatus, setAiAdminStatus] = useState({ ai_enabled: false });
   const [npcPrompt, setNpcPrompt] = useState('');
@@ -623,6 +658,7 @@ export default function NoteEditor({
   // Refs for beforeunload (need current values without stale closures)
   const titleRef = useRef(title);
   const contentRef = useRef(content);
+  const folderDmContentRef = useRef(folderDmContent);
   const displayIconRef = useRef(displayIcon);
   const displaySummaryRef = useRef(displaySummary);
   const categoryRef = useRef(category);
@@ -632,6 +668,7 @@ export default function NoteEditor({
   const noteIdRef = useRef(note?.id);
   titleRef.current = title;
   contentRef.current = content;
+  folderDmContentRef.current = folderDmContent;
   displayIconRef.current = displayIcon;
   displaySummaryRef.current = displaySummary;
   categoryRef.current = category;
@@ -659,6 +696,7 @@ export default function NoteEditor({
     setIsDmOnly(!!note?.is_dm_only);
     setDisplayIcon(note?.display_icon || '');
     setDisplaySummary(note?.display_summary || '');
+    setFolderDmContent(note?.folder_dm_content || '');
     setTagInput('');
     setDirty(false);
     setSavedAt(null);
@@ -707,8 +745,11 @@ export default function NoteEditor({
     if (dirty) return;
     if (note?.title != null) setTitle(note.title);
     if (note?.content != null) setContent(note.content);
+    if (showCampaignRootSplit && note?.folder_dm_content !== undefined) {
+      setFolderDmContent(note.folder_dm_content || '');
+    }
     serverUpdatedAt.current = note?.updated_at || serverUpdatedAt.current;
-  }, [note?.title, note?.content]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.title, note?.content, note?.folder_dm_content, showCampaignRootSplit, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load images for this note
   useEffect(() => {
@@ -771,6 +812,7 @@ export default function NoteEditor({
         title: titleRef.current,
         content: contentRef.current,
         category: categoryRef.current,
+        ...(showCampaignRootSplit ? { folder_dm_content: folderDmContentRef.current } : {}),
       });
       navigator.sendBeacon
         ? navigator.sendBeacon(`/api/notes/${noteIdRef.current}`, new Blob([body], { type: 'application/json' }))
@@ -778,7 +820,7 @@ export default function NoteEditor({
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [isOwner]);
+  }, [isOwner, showCampaignRootSplit]);
 
   const doSave = useCallback(async (overrides = {}) => {
     if (!noteIdRef.current || !canEdit) return;
@@ -791,6 +833,9 @@ export default function NoteEditor({
       display_icon: displayIconRef.current === '' ? null : displayIconRef.current,
       display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
       client_updated_at: serverUpdatedAt.current,
+      ...(showCampaignRootSplit
+        ? { folder_dm_content: folderDmContentRef.current === '' ? null : folderDmContentRef.current }
+        : {}),
       ...overrides,
     };
     if (!payload.title?.trim()) return;
@@ -808,10 +853,13 @@ export default function NoteEditor({
         setConflict({
           serverTitle:      d.server_title,
           serverContent:    d.server_content,
+          serverFolderDmContent: d.server_folder_dm_content ?? '',
           serverUpdatedAt:  d.server_updated_at,
           serverUpdatedBy:  d.server_updated_by,
           myTitle:          titleRef.current,
           myContent:        contentRef.current,
+          myFolderDmContent: folderDmContentRef.current,
+          hasFolderDmSplit: showCampaignRootSplit && !!note?.is_folder,
         });
       } else {
         console.error('Save failed', err);
@@ -819,7 +867,20 @@ export default function NoteEditor({
     } finally {
       setSaving(false);
     }
-  }, [isOwner, onSave]);
+  }, [canEdit, onSave, showCampaignRootSplit, note?.is_folder]);
+
+  /**
+   * Switches root-folder tool tab and persists the choice for the next visit.
+   * @param {'icons'|'ai'|'continuity'} id
+   */
+  const persistRootToolsTab = useCallback((id) => {
+    setRootToolsTab(id);
+    try {
+      localStorage.setItem('chronicler_rootFolderToolsTab', id);
+    } catch (_) {
+      /* ignore quota / private mode */
+    }
+  }, []);
 
   /**
    * Persists a new sidebar icon URL (emoji preset, upload, or AI-generated) and syncs server timestamp.
@@ -1976,6 +2037,418 @@ export default function NoteEditor({
 
         </div>
 
+        {/* World / campaign root: tabbed Icons, AI tools, Continuity (visibility matches previous inline sections). */}
+        {showRootToolsTabBar && (
+          <div
+            style={{
+              marginTop: '12px',
+              paddingTop: '12px',
+              borderTop: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                gap: '6px',
+                flexWrap: 'wrap',
+                marginBottom: '12px',
+                alignItems: 'center',
+                ...S.metaRow,
+              }}
+              className="toolbar-scroll"
+            >
+              {showIconsTab && (
+                <button
+                  type="button"
+                  onClick={() => persistRootToolsTab('icons')}
+                  style={{ ...S.viewBtn(rootToolsTab === 'icons'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                >
+                  Icons
+                </button>
+              )}
+              {showAiToolsTab && (
+                <button
+                  type="button"
+                  onClick={() => persistRootToolsTab('ai')}
+                  style={{ ...S.viewBtn(rootToolsTab === 'ai'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                >
+                  AI tools
+                </button>
+              )}
+              {showContinuityTab && (
+                <button
+                  type="button"
+                  onClick={() => persistRootToolsTab('continuity')}
+                  style={{ ...S.viewBtn(rootToolsTab === 'continuity'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                >
+                  Continuity
+                </button>
+              )}
+            </div>
+
+            {rootToolsTab === 'icons' && showIconsTab && (
+              <div>
+                <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
+                <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                  Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
+                  {isDM && ' DMs and admins can upload a small image for the sidebar (max 512KB); the server enforces size limits.'}
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setDisplayIcon('');
+                      try {
+                        const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: null, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                        serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                        if (onSave) onSave(res.data);
+                      } catch (e) { console.error(e); }
+                    }}
+                    style={{
+                      minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'Cinzel',
+                      border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent', color: 'rgba(226,213,187,0.5)',
+                    }}
+                    title="Automatic default for this folder type"
+                  >AUTO</button>
+                  {iconChoicesForFolderKind(folderTreeKind).map((ic) => (
+                    <button
+                      key={ic}
+                      type="button"
+                      onClick={async () => {
+                        setDisplayIcon(ic);
+                        try {
+                          const res = await api.put(`/notes/${note.id}`, { client_updated_at: serverUpdatedAt.current, display_icon: ic, display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current });
+                          serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+                          if (onSave) onSave(res.data);
+                        } catch (e) { console.error(e); }
+                      }}
+                      style={{
+                        width: '40px', height: '40px', fontSize: '20px', borderRadius: '6px', cursor: 'pointer',
+                        border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`, background: displayIcon === ic ? 'rgba(200,148,58,0.18)' : 'rgba(255,255,255,0.02)',
+                      }}
+                    >{ic}</button>
+                  ))}
+                </div>
+                {isDM && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
+                      <input
+                        ref={sidebarIconInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={handleSidebarIconFile}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => sidebarIconInputRef.current?.click()}
+                        disabled={uploadingSidebarIcon}
+                        style={{
+                          fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                          border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'rgba(226,213,187,0.75)',
+                        }}
+                      >
+                        {uploadingSidebarIcon ? 'Uploading…' : 'Upload image icon'}
+                      </button>
+                      {isManagedSidebarIconUrl(displayIcon) && (
+                        <img
+                          src={displayIcon}
+                          alt=""
+                          style={{
+                            width: 40, height: 40, objectFit: 'cover', borderRadius: 6,
+                            border: '1px solid rgba(255,255,255,0.12)',
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+                <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+                <textarea
+                  value={displaySummary}
+                  onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
+                  placeholder="One or two lines shown in the sidebar tooltip (optional)…"
+                  disabled={!canEdit}
+                  rows={3}
+                  style={{
+                    width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                    color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                  }}
+                />
+              </div>
+            )}
+
+            {rootToolsTab === 'ai' && showAiToolsTab && (
+              <div style={{ paddingTop: '4px' }}>
+                <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(139,196,226,0.65)', marginBottom: '6px' }}>
+                  DM AI TOOLS
+                </div>
+                <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.38)', margin: '0 0 14px', lineHeight: 1.45 }}>
+                  Select a <strong style={{ color: 'rgba(226,213,187,0.55)' }}>world</strong> or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>campaign</strong> folder to use generators. In each prompt, paste <strong style={{ color: 'rgba(226,213,187,0.55)' }}>[Title](note:id)</strong> links (from @mentions in notes) or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>note:123</strong> so the AI can use those notes as context.
+                </p>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                    NPC / CHARACTER
+                  </div>
+                  <textarea
+                    ref={npcPromptTextareaRef}
+                    value={npcPrompt}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const cursor = e.target.selectionStart;
+                      setNpcPrompt(v);
+                      npcPromptRef.current = v;
+                      schedulePromptMention('npc', v, cursor);
+                    }}
+                    onKeyDown={(e) => {
+                      if (handlePromptMentionKeyDown(e, 'npc')) return;
+                    }}
+                    placeholder="NPC-only: role, voice, goals… Type @ for links or paste [Title](note:id)."
+                    rows={4}
+                    disabled={!aiAdminStatus.ai_enabled}
+                    spellCheck={false}
+                    style={{
+                      width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                      Folder
+                      <select
+                        value={npcParentId ?? ''}
+                        onChange={(e) => setNpcParentId(parseInt(e.target.value, 10) || null)}
+                        style={{
+                          minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                        }}
+                      >
+                        <option value={continuityFolderId}>
+                          {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                        </option>
+                        {descendantFolders.map((f) => (
+                          <option key={f.id} value={f.id}>{f.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                      <input
+                        type="checkbox"
+                        checked={npcDmOnly}
+                        onChange={(e) => setNpcDmOnly(e.target.checked)}
+                      />
+                      DM-only note
+                    </label>
+                  </div>
+                  {npcErr && (
+                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{npcErr}</div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleNpcGenerate}
+                    disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim()}
+                    style={{
+                      padding: '8px 16px', borderRadius: '4px', cursor: npcBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(139,196,226,0.4)'}`,
+                      background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(139,196,226,0.12)',
+                      color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.95)',
+                    }}
+                  >
+                    {npcBusy ? 'Generating…' : 'Create NPC note'}
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(58,196,139,0.45)', marginBottom: '8px' }}>
+                    LOCATION
+                  </div>
+                  <textarea
+                    ref={locPromptTextareaRef}
+                    value={locPrompt}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const cursor = e.target.selectionStart;
+                      setLocPrompt(v);
+                      locPromptRef.current = v;
+                      schedulePromptMention('loc', v, cursor);
+                    }}
+                    onKeyDown={(e) => {
+                      if (handlePromptMentionKeyDown(e, 'loc')) return;
+                    }}
+                    placeholder="Place-only: settlement, dungeon, region… Type @ or use [Title](note:id) for canon ties."
+                    rows={4}
+                    disabled={!aiAdminStatus.ai_enabled}
+                    spellCheck={false}
+                    style={{
+                      width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                      Folder
+                      <select
+                        value={locParentId ?? ''}
+                        onChange={(e) => setLocParentId(parseInt(e.target.value, 10) || null)}
+                        style={{
+                          minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                        }}
+                      >
+                        <option value={continuityFolderId}>
+                          {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                        </option>
+                        {descendantFolders.map((f) => (
+                          <option key={`loc-${f.id}`} value={f.id}>{f.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                      <input type="checkbox" checked={locDmOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
+                      DM-only note
+                    </label>
+                  </div>
+                  {locErr && (
+                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{locErr}</div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleLocationGenerate}
+                    disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim()}
+                    style={{
+                      padding: '8px 16px', borderRadius: '4px', cursor: locBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(58,196,139,0.4)'}`,
+                      background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(58,196,139,0.1)',
+                      color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(58,196,139,0.95)',
+                    }}
+                  >
+                    {locBusy ? 'Generating…' : 'Create location note'}
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(107,58,196,0.55)', marginBottom: '8px' }}>
+                    ITEM / ARTIFACT
+                  </div>
+                  <textarea
+                    ref={itemPromptTextareaRef}
+                    value={itemPrompt}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const cursor = e.target.selectionStart;
+                      setItemPrompt(v);
+                      itemPromptRef.current = v;
+                      schedulePromptMention('item', v, cursor);
+                    }}
+                    onKeyDown={(e) => {
+                      if (handlePromptMentionKeyDown(e, 'item')) return;
+                    }}
+                    placeholder="Object-only: weapon, relic, consumable… Type @ or link notes with [Title](note:id)."
+                    rows={4}
+                    disabled={!aiAdminStatus.ai_enabled}
+                    spellCheck={false}
+                    style={{
+                      width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
+                      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
+                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                      Folder
+                      <select
+                        value={itemParentId ?? ''}
+                        onChange={(e) => setItemParentId(parseInt(e.target.value, 10) || null)}
+                        style={{
+                          minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                        }}
+                      >
+                        <option value={continuityFolderId}>
+                          {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
+                        </option>
+                        {descendantFolders.map((f) => (
+                          <option key={`item-${f.id}`} value={f.id}>{f.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                      <input type="checkbox" checked={itemDmOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
+                      DM-only note
+                    </label>
+                  </div>
+                  {itemErr && (
+                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{itemErr}</div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleItemGenerate}
+                    disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim()}
+                    style={{
+                      padding: '8px 16px', borderRadius: '4px', cursor: itemBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(107,58,196,0.45)'}`,
+                      background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(107,58,196,0.12)',
+                      color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(200,180,240,0.95)',
+                    }}
+                  >
+                    {itemBusy ? 'Generating…' : 'Create item note'}
+                  </button>
+                </div>
+
+                {!aiAdminStatus.ai_enabled && (
+                  <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
+                    Enable AI in Admin → AI to use these tools.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {rootToolsTab === 'continuity' && showContinuityTab && (
+              <div style={{ paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '6px' }}>
+                  CONTINUITY CHECKER
+                </div>
+                <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
+                  Runs only on this world/campaign root. Builds a visibility-safe corpus, then writes or updates a DM-only note titled <strong style={{ color: 'rgba(226,213,187,0.65)' }}>AI Continuity Report</strong> under{' '}
+                  <strong style={{ color: 'rgba(226,213,187,0.65)' }}>{(notes || []).find((n) => n.id === continuityFolderId)?.title || 'this folder'}</strong>.
+                </p>
+                {contErr && (
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{contErr}</div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleContinuityGenerate}
+                  disabled={contBusy || !aiAdminStatus.ai_enabled}
+                  style={{
+                    padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                    border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
+                    background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(200,148,58,0.1)',
+                    color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : '#c8943a',
+                  }}
+                >
+                  {contBusy ? 'Analyzing…' : 'Generate / update continuity report'}
+                </button>
+                {!aiAdminStatus.ai_enabled && (
+                  <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
+                    Enable AI in Admin → AI to run continuity analysis.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Player lore summary — gated on completed campaign/world (server + underArchive). */}
         {!note?.is_folder && underArchive && !!aiAdminStatus.ai_enabled && (!note?.is_dm_only || isDM || isAdminUser) && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
@@ -2065,8 +2538,8 @@ export default function NoteEditor({
           </div>
         )}
 
-        {/* Folder appearance: icon palette by world / campaign / subfolder + sidebar blurb */}
-        {canFolderStyle && canEditContent && (
+        {/* Nested subfolders: Chronicle appearance (world/campaign roots use tabbed Icons above). */}
+        {canFolderStyle && canEditContent && !dmAiRootOnly && (
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
@@ -2159,270 +2632,6 @@ export default function NoteEditor({
           </div>
         )}
 
-        {/* DM AI Tools — only on world or campaign root folders (not nested organizers). Use !!is_folder so SQLite 0 does not render as a stray "0". */}
-        {!!note?.is_folder && isDM && continuityFolderId && dmAiRootOnly && (!underArchive || isAdminUser) && (
-          <div style={{
-            marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(139,196,226,0.12)',
-          }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(139,196,226,0.65)', marginBottom: '6px' }}>
-              DM AI TOOLS
-            </div>
-            <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.38)', margin: '0 0 14px', lineHeight: 1.45 }}>
-              Select a <strong style={{ color: 'rgba(226,213,187,0.55)' }}>world</strong> or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>campaign</strong> folder to use generators. In each prompt, paste <strong style={{ color: 'rgba(226,213,187,0.55)' }}>[Title](note:id)</strong> links (from @mentions in notes) or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>note:123</strong> so the AI can use those notes as context.
-            </p>
-
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
-                NPC / CHARACTER
-              </div>
-              <textarea
-                ref={npcPromptTextareaRef}
-                value={npcPrompt}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const cursor = e.target.selectionStart;
-                  setNpcPrompt(v);
-                  npcPromptRef.current = v;
-                  schedulePromptMention('npc', v, cursor);
-                }}
-                onKeyDown={(e) => {
-                  if (handlePromptMentionKeyDown(e, 'npc')) return;
-                }}
-                placeholder="NPC-only: role, voice, goals… Type @ for links or paste [Title](note:id)."
-                rows={4}
-                disabled={!aiAdminStatus.ai_enabled}
-                spellCheck={false}
-                style={{
-                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
-                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
-                }}
-              />
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
-                  Folder
-                  <select
-                    value={npcParentId ?? ''}
-                    onChange={(e) => setNpcParentId(parseInt(e.target.value, 10) || null)}
-                    style={{
-                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
-                    }}
-                  >
-                    <option value={continuityFolderId}>
-                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
-                    </option>
-                    {descendantFolders.map((f) => (
-                      <option key={f.id} value={f.id}>{f.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
-                  <input
-                    type="checkbox"
-                    checked={npcDmOnly}
-                    onChange={(e) => setNpcDmOnly(e.target.checked)}
-                  />
-                  DM-only note
-                </label>
-              </div>
-              {npcErr && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{npcErr}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleNpcGenerate}
-                disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim()}
-                style={{
-                  padding: '8px 16px', borderRadius: '4px', cursor: npcBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
-                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(139,196,226,0.4)'}`,
-                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(139,196,226,0.12)',
-                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.95)',
-                }}
-              >
-                {npcBusy ? 'Generating…' : 'Create NPC note'}
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(58,196,139,0.45)', marginBottom: '8px' }}>
-                LOCATION
-              </div>
-              <textarea
-                ref={locPromptTextareaRef}
-                value={locPrompt}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const cursor = e.target.selectionStart;
-                  setLocPrompt(v);
-                  locPromptRef.current = v;
-                  schedulePromptMention('loc', v, cursor);
-                }}
-                onKeyDown={(e) => {
-                  if (handlePromptMentionKeyDown(e, 'loc')) return;
-                }}
-                placeholder="Place-only: settlement, dungeon, region… Type @ or use [Title](note:id) for canon ties."
-                rows={4}
-                disabled={!aiAdminStatus.ai_enabled}
-                spellCheck={false}
-                style={{
-                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
-                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
-                }}
-              />
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
-                  Folder
-                  <select
-                    value={locParentId ?? ''}
-                    onChange={(e) => setLocParentId(parseInt(e.target.value, 10) || null)}
-                    style={{
-                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
-                    }}
-                  >
-                    <option value={continuityFolderId}>
-                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
-                    </option>
-                    {descendantFolders.map((f) => (
-                      <option key={`loc-${f.id}`} value={f.id}>{f.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
-                  <input type="checkbox" checked={locDmOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
-                  DM-only note
-                </label>
-              </div>
-              {locErr && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{locErr}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleLocationGenerate}
-                disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim()}
-                style={{
-                  padding: '8px 16px', borderRadius: '4px', cursor: locBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
-                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(58,196,139,0.4)'}`,
-                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(58,196,139,0.1)',
-                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(58,196,139,0.95)',
-                }}
-              >
-                {locBusy ? 'Generating…' : 'Create location note'}
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(107,58,196,0.55)', marginBottom: '8px' }}>
-                ITEM / ARTIFACT
-              </div>
-              <textarea
-                ref={itemPromptTextareaRef}
-                value={itemPrompt}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const cursor = e.target.selectionStart;
-                  setItemPrompt(v);
-                  itemPromptRef.current = v;
-                  schedulePromptMention('item', v, cursor);
-                }}
-                onKeyDown={(e) => {
-                  if (handlePromptMentionKeyDown(e, 'item')) return;
-                }}
-                placeholder="Object-only: weapon, relic, consumable… Type @ or link notes with [Title](note:id)."
-                rows={4}
-                disabled={!aiAdminStatus.ai_enabled}
-                spellCheck={false}
-                style={{
-                  width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
-                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                  color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                  marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
-                }}
-              />
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
-                  Folder
-                  <select
-                    value={itemParentId ?? ''}
-                    onChange={(e) => setItemParentId(parseInt(e.target.value, 10) || null)}
-                    style={{
-                      minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
-                    }}
-                  >
-                    <option value={continuityFolderId}>
-                      {(notes || []).find((n) => n.id === continuityFolderId)?.title || 'Campaign / world root'}
-                    </option>
-                    {descendantFolders.map((f) => (
-                      <option key={`item-${f.id}`} value={f.id}>{f.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
-                  <input type="checkbox" checked={itemDmOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
-                  DM-only note
-                </label>
-              </div>
-              {itemErr && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{itemErr}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleItemGenerate}
-                disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim()}
-                style={{
-                  padding: '8px 16px', borderRadius: '4px', cursor: itemBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
-                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(107,58,196,0.45)'}`,
-                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(107,58,196,0.12)',
-                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(200,180,240,0.95)',
-                }}
-              >
-                {itemBusy ? 'Generating…' : 'Create item note'}
-              </button>
-            </div>
-
-            <div style={{ paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '6px' }}>
-                CONTINUITY CHECKER
-              </div>
-              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
-                Runs only on this world/campaign root. Builds a visibility-safe corpus, then writes or updates a DM-only note titled <strong style={{ color: 'rgba(226,213,187,0.65)' }}>AI Continuity Report</strong> under{' '}
-                <strong style={{ color: 'rgba(226,213,187,0.65)' }}>{(notes || []).find((n) => n.id === continuityFolderId)?.title || 'this folder'}</strong>.
-              </p>
-              {contErr && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{contErr}</div>
-              )}
-              <button
-                type="button"
-                onClick={handleContinuityGenerate}
-                disabled={contBusy || !aiAdminStatus.ai_enabled}
-                style={{
-                  padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
-                  border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
-                  background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(200,148,58,0.1)',
-                  color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : '#c8943a',
-                }}
-              >
-                {contBusy ? 'Analyzing…' : 'Generate / update continuity report'}
-              </button>
-            </div>
-
-            {!aiAdminStatus.ai_enabled && (
-              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
-                Enable AI in Admin → AI to use these tools.
-              </p>
-            )}
-          </div>
-        )}
-
         {/* Optional sidebar blurb for notes (same column as folders; icon row is in toolbar) */}
         {!note?.is_folder && canEdit && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
@@ -2444,6 +2653,166 @@ export default function NoteEditor({
 
       <div style={{ ...S.body, ...S.bodyInScroll }}>
         {viewMode === 'edit' ? (
+          showCampaignRootSplit && note?.is_folder ? (
+            <div
+              style={{
+                position: 'relative',
+                flex: 1,
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                gap: 0,
+                minHeight: 0,
+              }}
+            >
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: isMobile ? '200px' : 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderRight: isMobile ? 'none' : '1px solid rgba(255,255,255,0.06)',
+                  borderBottom: isMobile ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '8px',
+                    letterSpacing: '0.14em',
+                    color: 'rgba(139,196,226,0.55)',
+                    padding: '10px 24px 6px',
+                    flexShrink: 0,
+                  }}
+                >
+                  Party-visible overview
+                </div>
+                <textarea
+                  ref={contentTextareaRef}
+                  style={{ ...S.editor, flex: 1, minHeight: '180px', paddingTop: '8px' }}
+                  value={content}
+                  onChange={handleMainEditorChange}
+                  onKeyDown={handleEditorKeyDown}
+                  placeholder={
+                    canEdit
+                      ? 'Introduction and lore players can read… Markdown supported. Type @ to link notes.'
+                      : 'Read-only.'
+                  }
+                  readOnly={!canEdit}
+                  spellCheck={false}
+                />
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: isMobile ? '200px' : 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  background: 'rgba(200,148,58,0.03)',
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '8px',
+                    letterSpacing: '0.14em',
+                    color: 'rgba(200,148,58,0.65)',
+                    padding: '10px 24px 6px',
+                    flexShrink: 0,
+                  }}
+                >
+                  DM notes (hidden from players)
+                </div>
+                <textarea
+                  style={{
+                    ...S.editor,
+                    flex: 1,
+                    minHeight: '180px',
+                    paddingTop: '8px',
+                    background: 'transparent',
+                  }}
+                  value={folderDmContent}
+                  onChange={(e) => {
+                    setFolderDmContent(e.target.value);
+                    markDirty();
+                  }}
+                  placeholder={canEdit ? 'Plans, secrets, reminders for DMs only…' : ''}
+                  readOnly={!canEdit}
+                  spellCheck={false}
+                />
+              </div>
+            {mentionPopup && (!mentionPopup.field || mentionPopup.field === 'body') && mentionPopup.items && mentionPopup.items.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  maxHeight: 'min(200px, 40vh)',
+                  overflowY: 'auto',
+                  background: '#12151c',
+                  border: '1px solid rgba(200,148,58,0.35)',
+                  borderRadius: '4px',
+                  boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+                  zIndex: 30,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '7px',
+                    letterSpacing: '0.12em',
+                    color: 'rgba(200,148,58,0.45)',
+                    padding: '6px 10px 4px',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  }}
+                >
+                  @ LINKS (WORLD OR CAMPAIGN SCOPE) — ↑↓ ENTER TAB
+                </div>
+                {mentionPopup.items.map((it, idx) => (
+                  <button
+                    key={it.id}
+                    type="button"
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onClick={() => applyMentionChoice(it)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 12px',
+                      border: 'none',
+                      borderLeft: `3px solid ${getCategoryColor(it.category)}`,
+                      background:
+                        idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
+                      color: '#e2d5bb',
+                      fontFamily: 'Crimson Pro, serif',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      {it.title}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: 'Cinzel',
+                        fontSize: '7px',
+                        letterSpacing: '0.06em',
+                        color: 'rgba(226,213,187,0.35)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {it.category}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            </div>
+          ) : (
           <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <textarea
               ref={contentTextareaRef}
@@ -2531,7 +2900,166 @@ export default function NoteEditor({
               </div>
             )}
           </div>
+          )
         ) : (
+          showCampaignRootSplit && note?.is_folder ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                flex: 1,
+                minHeight: 0,
+                overflow: 'auto',
+              }}
+            >
+              <div
+                style={{
+                  ...S.preview,
+                  flex: 1,
+                  minWidth: 0,
+                  borderRight: isMobile ? 'none' : '1px solid rgba(255,255,255,0.06)',
+                  borderBottom: isMobile ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                }}
+                className="md-content"
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '8px',
+                    letterSpacing: '0.14em',
+                    color: 'rgba(139,196,226,0.55)',
+                    marginBottom: '10px',
+                  }}
+                >
+                  Party-visible overview
+                </div>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  urlTransform={chroniclerUrlTransform}
+                  components={{
+                    a: ({ href, children }) => {
+                      const h = href != null ? String(href).trim() : '';
+                      if (h && /^note:\d+$/i.test(h)) {
+                        const nid = parseInt(h.replace(/^note:/i, ''), 10);
+                        return (
+                          <button
+                            type="button"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: onOpenReferenceNote ? 'pointer' : 'default',
+                              color: '#c8943a',
+                              textDecoration: 'underline',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              padding: 0,
+                            }}
+                            onClick={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              if (onOpenReferenceNote) onOpenReferenceNote(nid);
+                            }}
+                          >
+                            {children}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: '#c8943a' }}
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
+                  }}
+                >
+                  {content || '*No content yet.*'}
+                </ReactMarkdown>
+              </div>
+              <div
+                style={{
+                  ...S.preview,
+                  flex: 1,
+                  minWidth: 0,
+                  background: 'rgba(200,148,58,0.03)',
+                }}
+                className="md-content md-dm"
+              >
+                <div
+                  style={{
+                    fontFamily: 'Cinzel',
+                    fontSize: '8px',
+                    letterSpacing: '0.14em',
+                    color: 'rgba(200,148,58,0.65)',
+                    marginBottom: '10px',
+                  }}
+                >
+                  DM notes (hidden from players)
+                </div>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  urlTransform={chroniclerUrlTransform}
+                  components={{
+                    a: ({ href, children }) => {
+                      const h = href != null ? String(href).trim() : '';
+                      if (h && /^note:\d+$/i.test(h)) {
+                        const nid = parseInt(h.replace(/^note:/i, ''), 10);
+                        return (
+                          <button
+                            type="button"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: onOpenReferenceNote ? 'pointer' : 'default',
+                              color: '#c8943a',
+                              textDecoration: 'underline',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              padding: 0,
+                            }}
+                            onClick={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              if (onOpenReferenceNote) onOpenReferenceNote(nid);
+                            }}
+                          >
+                            {children}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: '#c8943a' }}
+                        >
+                          {children}
+                        </a>
+                      );
+                    },
+                  }}
+                >
+                  {folderDmContent || '*No DM notes yet.*'}
+                </ReactMarkdown>
+              </div>
+            <style>{`
+              .md-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
+              .md-content h1, .md-content h2, .md-content h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 16px 0 6px; }
+              .md-content p { margin: 0 0 10px; }
+              .md-content ul, .md-content ol { padding-left: 20px; margin: 0 0 10px; }
+              .md-content blockquote { border-left: 2px solid rgba(200,148,58,0.3); margin: 0 0 10px; padding: 4px 12px; color: rgba(226,213,187,0.6); font-style: italic; }
+              .md-content code { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 5px; font-size: 14px; font-family: monospace; }
+              .md-content strong { color: #e2d5bb; } .md-content em { color: rgba(226,213,187,0.75); }
+              .md-content hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 14px 0; }
+              .md-content a { color: #c8943a; }
+            `}</style>
+            </div>
+          ) : (
           <div style={S.preview} className="md-content">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -2591,6 +3119,7 @@ export default function NoteEditor({
               .md-content a { color: #c8943a; }
             `}</style>
           </div>
+          )
         )}
 
         {/* DM Append section — shown when DM is viewing someone else's note */}
@@ -3256,6 +3785,9 @@ export default function NoteEditor({
           onKeepTheirs={() => {
             setTitle(conflict.serverTitle);
             setContent(conflict.serverContent);
+            if (conflict.hasFolderDmSplit) {
+              setFolderDmContent(conflict.serverFolderDmContent || '');
+            }
             serverUpdatedAt.current = conflict.serverUpdatedAt;
             setConflict(null);
             setDirty(false);
@@ -3264,6 +3796,10 @@ export default function NoteEditor({
             const divider = `\n\n---\n*✏ My edits — ${new Date().toLocaleString()}:*\n`;
             const merged = conflict.serverContent + divider + conflict.myContent;
             setContent(merged);
+            if (conflict.hasFolderDmSplit) {
+              const dmDivider = `\n\n---\n*✏ My DM edits — ${new Date().toLocaleString()}:*\n`;
+              setFolderDmContent((conflict.serverFolderDmContent || '') + dmDivider + (conflict.myFolderDmContent || ''));
+            }
             serverUpdatedAt.current = conflict.serverUpdatedAt;
             setConflict(null);
             setDirty(true);
@@ -3372,13 +3908,25 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
         </div>
         <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION (server)</div>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — PARTY TEXT (server)</div>
             <div style={pane}>{conflict.serverContent || ''}</div>
           </div>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION (unsaved)</div>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — PARTY TEXT (unsaved)</div>
             <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myContent || ''}</div>
           </div>
+          {conflict.hasFolderDmSplit && (
+            <>
+              <div>
+                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — DM NOTES (server)</div>
+                <div style={pane}>{conflict.serverFolderDmContent || ''}</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — DM NOTES (unsaved)</div>
+                <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myFolderDmContent || ''}</div>
+              </div>
+            </>
+          )}
         </div>
         <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
           <button style={{ ...btnBase, background: 'transparent', borderColor: 'rgba(226,213,187,0.15)', color: 'rgba(226,213,187,0.4)' }} onClick={onKeepTheirs}>Keep Theirs</button>

@@ -335,11 +335,13 @@ function runImport(db, data, opts) {
       user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order,
       visibility, significance, narrative_weight, deleted_at, original_parent_id, recovered,
       is_dm_only, is_demo, status, is_world, source_note_id, display_icon, display_summary,
+      folder_dm_content,
       created_at, updated_at
     ) VALUES (
       @user_id, @parent_id, @title, @content, @is_shared, @is_folder, @category, @color, @sort_order,
       @visibility, @significance, @narrative_weight, @deleted_at, @original_parent_id, @recovered,
       @is_dm_only, @is_demo, @status, @is_world, @source_note_id, @display_icon, @display_summary,
+      @folder_dm_content,
       @created_at, @updated_at
     )
   `);
@@ -390,6 +392,7 @@ function runImport(db, data, opts) {
         source_note_id: null,
         display_icon: n.display_icon ?? null,
         display_summary: n.display_summary ?? null,
+        folder_dm_content: n.folder_dm_content ?? null,
         created_at: n.created_at,
         updated_at: n.updated_at,
       });

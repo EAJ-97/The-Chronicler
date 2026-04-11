@@ -132,6 +132,26 @@ function isNoteUnderCompletedArchive(noteId) {
   return false;
 }
 
+/**
+ * True when folder id is a world root or a campaign root (standalone or under a world), not a nested subfolder.
+ * Matches frontend `getFolderTreeKind` (world | campaign vs subfolder).
+ * @param {number} folderId
+ * @returns {boolean}
+ */
+function isWorldOrCampaignRootFolder(folderId) {
+  const row = db
+    .prepare('SELECT id, is_folder, parent_id, is_world FROM notes WHERE id = ? AND deleted_at IS NULL')
+    .get(folderId);
+  if (!row?.is_folder) return false;
+  if (row.is_world && !row.parent_id) return true;
+  if (!row.parent_id && !row.is_world) return true;
+  if (row.parent_id) {
+    const p = db.prepare('SELECT is_world FROM notes WHERE id = ? AND deleted_at IS NULL').get(row.parent_id);
+    if (p?.is_world) return true;
+  }
+  return false;
+}
+
 module.exports = {
   isAdmin,
   getRootFolderId,
@@ -141,4 +161,5 @@ module.exports = {
   isGrantedUser,
   isCompletionScopeRoot,
   isNoteUnderCompletedArchive,
+  isWorldOrCampaignRootFolder,
 };

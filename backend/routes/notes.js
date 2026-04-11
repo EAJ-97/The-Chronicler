@@ -10,6 +10,7 @@ const {
   isGrantedUser,
   isCompletionScopeRoot,
   isNoteUnderCompletedArchive,
+  isWorldOrCampaignRootFolder,
 } = require('../utils/access');
 const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 
@@ -457,7 +458,18 @@ router.get('/:id', authenticateToken, (req, res) => {
   if (!note) return res.status(404).json({ error: 'Note not found' });
   if (!canSee(note.id, req.user.id, admin)) return res.status(403).json({ error: 'Access denied' });
   const under_completed_archive = !!isNoteUnderCompletedArchive(note.id);
-  res.json({ ...withPermissions(withTags(note)), under_completed_archive });
+  const row = { ...withPermissions(withTags(note)), under_completed_archive };
+  if (
+    row.folder_dm_content != null &&
+    String(row.folder_dm_content).length > 0 &&
+    note.is_folder &&
+    isWorldOrCampaignRootFolder(note.id)
+  ) {
+    if (!admin && !isDMOf(note.id, req.user.id)) {
+      row.folder_dm_content = null;
+    }
+  }
+  res.json(row);
 });
 
 // GET permissions for a note (owner, DM, or admin)
@@ -637,10 +649,14 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
   const canAppend    = isDM && !canFullEdit;           // DM on another user's note
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content } = req.body;
 
-  // Conflict detection — only for content/title edits, not structural ops
-  if (client_updated_at && (content !== undefined || (title !== undefined && title !== note.title))) {
+  // Conflict detection — only for content/title/DM-folder edits, not structural ops
+  if (client_updated_at && (
+    content !== undefined ||
+    folder_dm_content !== undefined ||
+    (title !== undefined && title !== note.title)
+  )) {
     const serverTs = new Date(note.updated_at).getTime();
     const clientTs = new Date(client_updated_at).getTime();
     if (serverTs > clientTs) {
@@ -648,6 +664,7 @@ router.put('/:id', authenticateToken, (req, res) => {
         error: 'conflict',
         server_title:      note.title,
         server_content:    note.content,
+        server_folder_dm_content: note.folder_dm_content ?? '',
         server_updated_at: note.updated_at,
         server_updated_by: db.prepare('SELECT username FROM users WHERE id = ?').get(note.user_id)?.username,
       });
@@ -879,6 +896,23 @@ router.put('/:id', authenticateToken, (req, res) => {
     db.prepare(
       'UPDATE notes SET display_icon = ?, display_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
     ).run(nextIcon, nextSummary, req.params.id);
+  }
+
+  /**
+   * DM-only markdown for world/campaign root folders (party sees `content` only). Editable by DM/admin
+   * when the row is a playable campaign or world root (not nested subfolders).
+   */
+  if (folder_dm_content !== undefined && note.is_folder && canFullEdit && isWorldOrCampaignRootFolder(note.id)) {
+    if (archived && !admin) {
+      return res.status(403).json({
+        error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+      });
+    }
+    if (!admin && !isDMOf(note.id, req.user.id)) {
+      return res.status(403).json({ error: 'Not authorised to edit DM folder notes' });
+    }
+    const v = folder_dm_content === null || folder_dm_content === '' ? null : String(folder_dm_content);
+    db.prepare('UPDATE notes SET folder_dm_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(v, req.params.id);
   }
 
   if (is_completed !== undefined && canManage && isCompletionScopeRoot(note) && (isDMOfFolder(note.id, req.user.id) || admin)) {

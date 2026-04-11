@@ -100,6 +100,7 @@ db.exec(`
     source_note_id     INTEGER  DEFAULT NULL,
     display_icon       TEXT     DEFAULT NULL,
     display_summary    TEXT     DEFAULT NULL,
+    folder_dm_content  TEXT     DEFAULT NULL,
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -530,6 +531,15 @@ migrate('040_notes_is_completed', () => {
     db.exec('ALTER TABLE notes ADD COLUMN is_completed INTEGER DEFAULT 0');
   } catch {
     /* already exists */
+  }
+});
+
+// DM-only markdown on world/campaign root folders (split from party-visible `content`)
+migrate('041_notes_folder_dm_content', () => {
+  try {
+    db.exec('ALTER TABLE notes ADD COLUMN folder_dm_content TEXT DEFAULT NULL');
+  } catch (e) {
+    /* column may already exist on fresh installs */
   }
 });
 
