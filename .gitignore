@@ -31,6 +31,9 @@ plans/
 # One-off release notes (used for GitHub release, not committed)
 release-*-notes.txt
 
+# Local docs (not tracked unless we explicitly add something worth shipping)
+docs/
+
 # Cursor IDE — ignore everything
 .cursor/*
 
