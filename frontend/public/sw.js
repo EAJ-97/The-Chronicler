@@ -1,4 +1,4 @@
-const CACHE = 'chronicler-v7';
+const CACHE = 'chronicler-v8';
 
 self.addEventListener('install', e => {
   e.waitUntil(
