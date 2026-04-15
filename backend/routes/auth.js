@@ -9,6 +9,15 @@ const { seedDemoForAdmin, seedDemoForUser } = require('../utils/demoSeed');
 const router = express.Router();
 
 /**
+ * Reads whether admin demo data is present (`settings.demo_seeded`).
+ * @returns {boolean}
+ */
+function getDemoSeededFlag() {
+  const demoRow = db.prepare("SELECT value FROM settings WHERE key = 'demo_seeded'").get();
+  return demoRow?.value === 'true';
+}
+
+/**
  * Compares two recovery secrets in constant time using SHA-256 digests (avoids length leaks on raw strings).
  * @param {string} provided - Token sent by the client
  * @param {string} expected - Value from `process.env.ADMIN_RECOVERY_TOKEN`
@@ -63,13 +72,24 @@ router.post('/register', async (req, res) => {
       console.error('Demo seed failed (non-fatal):', seedErr.message);
     }
 
+    const newUserId = result.lastInsertRowid;
+    try {
+      const { isDemoSeeded, syncDemoDmRolesForUser } = require('../utils/demoAccess');
+      if (isDemoSeeded()) syncDemoDmRolesForUser(newUserId);
+    } catch (e) {
+      console.error('[register demo sync]', e.message);
+    }
+
     const token = jwt.sign(
-      { id: result.lastInsertRowid, username, is_admin: isFirstUser ? 1 : 0 },
+      { id: newUserId, username, is_admin: isFirstUser ? 1 : 0 },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.status(201).json({ token, user: { id: result.lastInsertRowid, username, is_admin: isFirstUser ? 1 : 0 } });
+    res.status(201).json({
+      token,
+      user: { id: newUserId, username, is_admin: isFirstUser ? 1 : 0, demo_seeded: getDemoSeededFlag() },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -94,7 +114,16 @@ router.post('/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.json({ token, user: { id: user.id, username: user.username, is_admin: user.is_admin, force_password_change: user.force_password_change || 0 } });
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        is_admin: user.is_admin,
+        force_password_change: user.force_password_change || 0,
+        demo_seeded: getDemoSeededFlag(),
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -104,7 +133,16 @@ router.post('/login', async (req, res) => {
 router.get('/me', authenticateToken, (req, res) => {
   const user = db.prepare('SELECT id, username, is_admin, force_password_change FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ user });
+  const demo_seeded = getDemoSeededFlag();
+  if (demo_seeded) {
+    try {
+      const { syncDemoDmRolesForUser } = require('../utils/demoAccess');
+      syncDemoDmRolesForUser(req.user.id);
+    } catch (e) {
+      console.error('[auth/me demo sync]', e.message);
+    }
+  }
+  res.json({ user, demo_seeded });
 });
 
 /**

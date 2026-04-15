@@ -241,7 +241,8 @@ Tabs: PARTY · VAULT · DEMO · AI · BACKUP · PASSWORD
 
 - **PARTY** — create/delete users, toggle open registration
 - **VAULT** — browse and restore campaign snapshots
-- **DEMO** — generate or wipe demo campaign data
+- **DEMO** — generate or wipe **shared** demo campaigns (no fictional user accounts). The admin who runs **Generate** owns the inserted notes; **every real user** is granted **DM** on each demo root so the full tree (including DM-only notes and folder DM content) is visible. **New users** registered after demo exists are synced the same way (and on each **GET /auth/me** while demo is seeded). **Non-admins cannot mutate** demo notes, journal entries, connections, images, snapshots, recaps, or AI writes into demo trees; admins keep full edit for maintenance. In the app menu (when demo is present): **Tutorial** opens a spotlight tour; **Hide demo folders** stores a preference in the browser (`localStorage`) so demo roots disappear from the sidebar, graph, journal, and timeline pickers until you show them again.
+  - Tutorial is **role-aware**: admins start with an Admin chapter (each Admin tab), and the full guided tour requires demo data to be generated. When demo is missing, users see a short message telling them to ask an admin to generate demo.
 - **AI** — Anthropic API key for session recaps, test key, enable toggle
 - **BACKUP** — download full database backup (API key stripped); **Chronicler JSON import** (admin-only restore of DM JSON exports)
 - **PASSWORD** — change your own password; **PARTY** tab also has **Set password** on each user for player resets

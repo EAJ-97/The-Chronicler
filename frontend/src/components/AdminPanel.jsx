@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import api from '../api.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 
@@ -140,9 +140,13 @@ const S = {
  * @param {() => void} onClose - Closes the overlay
  * @param {() => void} [onChroniclerImportDone] - Optional; invoked after a successful JSON tree import to refresh the main app’s note list
  */
-export default function AdminPanel({ currentUser, onClose, onChroniclerImportDone }) {
+const AdminPanel = forwardRef(function AdminPanel(
+  { currentUser, onClose, onChroniclerImportDone, initialTab = 'users', tutorialRefs = null },
+  ref,
+) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
+  const tabsRowRef = useRef(null);
   const [users, setUsers] = useState([]);
   const [regOpen, setRegOpen] = useState(false);
   const [newUsername, setNewUsername] = useState('');
@@ -236,7 +240,19 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
     }
   };
 
-  useEffect(() => { loadData(); loadVault(); }, []);
+  useEffect(() => {
+    setTab(initialTab || 'users');
+    loadData();
+    loadVault();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
+
+  useImperativeHandle(ref, () => ({
+    /** Sets the visible admin tab (used by the tutorial). */
+    setTab: (nextTab) => setTab(nextTab),
+    /** Focuses the tab strip (best-effort). */
+    focusTabs: () => tabsRowRef.current?.focus?.(),
+  }), []);
 
   /**
    * Restores a campaign folder to a saved snapshot (admin vault). snapshotLabel is optional UI text only.
@@ -257,7 +273,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
   };
 
   const handleGenerateDemo = async () => {
-    if (!window.confirm('Generate demo data? This will create 4 demo users, 2 campaigns, ~40 notes, and 3 journal sessions.')) return;
+    if (!window.confirm('Generate demo data? This creates 2 sample campaigns (~40 notes, journal sessions) owned by you. All current users become DMs on those campaigns; only admins can edit demo content. Refresh the page after generating.')) return;
     setDemoLoading(true); setError(''); setSuccess('');
     try {
       await api.post('/admin/demo/generate');
@@ -268,7 +284,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
   };
 
   const handleWipeDemo = async () => {
-    if (!window.confirm('Wipe all demo data? This permanently deletes all demo users, notes, and journal entries.')) return;
+    if (!window.confirm('Wipe all demo data? This permanently deletes demo campaigns, notes, and journal sessions. Your real user accounts are not removed.')) return;
     setDemoLoading(true); setError(''); setSuccess('');
     try {
       await api.delete('/admin/demo/wipe');
@@ -355,7 +371,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
   };
 
   return (
-    <div style={{ ...S.overlay, padding: isMobile ? 0 : '24px' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={tutorialRefs?.shell || null} style={{ ...S.overlay, padding: isMobile ? 0 : '24px' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={isMobile ? {
         width: '100%', height: '100%', maxHeight: '100%',
         background: 'linear-gradient(160deg, #0f1219 0%, #0a0c14 100%)',
@@ -364,7 +380,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
       } : { ...S.panel, maxWidth: tab === 'vault' ? '680px' : '560px' }}>
         <div style={S.header}>
           <span style={S.title}>⚔ ADMIN PANEL</span>
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div ref={tabsRowRef} style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
             {[
               { id: 'users', label: 'PARTY' },
               { id: 'vault', label: 'VAULT' },
@@ -373,7 +389,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
               { id: 'backup', label: 'BACKUP' },
               { id: 'password', label: 'PWD' },
             ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)} style={{
+              <button key={t.id} ref={tutorialRefs?.[`tab_${t.id}`] || null} onClick={() => setTab(t.id)} style={{
                 fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em',
                 padding: isMobile ? '6px 10px' : '4px 12px', minHeight: isMobile ? '36px' : 'auto',
                 borderRadius: '3px', cursor: 'pointer',
@@ -542,7 +558,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
             <div style={S.section}>
               <div style={S.sectionTitle}>Demo Environment</div>
               <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)', lineHeight: '1.6', marginBottom: '16px' }}>
-                Generates a full demo dataset: 4 users, 2 campaigns, ~40 notes across all categories, 3 journal sessions with realistic multi-author entries, and a complete connection graph. All demo content is flagged and can be wiped cleanly without touching real data.
+                Inserts two sample campaigns (NPCs, locations, factions, journal sessions, connections, DM-only examples) owned by <strong style={{ color: 'rgba(200,148,58,0.75)' }}>you</strong> — no separate “demo” logins. Every existing user is granted DM on those roots so they see the full tree; new sign-ups are synced the same way. <strong style={{ color: 'rgba(200,148,58,0.75)' }}>Only admins</strong> can edit demo content; everyone else gets a read-only showcase. Wipe removes only flagged demo notes and sessions, not real users.
               </div>
               <div style={{ padding: '14px', background: 'rgba(255,255,255,0.02)', border: `1px solid ${demoSeeded ? 'rgba(58,196,139,0.2)' : 'rgba(255,255,255,0.07)'}`, borderRadius: '3px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: demoSeeded ? 'rgba(58,196,139,0.8)' : 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
@@ -551,7 +567,7 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
                     {demoSeeded ? 'DEMO DATA ACTIVE' : 'NO DEMO DATA'}
                   </div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)' }}>
-                    {demoSeeded ? 'Demo users and content are currently loaded.' : 'No demo content has been generated yet.'}
+                    {demoSeeded ? 'Shared demo campaigns are loaded; players can open Tutorial or hide demo folders from the user (⋯) menu.' : 'No demo content has been generated yet.'}
                   </div>
                 </div>
               </div>
@@ -570,19 +586,12 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
                 )}
               </div>
               <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid rgba(200,148,58,0.1)', borderRadius: '3px' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>DEMO ACCOUNTS</div>
-                {[
-                  { user: 'DungeonMaster', pw: 'demo1234', role: 'Admin (demo)' },
-                  { user: 'Sable',         pw: 'demo1234', role: 'Player' },
-                  { user: 'Brennan',       pw: 'demo1234', role: 'Player' },
-                  { user: 'Lira',          pw: 'demo1234', role: 'Player' },
-                ].map(({ user, pw, role }) => (
-                  <div key={user} style={{ display: 'flex', gap: '12px', fontFamily: 'monospace', fontSize: '12px', color: 'rgba(226,213,187,0.5)', marginBottom: '4px' }}>
-                    <span style={{ color: 'rgba(200,148,58,0.7)', width: '120px' }}>{user}</span>
-                    <span>{pw}</span>
-                    <span style={{ color: 'rgba(226,213,187,0.3)', marginLeft: '8px' }}>{role}</span>
-                  </div>
-                ))}
+                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>HOW DEMO WORKS</div>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: 1.55 }}>
+                  <li>Party members sign in with their <strong style={{ color: 'rgba(200,148,58,0.65)' }}>normal</strong> accounts — there are no extra demo passwords.</li>
+                  <li>After you generate, ask users to refresh once so the sidebar and <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_seeded</strong> menu items appear.</li>
+                  <li>If someone still cannot see a demo root, have them log out and back in (sync runs on login / session check).</li>
+                </ul>
               </div>
             </div>
           )}
@@ -942,4 +951,6 @@ export default function AdminPanel({ currentUser, onClose, onChroniclerImportDon
       </div>
     </div>
   );
-}
+});
+
+export default AdminPanel;

@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { buildRecapPromptsForSession } = require('../utils/recapPromptBuild');
 
 const router = express.Router();
@@ -138,6 +139,12 @@ router.post('/generate', authenticateToken, async (req, res) => {
   const q = assertRecapQuota(uid, session_id);
   if (!q.ok) return res.status(q.status).json({ error: q.error });
 
+  const sessRow = db.prepare('SELECT folder_id FROM sessions WHERE id = ?').get(session_id);
+  if (sessRow?.folder_id != null) {
+    const dmRec = demoMutateForbiddenMessage(uid, sessRow.folder_id);
+    if (dmRec) return res.status(403).json({ error: dmRec });
+  }
+
   const aiEnabled = db.prepare("SELECT value FROM settings WHERE key = 'ai_enabled'").get();
   if (aiEnabled?.value !== 'true') return res.status(503).json({ error: 'AI features are not enabled.' });
 
@@ -213,6 +220,9 @@ router.post('/folder-roles/:folderId', authenticateToken, (req, res) => {
   const dm = !!db.prepare("SELECT 1 FROM folder_roles WHERE folder_id = ? AND user_id = ? AND role = 'dm'").get(rootId, uid);
 
   if (!admin && !dm) return res.status(403).json({ error: 'Only DMs and admins can manage folder roles' });
+
+  const dmRoles = demoMutateForbiddenMessage(uid, rootId);
+  if (dmRoles) return res.status(403).json({ error: dmRoles });
 
   // Prevent removing the last DM
   if (action === 'remove') {

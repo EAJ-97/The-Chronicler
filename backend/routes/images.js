@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf } = require('../utils/access');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { getImagesDataDir } = require('../utils/sidebarIcon');
 
 const router = express.Router();
@@ -62,6 +63,12 @@ router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('im
     return res.status(404).json({ error: 'Note not found' });
   }
 
+  const dmImg = demoMutateForbiddenMessage(req.user.id, noteId);
+  if (dmImg) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(403).json({ error: dmImg });
+  }
+
   if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
     return res.status(403).json({ error: 'Only campaign DMs and admins can upload sidebar icons' });
@@ -75,6 +82,13 @@ router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('im
 // POST upload image to a note
 router.post('/upload/:noteId', authenticateToken, upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No valid image file provided' });
+
+  const nid = parseInt(req.params.noteId, 10);
+  const dmUp = demoMutateForbiddenMessage(req.user.id, nid);
+  if (dmUp) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(403).json({ error: dmUp });
+  }
 
   const result = db.prepare(`
     INSERT INTO note_images (note_id, filename, original_name, uploaded_by)
@@ -100,6 +114,9 @@ router.get('/note/:noteId', authenticateToken, (req, res) => {
 router.delete('/:id', authenticateToken, (req, res) => {
   const image = db.prepare('SELECT * FROM note_images WHERE id = ?').get(req.params.id);
   if (!image) return res.status(404).json({ error: 'Image not found' });
+
+  const dmDel = demoMutateForbiddenMessage(req.user.id, image.note_id);
+  if (dmDel) return res.status(403).json({ error: dmDel });
 
   // Only uploader, DM of the note's campaign, or admin can delete
   const isDM = isDMOf(image.note_id, req.user.id);

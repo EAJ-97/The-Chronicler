@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import NoteList from './NoteList.jsx';
 import NoteEditor from './NoteEditor.jsx';
 import GraphView from './GraphView.jsx';
@@ -11,11 +11,41 @@ import ReferencePeekPanel from './ReferencePeekPanel.jsx';
 import SnapshotPanel from './SnapshotPanel.jsx';
 import TrashPanel from './TrashPanel.jsx';
 import CampaignModal from './CampaignModal.jsx';
+import TutorialOverlay from './TutorialOverlay.jsx';
 import api from '../api.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
+import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
 
 /** Set to true to show the Timeline tab (ITEM_9). Hidden by default; implementation kept in TimelineView.jsx. */
 const SHOW_TIMELINE_TAB = false;
+
+const LS_HIDE_DEMO = 'chronicler_hide_demo_folders';
+
+/**
+ * When hideDemo is true, removes notes that belong to a demo root campaign (is_demo root folder).
+ * @param {object[]} allNotes
+ * @param {boolean} hideDemo
+ * @returns {object[]}
+ */
+function filterNotesHideDemoRoots(allNotes, hideDemo) {
+  if (!hideDemo || !allNotes?.length) return allNotes || [];
+  const byId = new Map(allNotes.map((n) => [n.id, n]));
+  const inDemoTree = (row) => {
+    let cur = row;
+    for (let i = 0; i < 500 && cur; i++) {
+      if (cur.parent_id == null && cur.is_folder && Number(cur.is_demo) === 1) return true;
+      cur = cur.parent_id != null ? byId.get(cur.parent_id) : null;
+    }
+    return false;
+  };
+  return allNotes.filter((n) => !inDemoTree(n));
+}
+
+function findSunkenValeRootId(allNotes) {
+  const roots = (allNotes || []).filter((n) => n.is_folder && !n.parent_id && Number(n.is_demo) === 1);
+  const byTitle = roots.find((n) => String(n.title || '').trim().toLowerCase() === 'the sunken vale');
+  return (byTitle || roots[0] || null)?.id ?? null;
+}
 
 const S = {
   shell: { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, overflow: 'hidden', background: '#07080e' },
@@ -156,7 +186,74 @@ export default function Dashboard({ user, onLogout }) {
   // User menu popover on very narrow topbar
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);
+  const userMenuTutorialRef = useRef(null);
+  const userMenuHideDemoRef = useRef(null);
+  const userMenuTrashRef = useRef(null);
+  const userMenuLeaveRef = useRef(null);
+  const topbarRef = useRef(null);
+  const viewToggleRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const mainRef = useRef(null);
+  const tutorialCardRef = useRef(null);
+
+  // Tutorial target refs (wired into children via props)
+  const noteListCreateBarRef = useRef(null);
+  const adminPanelRef = useRef(null);
+  const adminPanelShellRef = useRef(null);
+  const adminTabUsersRef = useRef(null);
+  const adminTabVaultRef = useRef(null);
+  const adminTabDemoRef = useRef(null);
+  const adminTabAiRef = useRef(null);
+  const adminTabBackupRef = useRef(null);
+  const adminTabPasswordRef = useRef(null);
+
+  const noteEditorRootToolsTabsRef = useRef(null);
+  const noteEditorSidebarDescriptionRef = useRef(null);
+  const noteEditorCampaignSplitRef = useRef(null);
+  const noteEditorDrawerBarRef = useRef(null);
+  const noteEditorDrawerExpandRef = useRef(null);
+
+  const graphCanvasRef = useRef(null);
+  const graphCampaignSelectRef = useRef(null);
+  const graphOverflowMenuRef = useRef(null);
+  const graphBtnConnectRef = useRef(null);
+  const graphBtnPathRef = useRef(null);
+  const graphBtnTheoryRef = useRef(null);
+  const graphBtnShipRef = useRef(null);
+  const graphBtn3dRef = useRef(null);
+  const graphBtnExpandRef = useRef(null);
+  const graphBtnDmViewRef = useRef(null);
+  const graphLegendRef = useRef(null);
+  const graph3dControlsRef = useRef(null);
+  const graphLegendTabRef = useRef(null);
+  const graph3dControlsTabRef = useRef(null);
+
+  const journalShellRef = useRef(null);
+  const journalCampaignPickerRef = useRef(null);
+  const journalLorePanelRef = useRef(null);
+  const journalLoreBtnRef = useRef(null);
+  const journalNewSessionBtnRef = useRef(null);
+  const journalSessionsListRef = useRef(null);
+  const journalContinueBtnRef = useRef(null);
+  const journalMoveBtnRef = useRef(null);
+  const journalPrepBtnRef = useRef(null);
+  const journalRollBtnRef = useRef(null);
+  const journalRecapBtnRef = useRef(null);
+
+  const backupBtnSnapshotRef = useRef(null);
+  const backupBtnExportRef = useRef(null);
+  const backupBtnSyncRef = useRef(null);
+  const backupBtnRenameRef = useRef(null);
+  const backupBtnDeleteRef = useRef(null);
   const [notes, setNotes] = useState([]);
+  /** Must be declared before `notesForList` — that memo reads this flag (TDZ if order is reversed). */
+  const [hideDemoFolders, setHideDemoFolders] = useState(() => {
+    try { return localStorage.getItem(LS_HIDE_DEMO) === 'true'; } catch { return false; }
+  });
+  const notesForList = useMemo(
+    () => filterNotesHideDemoRoots(notes, hideDemoFolders),
+    [notes, hideDemoFolders],
+  );
   const [dmCampaignIds, setDmCampaignIds] = useState([]);
   const [snapshotFolder, setSnapshotFolder] = useState(null);
   const [connections, setConnections] = useState([]);
@@ -174,6 +271,16 @@ export default function Dashboard({ user, onLogout }) {
   const [viewAsUserList, setViewAsUserList] = useState([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [showIntegrity, setShowIntegrity] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+  const [tutorialForceHoverNodeId, setTutorialForceHoverNodeId] = useState(null);
+  const [tutorialRequestedRootToolsTab, setTutorialRequestedRootToolsTab] = useState(null);
+  const [tutorialRequestedDrawerTab, setTutorialRequestedDrawerTab] = useState(null);
+  const [tutorialEnsureDrawerOpen, setTutorialEnsureDrawerOpen] = useState(false);
+  const [tutorialForceDrawerClosed, setTutorialForceDrawerClosed] = useState(false);
+  const [tutorialGraphForce3D, setTutorialGraphForce3D] = useState(false);
+  const [tutorialGraphForce2D, setTutorialGraphForce2D] = useState(false);
+  const hideDemoRestoreRef = useRef(null);
   const [campaignModalOpts, setCampaignModalOpts] = useState({});
   const simulatedRoleRef = useRef(null);
   const viewAsUserIdRef = useRef(null);
@@ -198,6 +305,159 @@ export default function Dashboard({ user, onLogout }) {
     if (!user?.is_admin) return;
     api.get('/notes/meta/users').then((r) => setViewAsUserList(r.data || [])).catch(() => {});
   }, [user?.is_admin]);
+
+  /** Clear selection when the selected note is hidden with demo folders toggle. */
+  useEffect(() => {
+    if (!hideDemoFolders || selectedNoteId == null || !notes.length) return;
+    if (!notesForList.some((n) => n.id === selectedNoteId)) setSelectedNoteId(null);
+  }, [hideDemoFolders, selectedNoteId, notes, notesForList]);
+
+  const tutorialModel = useMemo(() => {
+    return buildTutorialSteps({ isAdmin: !!user?.is_admin, demoSeeded: !!user?.demo_seeded });
+  }, [user?.is_admin, user?.demo_seeded]);
+
+  const tutorialSteps = tutorialModel.steps || [];
+  const tutorialChapters = tutorialModel.chapters || [];
+
+  const tutorialTargetRefs = useMemo(() => ({
+    tutorialCard: tutorialCardRef,
+    sidebar: sidebarRef,
+    noteListCreateBar: noteListCreateBarRef,
+    userMenu: userMenuRef,
+    userMenuTutorial: userMenuTutorialRef,
+    userMenuHideDemo: userMenuHideDemoRef,
+    userMenuTrash: userMenuTrashRef,
+    userMenuLeave: userMenuLeaveRef,
+    adminPanelShell: adminPanelShellRef,
+    adminTab_users: adminTabUsersRef,
+    adminTab_vault: adminTabVaultRef,
+    adminTab_demo: adminTabDemoRef,
+    adminTab_ai: adminTabAiRef,
+    adminTab_backup: adminTabBackupRef,
+    adminTab_password: adminTabPasswordRef,
+    noteEditorRootToolsTabs: noteEditorRootToolsTabsRef,
+    noteEditorSidebarDescription: noteEditorSidebarDescriptionRef,
+    noteEditorCampaignSplit: noteEditorCampaignSplitRef,
+    noteEditorDrawerBar: noteEditorDrawerBarRef,
+    noteEditorDrawerExpand: noteEditorDrawerExpandRef,
+    graphCanvas: graphCanvasRef,
+    graphCampaignSelect: graphCampaignSelectRef,
+    graphOverflowMenu: graphOverflowMenuRef,
+    graphBtn_connect: graphBtnConnectRef,
+    graphBtn_path: graphBtnPathRef,
+    graphBtn_theory: graphBtnTheoryRef,
+    graphBtn_ship: graphBtnShipRef,
+    graphBtn_3d: graphBtn3dRef,
+    graphBtn_expand: graphBtnExpandRef,
+    graphBtn_dmview: graphBtnDmViewRef,
+    graphLegend: graphLegendRef,
+    graphLegendTab: graphLegendTabRef,
+    graph3dControls: graph3dControlsRef,
+    graph3dControlsTab: graph3dControlsTabRef,
+    journalShell: journalShellRef,
+    journalCampaignPicker: journalCampaignPickerRef,
+    journalLorePanel: journalLorePanelRef,
+    journalLoreBtn: journalLoreBtnRef,
+    journalNewSessionBtn: journalNewSessionBtnRef,
+    journalSessionsList: journalSessionsListRef,
+    journalContinueBtn: journalContinueBtnRef,
+    journalMoveBtn: journalMoveBtnRef,
+    journalPrepBtn: journalPrepBtnRef,
+    journalRollBtn: journalRollBtnRef,
+    journalRecapBtn: journalRecapBtnRef,
+    backupBtn_snapshot: backupBtnSnapshotRef,
+    backupBtn_export: backupBtnExportRef,
+    backupBtn_sync: backupBtnSyncRef,
+    backupBtn_rename: backupBtnRenameRef,
+    backupBtn_delete: backupBtnDeleteRef,
+  }), []);
+
+  const setHideDemoFoldersPersist = useCallback((next) => {
+    setHideDemoFolders(next);
+    try { localStorage.setItem(LS_HIDE_DEMO, next ? 'true' : 'false'); } catch {}
+  }, []);
+
+  // Keep tutorialStep in bounds when the step list changes (e.g. demo gating).
+  useEffect(() => {
+    if (!tutorialOpen) return;
+    if (tutorialStep >= tutorialSteps.length) setTutorialStep(0);
+  }, [tutorialOpen, tutorialStep, tutorialSteps.length]);
+
+  /** Tutorial step orchestration: force view/admin/tab/selection and per-component hints. */
+  useEffect(() => {
+    if (!tutorialOpen) {
+      setTutorialForceHoverNodeId(null);
+      setTutorialRequestedRootToolsTab(null);
+      setTutorialRequestedDrawerTab(null);
+      setTutorialEnsureDrawerOpen(false);
+      setTutorialForceDrawerClosed(false);
+      setTutorialGraphForce3D(false);
+      setTutorialGraphForce2D(false);
+      if (hideDemoRestoreRef.current != null) {
+        setHideDemoFoldersPersist(!!hideDemoRestoreRef.current);
+        hideDemoRestoreRef.current = null;
+      }
+      return;
+    }
+
+    const step = tutorialSteps[tutorialStep];
+    const ui = step?.ui || {};
+
+    // Prevent “hide demo” from breaking demo-driven steps.
+    if (!!user?.demo_seeded) {
+      if (hideDemoRestoreRef.current == null) hideDemoRestoreRef.current = hideDemoFolders;
+      if (hideDemoFolders) setHideDemoFoldersPersist(false);
+    }
+
+    // Admin panel visibility + tab.
+    if (ui.openAdmin) {
+      setShowAdmin(true);
+      if (ui.adminTab && adminPanelRef.current?.setTab) adminPanelRef.current.setTab(ui.adminTab);
+    } else {
+      setShowAdmin(false);
+    }
+
+    // Main view selection (Admin chapter still uses the Notes shell behind the overlay).
+    if (ui.view === 'graph' || ui.view === 'journal' || ui.view === 'notes') setView(ui.view);
+    else if (ui.view === 'admin') setView('notes');
+
+    // User menu visibility for the Users chapter.
+    if (ui.openUserMenu) {
+      if (isMobile) setMobileMenuOpen(true);
+      else setShowUserMenu(true);
+    } else {
+      setShowUserMenu(false);
+      setMobileMenuOpen(false);
+    }
+
+    // Select Sunken Vale demo root.
+    if (ui.selectSunkenVale) {
+      const rootId = findSunkenValeRootId(notes);
+      if (rootId != null) setSelectedNoteId(rootId);
+    }
+    if (ui.clearSelection) {
+      setSelectedNoteId(null);
+      setGraphPanelNoteId(null);
+    }
+
+    // Backup actions: force sidebar root actions visible for Sunken Vale.
+    if (ui.forceShowBackupActions) {
+      const rootId = findSunkenValeRootId(notes);
+      setTutorialForceHoverNodeId(rootId != null ? rootId : null);
+    } else {
+      setTutorialForceHoverNodeId(null);
+    }
+
+    // NoteEditor hints.
+    setTutorialRequestedRootToolsTab(ui.noteEditorRootToolsTab || null);
+    setTutorialRequestedDrawerTab(ui.noteEditorDrawerTab || null);
+    setTutorialEnsureDrawerOpen(!!ui.ensureDrawerOpen);
+    setTutorialForceDrawerClosed(!!ui.ensureDrawerClosed);
+
+    // Graph hints.
+    setTutorialGraphForce3D(!!ui.graphForce3D);
+    setTutorialGraphForce2D(!!ui.graphForce2D);
+  }, [tutorialOpen, tutorialStep, tutorialSteps, notes, user?.demo_seeded, hideDemoFolders, setHideDemoFoldersPersist]);
   const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
   const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
     : simulatedRole ? []
@@ -546,7 +806,7 @@ export default function Dashboard({ user, onLogout }) {
 
   // Shared NoteList props (used both in desktop sidebar and mobile drawer)
   const noteListProps = {
-    notes,
+    notes: notesForList,
     selectedId: selectedNoteId,
     onSelect: (id) => {
       const n = notes.find((row) => row.id === id);
@@ -624,6 +884,15 @@ export default function Dashboard({ user, onLogout }) {
     dmCampaignIds: effectiveDmCampaignIds,
     simulatedRole,
     isMobile,
+    tutorialRefs: { createBar: noteListCreateBarRef },
+    tutorialForceHoverNodeId: tutorialForceHoverNodeId,
+    tutorialActionRefs: {
+      snapshot: backupBtnSnapshotRef,
+      export: backupBtnExportRef,
+      sync: backupBtnSyncRef,
+      rename: backupBtnRenameRef,
+      del: backupBtnDeleteRef,
+    },
   };
 
   if (loading) {
@@ -636,7 +905,24 @@ export default function Dashboard({ user, onLogout }) {
 
   return (
     <div style={S.shell}>
-      {showAdmin && <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} onChroniclerImportDone={loadData} />}
+      {showAdmin && (
+        <AdminPanel
+          ref={adminPanelRef}
+          currentUser={user}
+          initialTab={tutorialOpen ? (tutorialSteps[tutorialStep]?.ui?.adminTab || 'users') : 'users'}
+          tutorialRefs={{
+            shell: adminPanelShellRef,
+            tab_users: adminTabUsersRef,
+            tab_vault: adminTabVaultRef,
+            tab_demo: adminTabDemoRef,
+            tab_ai: adminTabAiRef,
+            tab_backup: adminTabBackupRef,
+            tab_password: adminTabPasswordRef,
+          }}
+          onClose={() => setShowAdmin(false)}
+          onChroniclerImportDone={loadData}
+        />
+      )}
       {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData()} />}
 
       {/* Undo toast */}
@@ -669,7 +955,7 @@ export default function Dashboard({ user, onLogout }) {
       {/* ── TOPBAR ── */}
       {isMobile ? (
         /* Mobile topbar: hamburger | brand | ··· */
-        <div style={{ ...S.topbar, height: 'calc(52px + env(safe-area-inset-top))', paddingTop: 'env(safe-area-inset-top)' }}>
+        <div ref={topbarRef} style={{ ...S.topbar, height: 'calc(52px + env(safe-area-inset-top))', paddingTop: 'env(safe-area-inset-top)' }}>
           <button style={S.mobileHamburger} onClick={() => setMobileSidebarOpen(true)} aria-label="Open notes">
             ☰
           </button>
@@ -682,9 +968,9 @@ export default function Dashboard({ user, onLogout }) {
         </div>
       ) : (
         /* Desktop topbar: unchanged */
-        <div style={S.topbar}>
+        <div ref={topbarRef} style={S.topbar}>
           <span style={S.brand}>The Chronicler{isDevPort ? ' (DEV)' : ''}</span>
-          <div style={S.viewToggle}>
+          <div ref={viewToggleRef} style={S.viewToggle}>
             <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
             <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
             <button style={S.viewBtn(view === 'journal')} onClick={() => setView('journal')}>⚡ Journal</button>
@@ -785,28 +1071,42 @@ export default function Dashboard({ user, onLogout }) {
           )}
           <div style={S.spacer} />
           <div style={S.userInfo}>
-            {!isNarrow && <span style={S.username}>{user.username.toUpperCase()}</span>}
-            {windowWidth <= 720 ? (
+            {(windowWidth <= 720 || user.demo_seeded) ? (
               <div style={{ position: 'relative' }} ref={userMenuRef}>
                 <button
-                  style={{ ...S.topBtn, letterSpacing: '0.2em', fontSize: '12px', padding: '4px 10px' }}
-                  onClick={() => setShowUserMenu(v => !v)}
-                  title="Menu"
-                >···</button>
+                  style={{
+                    ...S.topBtn,
+                    letterSpacing: windowWidth <= 720 ? '0.2em' : '0.12em',
+                    fontSize: windowWidth <= 720 ? '12px' : '9px',
+                    padding: '4px 10px',
+                    maxWidth: windowWidth <= 720 ? undefined : '160px',
+                  }}
+                  onClick={() => setShowUserMenu((v) => !v)}
+                  title="Account menu"
+                >{windowWidth <= 720 ? '···' : user.username.toUpperCase()}</button>
                 {showUserMenu && (
-                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '130px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
                     <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
-                    <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
-                    {!!user.is_admin && <button style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
-                    <button style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
+                    {!!user.demo_seeded && (
+                      <>
+                        <button ref={userMenuTutorialRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setShowUserMenu(false); }}>Tutorial</button>
+                        <button ref={userMenuHideDemoRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setShowUserMenu(false); }}>
+                          {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
+                        </button>
+                      </>
+                    )}
+                    <button ref={userMenuTrashRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
+                    {!!user.is_admin && <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
+                    <button ref={userMenuLeaveRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
                   </div>
                 )}
               </div>
             ) : (
               <>
-                <button style={S.topBtn} onClick={() => setShowTrash(true)} title="View deleted items">🗑</button>
-                {!!user.is_admin && <button style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
-                <button style={S.topBtn} onClick={onLogout}>Leave</button>
+                {!isNarrow && <span style={S.username}>{user.username.toUpperCase()}</span>}
+                <button type="button" style={S.topBtn} onClick={() => setShowTrash(true)} title="View deleted items">🗑</button>
+                {!!user.is_admin && <button type="button" style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
+                <button type="button" style={S.topBtn} onClick={onLogout}>Leave</button>
               </>
             )}
           </div>
@@ -826,7 +1126,7 @@ export default function Dashboard({ user, onLogout }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px', borderBottom: '1px solid rgba(200,148,58,0.08)', flexShrink: 0 }}>
               <button style={{ ...S.mobileHamburger, fontSize: '20px', color: 'rgba(226,213,187,0.4)' }} onClick={() => setMobileSidebarOpen(false)} aria-label="Close">×</button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <div ref={sidebarRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <NoteList
                 {...noteListProps}
                 collapsed={false}
@@ -845,6 +1145,16 @@ export default function Dashboard({ user, onLogout }) {
             <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
               {user.username.toUpperCase()}
             </div>
+            {!!user.demo_seeded && (
+              <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
+                <button ref={userMenuTutorialRef} type="button" style={S.mobileMenuBtn} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setMobileMenuOpen(false); }}>
+                  <span>✦</span> Tutorial
+                </button>
+                <button ref={userMenuHideDemoRef} type="button" style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setMobileMenuOpen(false); }}>
+                  <span>{hideDemoFolders ? '👁' : '🙈'}</span> {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
+                </button>
+              </div>
+            )}
             {!!user.is_admin && (
               <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
                 <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
@@ -881,7 +1191,7 @@ export default function Dashboard({ user, onLogout }) {
                 )}
               </div>
             )}
-            <button style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
+            <button ref={userMenuTrashRef} style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
             </button>
             {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
@@ -894,7 +1204,7 @@ export default function Dashboard({ user, onLogout }) {
                 <span>⚙</span> Admin
               </button>
             )}
-            <button style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={onLogout}>
+            <button ref={userMenuLeaveRef} style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={onLogout}>
               <span>↩</span> Leave
             </button>
           </div>
@@ -925,11 +1235,13 @@ export default function Dashboard({ user, onLogout }) {
       >
         {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
         {!isMobile && view !== 'journal' && (
-          <NoteList
-            {...noteListProps}
-            collapsed={!sidebarOpen}
-            onToggleCollapse={toggleSidebar}
-          />
+          <div ref={sidebarRef} style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <NoteList
+              {...noteListProps}
+              collapsed={!sidebarOpen}
+              onToggleCollapse={toggleSidebar}
+            />
+          </div>
         )}
 
         {/* Snapshot modal */}
@@ -970,7 +1282,7 @@ export default function Dashboard({ user, onLogout }) {
           />
         )}
 
-        <div style={S.main}>
+        <div ref={mainRef} style={S.main}>
           {view === 'notes' && (
             <div
               style={{
@@ -1006,6 +1318,17 @@ export default function Dashboard({ user, onLogout }) {
                   onSelectNote={(id) => {
                     setSelectedNoteId(id);
                     loadData();
+                  }}
+                  tutorialRequestedRootToolsTab={tutorialRequestedRootToolsTab}
+                  tutorialRequestedDrawerTab={tutorialRequestedDrawerTab}
+                  tutorialEnsureDrawerOpen={tutorialEnsureDrawerOpen}
+                  tutorialForceDrawerClosed={tutorialForceDrawerClosed}
+                  tutorialRefs={{
+                    rootToolsTabs: noteEditorRootToolsTabsRef,
+                    sidebarDescription: noteEditorSidebarDescriptionRef,
+                    campaignSplit: noteEditorCampaignSplitRef,
+                    drawerBar: noteEditorDrawerBarRef,
+                    drawerExpand: noteEditorDrawerExpandRef,
                   }}
                 />
               </div>
@@ -1044,8 +1367,8 @@ export default function Dashboard({ user, onLogout }) {
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <GraphView
-                  allNotes={notes}
-                  notes={notes.filter(n => !n.is_folder)}
+                  allNotes={notesForList}
+                  notes={notesForList.filter(n => !n.is_folder)}
                   connections={connections}
                   onSelectNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(id); }}
                   onOpenNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(null); setView('notes'); }}
@@ -1057,6 +1380,24 @@ export default function Dashboard({ user, onLogout }) {
                   dmCampaignIds={effectiveDmCampaignIds}
                   simulatedRole={simulatedRole}
                   isMobile={isMobile}
+                  tutorialForce3D={tutorialGraphForce3D}
+                  tutorialForce2D={tutorialGraphForce2D}
+                  tutorialRefs={{
+                    canvas: graphCanvasRef,
+                    campaignSelect: graphCampaignSelectRef,
+                    overflowMenu: graphOverflowMenuRef,
+                    btnConnect: graphBtnConnectRef,
+                    btnPath: graphBtnPathRef,
+                    btnTheory: graphBtnTheoryRef,
+                    btnShip: graphBtnShipRef,
+                    btn3d: graphBtn3dRef,
+                    btnExpand: graphBtnExpandRef,
+                    btnDmView: graphBtnDmViewRef,
+                    legend: graphLegendRef,
+                    legendTab: graphLegendTabRef,
+                    controls3d: graph3dControlsRef,
+                    controls3dTab: graph3dControlsTabRef,
+                  }}
                 />
               </div>
               {/* Mobile graph note panel — bottom sheet */}
@@ -1081,11 +1422,29 @@ export default function Dashboard({ user, onLogout }) {
           )}
 
           {view === 'journal' && (
-            <Journal notes={notes} selectedNoteId={selectedNoteId} currentUser={user} dmCampaignIds={effectiveDmCampaignIds} />
+            <Journal
+              notes={notesForList}
+              selectedNoteId={selectedNoteId}
+              currentUser={user}
+              dmCampaignIds={effectiveDmCampaignIds}
+              tutorialRefs={{
+                shell: journalShellRef,
+                campaignPicker: journalCampaignPickerRef,
+                lorePanel: journalLorePanelRef,
+                loreBtn: journalLoreBtnRef,
+                newSessionBtn: journalNewSessionBtnRef,
+                sessionsList: journalSessionsListRef,
+                continueBtn: journalContinueBtnRef,
+                moveBtn: journalMoveBtnRef,
+                prepBtn: journalPrepBtnRef,
+                rollBtn: journalRollBtnRef,
+                recapBtn: journalRecapBtnRef,
+              }}
+            />
           )}
 
           {SHOW_TIMELINE_TAB && view === 'timeline' && (
-            <TimelineView notes={notes} currentUser={user} />
+            <TimelineView notes={notesForList} currentUser={user} />
           )}
         </div>
       </div>
@@ -1120,6 +1479,17 @@ export default function Dashboard({ user, onLogout }) {
           <div style={S.bottomNavSafeFill} />
         </div>
       )}
+
+      <TutorialOverlay
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
+        stepIndex={tutorialStep}
+        setStepIndex={setTutorialStep}
+        steps={tutorialSteps}
+        targetRefs={tutorialTargetRefs}
+        chapters={tutorialChapters}
+        cardRef={tutorialCardRef}
+      />
     </div>
   );
 }

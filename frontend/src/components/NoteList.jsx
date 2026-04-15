@@ -62,6 +62,8 @@ function TreeNode({
   onDelete, expandedIds, onToggleExpand, currentUser, onRename,
   draggedId, onDragStart, onDragEnd, onDrop, dropTargetId, onSnapshot, onExport, onSync,
   allNotes, dmCampaignIds, simulatedRole, isMobile,
+  tutorialForceHoverNodeId,
+  tutorialActionRefs,
 }) {
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -94,6 +96,7 @@ function TreeNode({
   })();
 
   const isRootFolder = isFolder && depth === 0;
+  const forceShowActions = isRootFolder && tutorialForceHoverNodeId === node.id;
   /** World root or standalone campaign root or a campaign folder whose parent is a world (export root). */
   const parentNote = node.parent_id && allNotes ? allNotes.find((n) => n.id === node.parent_id) : null;
   const isExportRootFolder = isFolder && (!node.parent_id || !!parentNote?.is_world);
@@ -278,19 +281,19 @@ function TreeNode({
           </span>
         )}
 
-        {(hovered || (isMobile && isSelected)) && !renaming && (
+        {(hovered || (isMobile && isSelected) || forceShowActions) && !renaming && (
           <span style={{ display: 'flex', gap: isMobile ? '6px' : '2px', flexShrink: 0 }}>
             {isFolder && depth === 0 && canManage && (
-              <span title="Campaign snapshot" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSnapshot(node.id); }}>📷</span>
+              <span ref={forceShowActions ? tutorialActionRefs?.snapshot : null} title="Campaign snapshot" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSnapshot(node.id); }}>📷</span>
             )}
             {canExportBackup && onExport && (
-              <span title="Downloads JSON (admin import) + HTML (double-click to browse read-only)" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onExport(node.id, node.title); }}>💾</span>
+              <span ref={forceShowActions ? tutorialActionRefs?.export : null} title="Downloads JSON (admin import) + HTML (double-click to browse read-only)" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onExport(node.id, node.title); }}>💾</span>
             )}
             {isFolder && canManage && (
-              <span title="Sync visibility to all children" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSync(node.id, node.title); }}>⟳</span>
+              <span ref={forceShowActions ? tutorialActionRefs?.sync : null} title="Sync visibility to all children" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSync(node.id, node.title); }}>⟳</span>
             )}
-            {canManage && !isMobile && <span title="Rename" style={actionBtn} onClick={startRename}>✎</span>}
-            {canManage && !isMobile && <span title="Delete" style={{ ...actionBtn, color: 'rgba(224,112,112,0.6)' }} onClick={e => { e.stopPropagation(); onDelete(node.id, node.title, isFolder); }}>×</span>}
+            {canManage && !isMobile && <span ref={forceShowActions ? tutorialActionRefs?.rename : null} title="Rename" style={actionBtn} onClick={startRename}>✎</span>}
+            {canManage && !isMobile && <span ref={forceShowActions ? tutorialActionRefs?.del : null} title="Delete" style={{ ...actionBtn, color: 'rgba(224,112,112,0.6)' }} onClick={e => { e.stopPropagation(); onDelete(node.id, node.title, isFolder); }}>×</span>}
           </span>
         )}
       </div>
@@ -306,6 +309,8 @@ function TreeNode({
           onDrop={onDrop} dropTargetId={dropTargetId} onSnapshot={onSnapshot} onExport={onExport} onSync={onSync}
           allNotes={allNotes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
           isMobile={isMobile}
+          tutorialForceHoverNodeId={tutorialForceHoverNodeId}
+          tutorialActionRefs={tutorialActionRefs}
         />
       ))}
     </div>
@@ -346,6 +351,9 @@ export default function NoteList({
   collapsed,
   onToggleCollapse,
   isMobile,
+  tutorialRefs = null,
+  tutorialForceHoverNodeId = null,
+  tutorialActionRefs = null,
 }) {
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState(null);
@@ -469,7 +477,7 @@ export default function NoteList({
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div ref={tutorialRefs?.createBar || null} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateNote(null)}>+ Note</button>
           {insideCampaign ? (
             <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateFolder(campaignFolderId)}>+ Folder</button>
@@ -579,6 +587,8 @@ export default function NoteList({
                 onSync={onSync}
                 allNotes={notes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
                 isMobile={isMobile}
+                tutorialForceHoverNodeId={tutorialForceHoverNodeId}
+                tutorialActionRefs={tutorialActionRefs}
               />
             ))
           )

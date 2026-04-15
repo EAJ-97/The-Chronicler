@@ -13,6 +13,7 @@ const {
   isWorldOrCampaignRootFolder,
 } = require('../utils/access');
 const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 
 const router = express.Router();
 
@@ -497,6 +498,11 @@ router.post('/', authenticateToken, (req, res) => {
 
   if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
 
+  if (parent_id) {
+    const dmErr = demoMutateForbiddenMessage(req.user.id, parent_id);
+    if (dmErr) return res.status(403).json({ error: dmErr });
+  }
+
   // Handle override creation: source_note_id set
   if (source_note_id) {
     // Creating an override of a world-layer note
@@ -615,6 +621,17 @@ router.put('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const note = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
+
+  const dmErrSelf = demoMutateForbiddenMessage(req.user.id, note.id);
+  if (dmErrSelf) return res.status(403).json({ error: dmErrSelf });
+  const rawMoveParent = req.body && req.body.parent_id;
+  if (rawMoveParent !== undefined && rawMoveParent !== null && rawMoveParent !== -1) {
+    const pid = parseInt(rawMoveParent, 10);
+    if (Number.isFinite(pid)) {
+      const dmErrParent = demoMutateForbiddenMessage(req.user.id, pid);
+      if (dmErrParent) return res.status(403).json({ error: dmErrParent });
+    }
+  }
 
   const archived = isNoteUnderCompletedArchive(note.id);
   if (archived && !admin) {
@@ -930,6 +947,9 @@ router.delete('/:id', authenticateToken, (req, res) => {
   const note  = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
 
+  const dmDel = demoMutateForbiddenMessage(req.user.id, note.id);
+  if (dmDel) return res.status(403).json({ error: dmDel });
+
   if (isNoteUnderCompletedArchive(note.id) && !admin) {
     return res.status(403).json({ error: 'This campaign or world is marked completed; delete is disabled.' });
   }
@@ -967,6 +987,8 @@ router.post('/:id/restore', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const note  = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NOT NULL').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Not found in trash' });
+  const dmRest = demoMutateForbiddenMessage(req.user.id, note.id);
+  if (dmRest) return res.status(403).json({ error: dmRest });
   const isOwner = note.user_id === req.user.id;
   const isDM    = isDMOf(note.id, req.user.id);
   if (!admin && !isOwner && !isDM) return res.status(403).json({ error: 'Not yours to restore' });
@@ -990,6 +1012,9 @@ router.put('/:id/members', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const folder = db.prepare('SELECT * FROM notes WHERE id = ? AND is_folder = 1 AND parent_id IS NULL').get(req.params.id);
   if (!folder) return res.status(404).json({ error: 'Campaign folder not found' });
+
+  const dmMem = demoMutateForbiddenMessage(req.user.id, folder.id);
+  if (dmMem) return res.status(403).json({ error: dmMem });
 
   const isDM = isDMOf(folder.id, req.user.id);
   if (!admin && !isDM) return res.status(403).json({ error: 'DM or admin only' });
@@ -1053,6 +1078,8 @@ router.put('/:id/clear-recovered', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const note  = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Not found' });
+  const dmClr = demoMutateForbiddenMessage(req.user.id, note.id);
+  if (dmClr) return res.status(403).json({ error: dmClr });
   const isOwner = note.user_id === req.user.id;
   const isDM    = isDMOf(note.id, req.user.id);
   if (!admin && !isOwner && !isDM) return res.status(403).json({ error: 'Not yours' });
@@ -1078,6 +1105,8 @@ router.post('/:id/sync-visibility', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const folder = db.prepare('SELECT * FROM notes WHERE id = ?').get(req.params.id);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  const dmSync = demoMutateForbiddenMessage(req.user.id, folder.id);
+  if (dmSync) return res.status(403).json({ error: dmSync });
   const isOwner = folder.user_id === req.user.id;
   const isDM    = isDMOf(folder.id, req.user.id);
   if (!admin && !isOwner && !isDM) return res.status(403).json({ error: 'Owner, DM, or admin only' });

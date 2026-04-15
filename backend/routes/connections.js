@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
+const { demoMutateForbiddenForAny } = require('../utils/demoAccess');
 
 const router = express.Router();
 
@@ -82,6 +83,9 @@ router.post('/', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
+  const demoConn = demoMutateForbiddenForAny(req.user.id, [source_note_id, target_note_id]);
+  if (demoConn) return res.status(403).json({ error: demoConn });
+
   const admin = isAdmin(req.user.id);
   if (
     !admin &&
@@ -131,6 +135,8 @@ router.put('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const conn  = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (!conn) return res.status(404).json({ error: 'Connection not found' });
+  const demoPut = demoMutateForbiddenForAny(req.user.id, [conn.source_note_id, conn.target_note_id]);
+  if (demoPut) return res.status(403).json({ error: demoPut });
   const isCreator = conn.created_by === req.user.id;
   const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
   if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });
@@ -151,6 +157,8 @@ router.delete('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const conn  = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (!conn) return res.status(404).json({ error: 'Connection not found' });
+  const demoDel = demoMutateForbiddenForAny(req.user.id, [conn.source_note_id, conn.target_note_id]);
+  if (demoDel) return res.status(403).json({ error: demoDel });
   const isCreator = conn.created_by === req.user.id;
   const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
   if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });

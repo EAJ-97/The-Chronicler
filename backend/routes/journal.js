@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOfFolder, isNoteUnderCompletedArchive } = require('../utils/access');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 
 const router = express.Router();
 
@@ -116,6 +117,23 @@ function journalFolderArchivedOr403(req, res, folderId) {
   return false;
 }
 
+/**
+ * Blocks mutating journal data under the demo campaign for non-admins.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {number|null|undefined} folderId - Campaign root note id
+ * @returns {boolean} true if 403 was sent
+ */
+function journalDemoReadonlyOr403(req, res, folderId) {
+  if (folderId == null) return false;
+  const msg = demoMutateForbiddenMessage(req.user.id, folderId);
+  if (msg) {
+    res.status(403).json({ error: msg });
+    return true;
+  }
+  return false;
+}
+
 function isUserCampaignMember(folderId, userId) {
   if (!folderId || !userId) return false;
   return !!db.prepare(`
@@ -179,6 +197,7 @@ router.post('/', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'folder_id does not match session' });
   }
   if (journalFolderArchivedOr403(req, res, sessRow.folder_id)) return;
+  if (journalDemoReadonlyOr403(req, res, sessRow.folder_id)) return;
 
   let sort_order;
   if (after_id) {
@@ -222,6 +241,7 @@ router.post('/sessions', authenticateToken, (req, res) => {
   const fid = folder_id ? parseInt(folder_id) : null;
 
   if (journalFolderArchivedOr403(req, res, fid)) return;
+  if (journalDemoReadonlyOr403(req, res, fid)) return;
 
   const result = db.prepare('INSERT INTO sessions (folder_id) VALUES (?)').run(fid);
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(result.lastInsertRowid);
@@ -238,6 +258,7 @@ router.delete('/sessions/:id', authenticateToken, (req, res) => {
 
   const fid = session.folder_id;
   if (journalFolderArchivedOr403(req, res, fid)) return;
+  if (journalDemoReadonlyOr403(req, res, fid)) return;
 
   const prevSession = db.prepare(`
     SELECT * FROM sessions
@@ -286,6 +307,8 @@ router.put('/sessions/:id/move', authenticateToken, (req, res) => {
 
   if (journalFolderArchivedOr403(req, res, oldFid)) return;
   if (journalFolderArchivedOr403(req, res, newFid)) return;
+  if (journalDemoReadonlyOr403(req, res, oldFid)) return;
+  if (journalDemoReadonlyOr403(req, res, newFid)) return;
 
   db.transaction(() => {
     db.prepare('UPDATE sessions SET folder_id = ? WHERE id = ?').run(newFid, sessionId);
@@ -344,6 +367,7 @@ router.post('/sessions/:sessionId/checklist-items/reset-checks', authenticateTok
   const ctx = dmPrepOr403(req, res, session);
   if (!ctx) return;
   if (journalFolderArchivedOr403(req, res, ctx.folderId)) return;
+  if (journalDemoReadonlyOr403(req, res, ctx.folderId)) return;
 
   db.prepare('UPDATE session_checklist_items SET is_checked = 0 WHERE session_id = ?').run(sessionId);
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
@@ -358,6 +382,7 @@ router.post('/sessions/:sessionId/checklist-items', authenticateToken, (req, res
   const ctx = dmPrepOr403(req, res, session);
   if (!ctx) return;
   if (journalFolderArchivedOr403(req, res, ctx.folderId)) return;
+  if (journalDemoReadonlyOr403(req, res, ctx.folderId)) return;
 
   const raw = req.body?.content;
   if (raw == null || typeof raw !== 'string') {
@@ -400,6 +425,7 @@ router.put('/checklist-items/:itemId', authenticateToken, (req, res) => {
   const ctx = dmPrepOr403(req, res, session);
   if (!ctx) return;
   if (journalFolderArchivedOr403(req, res, ctx.folderId)) return;
+  if (journalDemoReadonlyOr403(req, res, ctx.folderId)) return;
 
   const { content, is_checked } = req.body;
   let newContent = item.content;
@@ -440,6 +466,7 @@ router.delete('/checklist-items/:itemId', authenticateToken, (req, res) => {
   const ctx = dmPrepOr403(req, res, session);
   if (!ctx) return;
   if (journalFolderArchivedOr403(req, res, ctx.folderId)) return;
+  if (journalDemoReadonlyOr403(req, res, ctx.folderId)) return;
 
   db.prepare('DELETE FROM session_checklist_items WHERE id = ?').run(itemId);
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: ctx.folderId });
@@ -462,6 +489,7 @@ router.put('/sessions/:sessionId/attendance', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Only the DM or an admin can update attendance' });
   }
   if (journalFolderArchivedOr403(req, res, fid)) return;
+  if (journalDemoReadonlyOr403(req, res, fid)) return;
 
   const targetUserId = parseInt(req.body?.user_id, 10);
   const attended = req.body?.attended;
@@ -489,6 +517,7 @@ router.put('/:id', authenticateToken, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
   if (!admin && entry.user_id !== req.user.id) return res.status(403).json({ error: 'Not yours to edit' });
   if (journalFolderArchivedOr403(req, res, entry.folder_id)) return;
+  if (journalDemoReadonlyOr403(req, res, entry.folder_id)) return;
 
   const { content, indent_level } = req.body;
   const newContent     = content      !== undefined ? content      : entry.content;
@@ -514,6 +543,7 @@ router.delete('/:id', authenticateToken, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
   if (!admin && entry.user_id !== req.user.id) return res.status(403).json({ error: 'Not yours to delete' });
   if (journalFolderArchivedOr403(req, res, entry.folder_id)) return;
+  if (journalDemoReadonlyOr403(req, res, entry.folder_id)) return;
 
   db.prepare('DELETE FROM journal_entries WHERE id = ?').run(req.params.id);
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: entry.folder_id });
@@ -527,12 +557,15 @@ router.post('/:id/promote', authenticateToken, (req, res) => {
   if (!entry) return res.status(404).json({ error: 'Entry not found' });
   if (!admin && entry.user_id !== req.user.id) return res.status(403).json({ error: 'Not yours to promote' });
   if (journalFolderArchivedOr403(req, res, entry.folder_id)) return;
+  if (journalDemoReadonlyOr403(req, res, entry.folder_id)) return;
 
   const { mode = 'create', parent_id, category = 'general', markdown_content, target_note_id } = req.body;
 
   if (mode === 'append') {
     // Append markdown-formatted content to an existing note
     if (!target_note_id) return res.status(400).json({ error: 'target_note_id required for append mode' });
+    const tdm = demoMutateForbiddenMessage(req.user.id, target_note_id);
+    if (tdm) return res.status(403).json({ error: tdm });
     const target = db.prepare('SELECT * FROM notes WHERE id = ?').get(target_note_id);
     if (!target) return res.status(404).json({ error: 'Target note not found' });
     const appendText = '\n\n' + (markdown_content || entry.content);
@@ -546,6 +579,11 @@ router.post('/:id/promote', authenticateToken, (req, res) => {
   // mode === 'create' — create new note
   const title   = (req.body.title || entry.content.split('\n')[0]).slice(0, 80) || 'Journal Note';
   const noteContent = markdown_content !== undefined ? markdown_content : '';
+  const effectiveParent = parent_id || entry.folder_id || null;
+  if (effectiveParent) {
+    const pdm = demoMutateForbiddenMessage(req.user.id, effectiveParent);
+    if (pdm) return res.status(403).json({ error: pdm });
+  }
 
   const result = db.prepare(`
     INSERT INTO notes (user_id, parent_id, title, content, is_shared, category)
