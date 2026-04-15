@@ -1071,7 +1071,7 @@ export default function Dashboard({ user, onLogout }) {
           )}
           <div style={S.spacer} />
           <div style={S.userInfo}>
-            {(windowWidth <= 720 || user.demo_seeded) ? (
+            {(
               <div style={{ position: 'relative' }} ref={userMenuRef}>
                 <button
                   style={{
@@ -1087,27 +1087,16 @@ export default function Dashboard({ user, onLogout }) {
                 {showUserMenu && (
                   <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
                     <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
-                    {!!user.demo_seeded && (
-                      <>
-                        <button ref={userMenuTutorialRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setShowUserMenu(false); }}>Tutorial</button>
-                        <button ref={userMenuHideDemoRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setShowUserMenu(false); }}>
-                          {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
-                        </button>
-                      </>
-                    )}
+                    <button ref={userMenuTutorialRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setShowUserMenu(false); }}>Tutorial</button>
+                    <button ref={userMenuHideDemoRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setShowUserMenu(false); }}>
+                      {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
+                    </button>
                     <button ref={userMenuTrashRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
                     {!!user.is_admin && <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
                     <button ref={userMenuLeaveRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
                   </div>
                 )}
               </div>
-            ) : (
-              <>
-                {!isNarrow && <span style={S.username}>{user.username.toUpperCase()}</span>}
-                <button type="button" style={S.topBtn} onClick={() => setShowTrash(true)} title="View deleted items">🗑</button>
-                {!!user.is_admin && <button type="button" style={{ ...S.topBtn, color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => setShowAdmin(true)}>Admin</button>}
-                <button type="button" style={S.topBtn} onClick={onLogout}>Leave</button>
-              </>
             )}
           </div>
         </div>
@@ -1145,16 +1134,14 @@ export default function Dashboard({ user, onLogout }) {
             <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
               {user.username.toUpperCase()}
             </div>
-            {!!user.demo_seeded && (
-              <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
-                <button ref={userMenuTutorialRef} type="button" style={S.mobileMenuBtn} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setMobileMenuOpen(false); }}>
-                  <span>✦</span> Tutorial
-                </button>
-                <button ref={userMenuHideDemoRef} type="button" style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setMobileMenuOpen(false); }}>
-                  <span>{hideDemoFolders ? '👁' : '🙈'}</span> {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
-                </button>
-              </div>
-            )}
+            <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
+              <button ref={userMenuTutorialRef} type="button" style={S.mobileMenuBtn} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setMobileMenuOpen(false); }}>
+                <span>✦</span> Tutorial
+              </button>
+              <button ref={userMenuHideDemoRef} type="button" style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setMobileMenuOpen(false); }}>
+                <span>{hideDemoFolders ? '👁' : '🙈'}</span> {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
+              </button>
+            </div>
             {!!user.is_admin && (
               <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
                 <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
