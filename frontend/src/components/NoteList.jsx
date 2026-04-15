@@ -442,18 +442,19 @@ export default function NoteList({
           onClick={onToggleCollapse}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           style={{
-            position: 'absolute', top: '10px', right: '-14px',
-            zIndex: 20, width: '14px', height: '48px',
-            background: '#0a0c14',
-            border: '1px solid rgba(255,255,255,0.08)',
+            position: 'absolute', top: '10px', right: '-18px',
+            zIndex: 120, width: '18px', height: '52px',
+            background: '#101522',
+            border: '1px solid rgba(200,148,58,0.35)',
             borderLeft: 'none',
             borderRadius: '0 4px 4px 0',
             cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'rgba(200,148,58,0.5)', fontSize: '8px',
+            color: 'rgba(226,213,187,0.9)', fontSize: '10px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.45)',
             padding: 0, transition: 'background 0.15s, color 0.15s',
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(200,148,58,0.1)'; e.currentTarget.style.color = '#c8943a'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = '#0a0c14'; e.currentTarget.style.color = 'rgba(200,148,58,0.5)'; }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(200,148,58,0.18)'; e.currentTarget.style.color = '#c8943a'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = '#101522'; e.currentTarget.style.color = 'rgba(226,213,187,0.9)'; }}
         >
           {collapsed ? '▶' : '◀'}
         </button>
