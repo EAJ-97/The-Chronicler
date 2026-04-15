@@ -1222,7 +1222,7 @@ export default function Dashboard({ user, onLogout }) {
       >
         {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
         {!isMobile && view !== 'journal' && (
-          <div ref={sidebarRef} style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div ref={sidebarRef} style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
             <NoteList
               {...noteListProps}
               collapsed={!sidebarOpen}
