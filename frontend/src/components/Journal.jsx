@@ -51,7 +51,7 @@ function groupSessions(sessions, entries, serverNow) {
 
 const INDENT_PX = 24;
 
-export default function Journal({ notes, selectedNoteId, currentUser, dmCampaignIds = [] }) {
+export default function Journal({ notes, selectedNoteId, currentUser, dmCampaignIds = [], tutorialRefs = null }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [sessions, setSessions]         = useState([]);
@@ -534,7 +534,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
+    <div ref={tutorialRefs?.shell || null} style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
       {journalLocked && (
         <div
           style={{
@@ -808,6 +808,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           {journalCampaignRoots.length > 0 ? (
             <select
               style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', padding: isMobile ? '8px 10px' : '4px 8px', outline: 'none', cursor: 'pointer', ...(isMobile ? { width: '100%', minHeight: '40px' } : {}) }}
+              ref={tutorialRefs?.campaignPicker || null}
               value={activeFolderId || ''}
               onChange={e => setActiveFolderId(e.target.value ? parseInt(e.target.value) : null)}
             >
@@ -819,6 +820,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'nowrap' }}>
             <button
               type="button"
+              ref={tutorialRefs?.loreBtn || null}
               style={{
                 flex: 1,
                 padding: '10px 12px',
@@ -840,6 +842,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             </button>
             <button
               type="button"
+              ref={tutorialRefs?.newSessionBtn || null}
               style={{
                 flex: 1,
                 padding: '10px 12px',
@@ -870,7 +873,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
       {/* Lore So Far — visibility-safe AI summary; per-user cache on server */}
       {lorePanelOpen && activeFolderId && (
-        <div style={{
+        <div ref={tutorialRefs?.lorePanel || null} style={{
           flexShrink: 0,
           maxHeight: 'min(42vh, 480px)',
           display: 'flex',
@@ -965,7 +968,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       )}
 
       {/* Entries */}
-      <div ref={scrollAreaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '0 12px 16px' : '0 24px 16px' }}>
+      <div ref={tutorialRefs?.sessionsList || scrollAreaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '0 12px 16px' : '0 24px 16px' }}>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Cinzel', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em', fontSize: '12px' }}>LOADING...</div>
         ) : !activeFolderId ? (
@@ -990,6 +993,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                     {!isFirst && (
                       <button
                         type="button"
+                        ref={!tutorialRefs?.continueBtn || isFirst ? null : (sessionNum === 2 ? tutorialRefs.continueBtn : null)}
                         onClick={() => handleContinueSession(session.id)}
                         disabled={journalLocked}
                         style={{
@@ -1011,6 +1015,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                     {journalCampaignRoots.length > 1 && (
                       <button
                         type="button"
+                        ref={sessionNum === 1 ? tutorialRefs?.moveBtn || null : null}
                         onClick={() => setMovingSession({ sessionId: session.id, sessionNum })}
                         disabled={journalLocked}
                         style={{
@@ -1037,6 +1042,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       return (
                         <button
                           type="button"
+                          ref={sessionNum === 1 ? tutorialRefs?.prepBtn || null : null}
                           onClick={() => setPrepSession({ id: session.id, num: sessionNum })}
                           style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}
                           title={prepTitle}
@@ -1054,6 +1060,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       return (
                         <button
                           type="button"
+                          ref={sessionNum === 1 ? tutorialRefs?.rollBtn || null : null}
                           onClick={() => setAttendanceSession({ id: session.id, num: sessionNum })}
                           style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.48)' }}
                           title={attTitle}
@@ -1071,6 +1078,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       return (
                         <button
                           type="button"
+                          ref={sessionNum === 1 ? tutorialRefs?.recapBtn || null : null}
                           onClick={() => setRecapSession({ id: session.id, num: sessionNum })}
                           style={{ padding: '2px 8px', background: 'none', border: `1px solid ${borderColor}`, borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: btnColor }}
                           title={canGen ? 'Generate or view recaps' : hasRecaps ? 'View recaps' : 'Recaps (AI disabled)'}

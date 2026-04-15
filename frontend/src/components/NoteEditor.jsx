@@ -228,6 +228,16 @@ export default function NoteEditor({
   onOpenReferenceNote,
   /** After AI creates a note (NPC / continuity), select it in the sidebar and refresh the list. */
   onSelectNote,
+  /** Tutorial: request showing a particular root tools tab ('icons'|'ai'|'continuity'). */
+  tutorialRequestedRootToolsTab = null,
+  /** Tutorial: request opening a particular drawer tab ('connections'|'tags'|'images'|'permissions'). */
+  tutorialRequestedDrawerTab = null,
+  /** Tutorial: if true, ensure the drawer is expanded. */
+  tutorialEnsureDrawerOpen = false,
+  /** Tutorial: if true, collapse the drawer. */
+  tutorialForceDrawerClosed = false,
+  /** Tutorial: target refs for spotlighting specific UI areas. */
+  tutorialRefs = null,
 }) {
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
@@ -274,9 +284,36 @@ export default function NoteEditor({
   const [folderDmContent, setFolderDmContent] = useState(note?.folder_dm_content || '');
   /** Tab under toolbar: icons / AI tools / continuity (root campaign & world folders). */
   const [rootToolsTab, setRootToolsTab] = useState(() => localStorage.getItem('chronicler_rootFolderToolsTab') || 'icons');
+  // Tutorial spotlight refs (optional)
+  const rootToolsTabsRef = useRef(null);
+  const sidebarDescriptionRef = useRef(null);
+  const campaignSplitRef = useRef(null);
+  const drawerBarRef = useRef(null);
   /** Modal: pick note sidebar emoji from categorized + all-icons grid */
   const [noteIconMenuOpen, setNoteIconMenuOpen] = useState(false);
   const uniqueNotePresetIcons = useMemo(() => allUniqueNotePresetIcons(), []);
+
+  // Tutorial: force tab selections and ensure drawer is open.
+  useEffect(() => {
+    if (tutorialRequestedRootToolsTab && typeof tutorialRequestedRootToolsTab === 'string') {
+      const t = tutorialRequestedRootToolsTab;
+      if (t === 'icons' || t === 'ai' || t === 'continuity') {
+        setRootToolsTab(t);
+        try { localStorage.setItem('chronicler_rootFolderToolsTab', t); } catch {}
+      }
+    }
+  }, [tutorialRequestedRootToolsTab]);
+
+  useEffect(() => {
+    if (tutorialRequestedDrawerTab && typeof tutorialRequestedDrawerTab === 'string') {
+      const t = tutorialRequestedDrawerTab;
+      if (t === 'connections' || t === 'tags' || t === 'images' || t === 'permissions') {
+        setDrawerTab(t);
+      }
+    }
+    if (tutorialEnsureDrawerOpen) setDrawerOpen(true);
+    if (tutorialForceDrawerClosed) setDrawerOpen(false);
+  }, [tutorialRequestedDrawerTab, tutorialEnsureDrawerOpen, tutorialForceDrawerClosed]);
   // Campaign member management (root folder only)
   const [addMemberSearch, setAddMemberSearch] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
@@ -338,12 +375,23 @@ export default function NoteEditor({
   const underArchive =
     note?.under_completed_archive ??
     (note?.id != null ? isUnderCompletedArchive(notes, note.id) : false);
+  /** True when this note lives under a seeded demo campaign root; only admins may mutate (matches API). */
+  const demoReadOnly = (() => {
+    if (!note?.id || !notes?.length || isAdminUser) return false;
+    const byId = new Map((notes || []).map((x) => [x.id, x]));
+    let cur = note;
+    for (let i = 0; i < 500 && cur; i++) {
+      if (cur.parent_id == null && cur.is_folder && Number(cur.is_demo) === 1) return true;
+      cur = cur.parent_id != null ? byId.get(cur.parent_id) : null;
+    }
+    return false;
+  })();
   /** Full edit of title/body (blocked when subtree is in completed archive, except admins). */
-  const canEditContent = canFullEdit && (!underArchive || isAdminUser);
+  const canEditContent = canFullEdit && (!underArchive || isAdminUser) && !demoReadOnly;
   /** DM append to another user's note — disabled in archived campaigns (non-admin). */
-  const canAppendEffective = canAppend && (!underArchive || isAdminUser);
+  const canAppendEffective = canAppend && (!underArchive || isAdminUser) && !demoReadOnly;
   /** Move, delete, permissions — disabled when archived for non-admin. */
-  const canManageUi = canManage && (!underArchive || isAdminUser);
+  const canManageUi = canManage && (!underArchive || isAdminUser) && !demoReadOnly;
   /** Same as legacy `canEdit`: full content edit only (DM append uses a separate textarea). */
   const canEdit = canEditContent;
   /** Folders: icon + description when user can manage or fully edit the folder */
@@ -381,7 +429,9 @@ export default function NoteEditor({
   const showCampaignRootSplit =
     dmAiRootOnly && !!note?.is_folder && (isDM || isAdminUser);
 
-  const showIconsTab = !!(canFolderStyle && canEditContent && dmAiRootOnly);
+  /** Show root “Icons” tab for DMs/admins on world/campaign roots; demo users keep the tab but controls are read-only (`demoReadOnly`). */
+  const showIconsTab = !!(canFolderStyle && dmAiRootOnly && (canEditContent || demoReadOnly));
+  /** Same surfaces as a normal DM, including on demo showcase; generators stay disabled when `demoReadOnly`. */
   const showAiToolsTab = !!(
     note?.is_folder &&
     isDM &&
@@ -2046,6 +2096,24 @@ export default function NoteEditor({
               borderTop: '1px solid rgba(255,255,255,0.06)',
             }}
           >
+            {demoReadOnly && (
+              <div
+                style={{
+                  marginBottom: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(200,148,58,0.25)',
+                  background: 'rgba(200,148,58,0.06)',
+                  fontFamily: 'Crimson Pro, serif',
+                  fontSize: '13px',
+                  lineHeight: 1.45,
+                  color: 'rgba(226,213,187,0.65)',
+                }}
+              >
+                <strong style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: '#c8943a' }}>DEMO SHOWCASE</strong>
+                {' — '}You can browse Icons, AI tools, and Continuity like a DM, but only admins may change demo data or run generators here.
+              </div>
+            )}
             <div
               style={{
                 display: 'flex',
@@ -2057,33 +2125,38 @@ export default function NoteEditor({
               }}
               className="toolbar-scroll"
             >
-              {showIconsTab && (
-                <button
-                  type="button"
-                  onClick={() => persistRootToolsTab('icons')}
-                  style={{ ...S.viewBtn(rootToolsTab === 'icons'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
-                >
-                  Icons
-                </button>
-              )}
-              {showAiToolsTab && (
-                <button
-                  type="button"
-                  onClick={() => persistRootToolsTab('ai')}
-                  style={{ ...S.viewBtn(rootToolsTab === 'ai'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
-                >
-                  AI tools
-                </button>
-              )}
-              {showContinuityTab && (
-                <button
-                  type="button"
-                  onClick={() => persistRootToolsTab('continuity')}
-                  style={{ ...S.viewBtn(rootToolsTab === 'continuity'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
-                >
-                  Continuity
-                </button>
-              )}
+              <div
+                ref={tutorialRefs?.rootToolsTabs || rootToolsTabsRef}
+                style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}
+              >
+                {showIconsTab && (
+                  <button
+                    type="button"
+                    onClick={() => persistRootToolsTab('icons')}
+                    style={{ ...S.viewBtn(rootToolsTab === 'icons'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                  >
+                    Icons
+                  </button>
+                )}
+                {showAiToolsTab && (
+                  <button
+                    type="button"
+                    onClick={() => persistRootToolsTab('ai')}
+                    style={{ ...S.viewBtn(rootToolsTab === 'ai'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                  >
+                    AI tools
+                  </button>
+                )}
+                {showContinuityTab && (
+                  <button
+                    type="button"
+                    onClick={() => persistRootToolsTab('continuity')}
+                    style={{ ...S.viewBtn(rootToolsTab === 'continuity'), minHeight: isMobile ? '40px' : undefined, padding: isMobile ? '6px 14px' : undefined }}
+                  >
+                    Continuity
+                  </button>
+                )}
+              </div>
             </div>
 
             {rootToolsTab === 'icons' && showIconsTab && (
@@ -2096,6 +2169,7 @@ export default function NoteEditor({
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
                   <button
                     type="button"
+                    disabled={demoReadOnly}
                     onClick={async () => {
                       setDisplayIcon('');
                       try {
@@ -2105,8 +2179,9 @@ export default function NoteEditor({
                       } catch (e) { console.error(e); }
                     }}
                     style={{
-                      minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'Cinzel',
+                      minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: demoReadOnly ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel',
                       border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent', color: 'rgba(226,213,187,0.5)',
+                      opacity: demoReadOnly ? 0.45 : 1,
                     }}
                     title="Automatic default for this folder type"
                   >AUTO</button>
@@ -2114,6 +2189,7 @@ export default function NoteEditor({
                     <button
                       key={ic}
                       type="button"
+                      disabled={demoReadOnly}
                       onClick={async () => {
                         setDisplayIcon(ic);
                         try {
@@ -2123,13 +2199,14 @@ export default function NoteEditor({
                         } catch (e) { console.error(e); }
                       }}
                       style={{
-                        width: '40px', height: '40px', fontSize: '20px', borderRadius: '6px', cursor: 'pointer',
+                        width: '40px', height: '40px', fontSize: '20px', borderRadius: '6px', cursor: demoReadOnly ? 'not-allowed' : 'pointer',
                         border: `1px solid ${displayIcon === ic ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`, background: displayIcon === ic ? 'rgba(200,148,58,0.18)' : 'rgba(255,255,255,0.02)',
+                        opacity: demoReadOnly ? 0.45 : 1,
                       }}
                     >{ic}</button>
                   ))}
                 </div>
-                {isDM && (
+                {isDM && !demoReadOnly && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
                       <input
@@ -2165,6 +2242,7 @@ export default function NoteEditor({
                 )}
                 <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
                 <textarea
+                  ref={tutorialRefs?.sidebarDescription || sidebarDescriptionRef}
                   value={displaySummary}
                   onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
                   placeholder="One or two lines shown in the sidebar tooltip (optional)…"
@@ -2207,13 +2285,13 @@ export default function NoteEditor({
                     }}
                     placeholder="NPC-only: role, voice, goals… Type @ for links or paste [Title](note:id)."
                     rows={4}
-                    disabled={!aiAdminStatus.ai_enabled}
+                    disabled={!aiAdminStatus.ai_enabled || demoReadOnly}
                     spellCheck={false}
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
                       color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
@@ -2222,6 +2300,7 @@ export default function NoteEditor({
                       <select
                         value={npcParentId ?? ''}
                         onChange={(e) => setNpcParentId(parseInt(e.target.value, 10) || null)}
+                        disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
                           borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
@@ -2235,10 +2314,11 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
                       <input
                         type="checkbox"
                         checked={npcDmOnly}
+                        disabled={demoReadOnly}
                         onChange={(e) => setNpcDmOnly(e.target.checked)}
                       />
                       DM-only note
@@ -2250,7 +2330,7 @@ export default function NoteEditor({
                   <button
                     type="button"
                     onClick={handleNpcGenerate}
-                    disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim()}
+                    disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: npcBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
                       fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
@@ -2282,13 +2362,13 @@ export default function NoteEditor({
                     }}
                     placeholder="Place-only: settlement, dungeon, region… Type @ or use [Title](note:id) for canon ties."
                     rows={4}
-                    disabled={!aiAdminStatus.ai_enabled}
+                    disabled={!aiAdminStatus.ai_enabled || demoReadOnly}
                     spellCheck={false}
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
                       color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
@@ -2297,6 +2377,7 @@ export default function NoteEditor({
                       <select
                         value={locParentId ?? ''}
                         onChange={(e) => setLocParentId(parseInt(e.target.value, 10) || null)}
+                        disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
                           borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
@@ -2310,8 +2391,8 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
-                      <input type="checkbox" checked={locDmOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                      <input type="checkbox" checked={locDmOnly} disabled={demoReadOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
                       DM-only note
                     </label>
                   </div>
@@ -2321,7 +2402,7 @@ export default function NoteEditor({
                   <button
                     type="button"
                     onClick={handleLocationGenerate}
-                    disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim()}
+                    disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: locBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
                       fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
@@ -2353,13 +2434,13 @@ export default function NoteEditor({
                     }}
                     placeholder="Object-only: weapon, relic, consumable… Type @ or link notes with [Title](note:id)."
                     rows={4}
-                    disabled={!aiAdminStatus.ai_enabled}
+                    disabled={!aiAdminStatus.ai_enabled || demoReadOnly}
                     spellCheck={false}
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
                       color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
-                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled ? 1 : 0.5,
+                      marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
@@ -2368,6 +2449,7 @@ export default function NoteEditor({
                       <select
                         value={itemParentId ?? ''}
                         onChange={(e) => setItemParentId(parseInt(e.target.value, 10) || null)}
+                        disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
                           borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
@@ -2381,8 +2463,8 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
-                      <input type="checkbox" checked={itemDmOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                      <input type="checkbox" checked={itemDmOnly} disabled={demoReadOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
                       DM-only note
                     </label>
                   </div>
@@ -2392,7 +2474,7 @@ export default function NoteEditor({
                   <button
                     type="button"
                     onClick={handleItemGenerate}
-                    disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim()}
+                    disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: itemBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
                       fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
@@ -2408,6 +2490,11 @@ export default function NoteEditor({
                 {!aiAdminStatus.ai_enabled && (
                   <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
                     Enable AI in Admin → AI to use these tools.
+                  </p>
+                )}
+                {demoReadOnly && aiAdminStatus.ai_enabled && (
+                  <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.4)', margin: '14px 0 0' }}>
+                    Generators are disabled on shared demo data (admins only).
                   </p>
                 )}
               </div>
@@ -2428,13 +2515,13 @@ export default function NoteEditor({
                 <button
                   type="button"
                   onClick={handleContinuityGenerate}
-                  disabled={contBusy || !aiAdminStatus.ai_enabled}
+                  disabled={contBusy || !aiAdminStatus.ai_enabled || demoReadOnly}
                   style={{
-                    padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
+                    padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled || demoReadOnly ? 'default' : 'pointer',
                     fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
-                    border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
-                    background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(200,148,58,0.1)',
-                    color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : '#c8943a',
+                    border: `1px solid ${!aiAdminStatus.ai_enabled || demoReadOnly ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
+                    background: !aiAdminStatus.ai_enabled || demoReadOnly ? 'transparent' : 'rgba(200,148,58,0.1)',
+                    color: !aiAdminStatus.ai_enabled || demoReadOnly ? 'rgba(226,213,187,0.25)' : '#c8943a',
                   }}
                 >
                   {contBusy ? 'Analyzing…' : 'Generate / update continuity report'}
@@ -2442,6 +2529,11 @@ export default function NoteEditor({
                 {!aiAdminStatus.ai_enabled && (
                   <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', margin: '14px 0 0' }}>
                     Enable AI in Admin → AI to run continuity analysis.
+                  </p>
+                )}
+                {demoReadOnly && aiAdminStatus.ai_enabled && (
+                  <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.4)', margin: '14px 0 0' }}>
+                    Continuity writes are disabled on shared demo data (admins only).
                   </p>
                 )}
               </div>
@@ -2655,6 +2747,7 @@ export default function NoteEditor({
         {viewMode === 'edit' ? (
           showCampaignRootSplit && note?.is_folder ? (
             <div
+              ref={tutorialRefs?.campaignSplit || campaignSplitRef}
               style={{
                 position: 'relative',
                 flex: 1,
@@ -3171,7 +3264,7 @@ export default function NoteEditor({
       </div>
 
       {/* ── Bottom Drawer: handle bar (lifted above home indicator / bottom edge) ── */}
-      <div style={{
+      <div ref={tutorialRefs?.drawerBar || drawerBarRef} style={{
         borderTop: '1px solid rgba(255,255,255,0.06)',
         background: 'rgba(7,8,14,0.6)',
         display: 'flex', alignItems: 'center',
@@ -3202,6 +3295,7 @@ export default function NoteEditor({
         <div style={{ flex: 1 }} />
         <button
           onClick={() => setDrawerOpen(o => !o)}
+          ref={tutorialRefs?.drawerExpand || null}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.25)', fontSize: '14px', padding: '6px 8px', lineHeight: 1, transition: 'transform 0.2s', transform: drawerOpen ? 'rotate(180deg)' : 'none' }}
           title={drawerOpen ? 'Collapse' : 'Expand'}
         >⌃</button>

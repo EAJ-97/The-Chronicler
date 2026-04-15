@@ -59,8 +59,15 @@ router.post('/users', authenticateToken, adminOnly, async (req, res) => {
       'INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)'
     ).run(username, passwordHash, is_admin ? 1 : 0);
 
+    const newId = result.lastInsertRowid;
+    try {
+      const { isDemoSeeded, syncDemoDmRolesForUser } = require('../utils/demoAccess');
+      if (isDemoSeeded()) syncDemoDmRolesForUser(newId);
+    } catch (syncErr) {
+      console.error('[admin/users demo sync]', syncErr);
+    }
     res.status(201).json({
-      id: result.lastInsertRowid,
+      id: newId,
       username,
       is_admin: is_admin ? 1 : 0,
     });
@@ -125,11 +132,13 @@ router.get('/demo/status', authenticateToken, adminOnly, (req, res) => {
   res.json({ demo_seeded: seeded?.value === 'true' });
 });
 
-// POST generate demo data
+// POST generate demo data (owned by requesting admin; all users receive DM on demo roots after seed)
 router.post('/demo/generate', authenticateToken, adminOnly, (req, res) => {
   try {
     const { seed } = require('../db/demoSeeder');
-    const result = seed();
+    const { syncDemoDmRolesForAllUsers } = require('../utils/demoAccess');
+    const result = seed(req.user.id);
+    if (result.seeded) syncDemoDmRolesForAllUsers();
     res.json(result);
   } catch (err) {
     console.error('[demo/generate]', err);

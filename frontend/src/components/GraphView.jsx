@@ -112,7 +112,7 @@ function getSubtreeIds(allNotes, rootId) {
   return ids;
 }
 
-export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile }) {
+export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const hoverTimerRef = useRef(null);
@@ -166,6 +166,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   const [is3D, setIs3DRaw] = useState(() => {
     try { return localStorage.getItem(is3DKey) === 'true'; } catch { return false; }
   });
+  const effectiveIs3D = tutorialForce3D ? true : (tutorialForce2D ? false : is3D);
   const setIs3D = (val) => {
     const next = typeof val === 'function' ? val(is3D) : val;
     setIs3DRaw(next);
@@ -485,14 +486,20 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   }, [containerWidth, activeCampaignId, isDMOfActiveCampaign, is3D]);
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', width: '100%', height: '100%', background: '#07080e' }}>
+    <div
+      ref={(el) => {
+        rootRef.current = el;
+        if (tutorialRefs?.canvas) tutorialRefs.canvas.current = el;
+      }}
+      style={{ position: 'relative', width: '100%', height: '100%', background: '#07080e' }}
+    >
       {/* Grid background */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
         backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.012) 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.012) 40px)`,
       }} />
 
-      <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 1, display: is3D ? 'none' : 'block' }} />
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 1, display: effectiveIs3D ? 'none' : 'block' }} />
 
       {/* Edge label editor — inline popup */}
       {editingEdge && (
@@ -567,6 +574,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               </div>
             ) : (
               <select
+                ref={tutorialRefs?.campaignSelect || null}
                 value={activeCampaignId || ''}
                 onChange={e => setActiveCampaignId(parseInt(e.target.value))}
                 style={{
@@ -609,7 +617,9 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       )}
 
       {/* Legend — anchored below the toolbar row so it never overlaps it */}
-      <LegendPanel selectedNoteId={selectedNoteId} />
+      <div ref={tutorialRefs?.legend || null}>
+        <LegendPanel selectedNoteId={selectedNoteId} tutorialRefs={tutorialRefs} />
+      </div>
 
       {/* Toolbar — top-right: buttons first, status hints below (so hints never sit above the buttons) */}
       <div style={{ position: 'absolute', top: 8, right: 16, zIndex: 15, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', maxWidth: 'calc(100% - 200px)' }}>
@@ -619,6 +629,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           {shouldCollapseToolbar && (
             <div style={{ position: 'absolute', top: 0, right: 0, zIndex: 2 }}>
               <button
+                ref={tutorialRefs?.overflowMenu || null}
                 onClick={() => setShowToolMenu(v => !v)}
                 style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', padding: isMobile ? '10px 16px' : '6px 12px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', background: showToolMenu ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)' }}
               >{isMobile ? 'MENU' : '···'}</button>
@@ -632,7 +643,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: pathMode ? 'rgba(139,196,58,0.18)' : 'transparent', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {pathMode ? '✕ Cancel Path' : '⬡ Find Path'}
                   </button>
-                  {!is3D && (
+                  {!effectiveIs3D && (
                     <>
                       <button onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); }}
                         style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'transparent', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : 'rgba(200,148,58,0.12)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.7)' }}>
@@ -645,10 +656,10 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
                     </>
                   )}
                   <button onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); setShowToolMenu(false); }}
-                    style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: is3D ? 'rgba(58,139,196,0.15)' : 'transparent', border: `1px solid ${is3D ? 'rgba(58,139,196,0.3)' : 'rgba(200,148,58,0.12)'}`, color: is3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.7)' }}>
-                    {is3D ? '↩ 2D View' : '◈ 3D View'}
+                    style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'transparent', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.3)' : 'rgba(200,148,58,0.12)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.7)' }}>
+                    {effectiveIs3D ? '↩ 2D View' : '◈ 3D View'}
                   </button>
-                  {!is3D && (
+                  {!effectiveIs3D && (
                     <button onClick={() => { runExpand(); setShowToolMenu(false); }}
                       style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: 'transparent', border: '1px solid rgba(200,148,58,0.12)', color: 'rgba(200,148,58,0.7)' }}>
                       ⊹ Expand
@@ -668,21 +679,25 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           {/* Inline buttons — always rendered so ref can measure width; hidden when narrow */}
           <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: shouldCollapseToolbar ? 'hidden' : 'visible', pointerEvents: shouldCollapseToolbar ? 'none' : 'auto' }}>
             <button
+              ref={tutorialRefs?.btnConnect || null}
               onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{connectMode ? '✕ Cancel' : '⟵⟶ Connect'}</button>
             <button
+              ref={tutorialRefs?.btnPath || null}
               onClick={() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); }}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: pathMode ? 'rgba(139,196,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.5)' : 'rgba(200,148,58,0.25)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{pathMode ? '✕ Cancel' : '⬡ Find Path'}</button>
-            {!is3D && (
+                  {!effectiveIs3D && (
               <>
                 <button
+                  ref={tutorialRefs?.btnTheory || null}
                   onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); }}
                   title="Add a speculative theory link (dashed violet)"
                   style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.5)' : 'rgba(200,148,58,0.25)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
                 >{theoryMode ? '✕ Theory' : '◇ Theory'}</button>
                 <button
+                  ref={tutorialRefs?.btnShip || null}
                   onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); }}
                   title="Ship two NPC/Character notes (dashed pink)"
                   style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: shipMode ? 'rgba(220,80,140,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.5)' : 'rgba(200,148,58,0.25)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
@@ -690,16 +705,17 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               </>
             )}
             <button
+              ref={tutorialRefs?.btn3d || null}
               onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); }}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: is3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${is3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: is3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
-            >{is3D ? '2D' : '3D'}</button>
-            {!is3D && (
-              <button onClick={runExpand} title="Auto-arrange all nodes to remove overlaps"
+              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+            >{effectiveIs3D ? '2D' : '3D'}</button>
+            {!effectiveIs3D && (
+              <button ref={tutorialRefs?.btnExpand || null} onClick={runExpand} title="Auto-arrange all nodes to remove overlaps"
                 style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
               >⊹ Expand</button>
             )}
             {isDMOfActiveCampaign && (
-              <button onClick={() => setDmView(v => !v)} title={dmView ? 'Showing DM-only notes — click to hide' : 'Show DM-only notes'}
+              <button ref={tutorialRefs?.btnDmView || null} onClick={() => setDmView(v => !v)} title={dmView ? 'Showing DM-only notes — click to hide' : 'Show DM-only notes'}
                 style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: dmView ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.04)', border: `1px solid ${dmView ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, color: dmView ? '#c8943a' : 'rgba(226,213,187,0.3)', whiteSpace: 'nowrap' }}
               >⚔ DM View</button>
             )}
@@ -741,7 +757,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       </div>
 
       {/* 3D graph overlay */}
-      {is3D && (
+      {effectiveIs3D && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 3 }}>
           <GraphView3D
             notes={visibleNotes}
@@ -758,6 +774,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
             onPathResult={(result) => setPathResult(result)}
             onExitPathMode={exitPathMode}
             isMobile={isMobile}
+            tutorialRefs={tutorialRefs}
           />
         </div>
       )}
@@ -1092,7 +1109,7 @@ function buildStyle() {
   ];
 }
 
-function LegendPanel({ selectedNoteId }) {
+function LegendPanel({ selectedNoteId, tutorialRefs = null }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{
@@ -1154,6 +1171,7 @@ function LegendPanel({ selectedNoteId }) {
 
       {/* Tab — mirrors CONTROLS tab style exactly */}
       <button
+        ref={tutorialRefs?.legendTab || null}
         onClick={() => setOpen(o => !o)}
         style={{
           pointerEvents: 'all',

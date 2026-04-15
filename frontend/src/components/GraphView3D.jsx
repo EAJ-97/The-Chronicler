@@ -233,7 +233,7 @@ const TIER_PARAMS = HOP_OPACITY.map((nodeOp, i) => ({
   labelOp:  [1.0,  0.90, 0.70, 0.45, 0.25, 0.12, 0.06][i],
 }));
 
-export default function GraphView3D({ notes, connections, onSelectNote, onOpenNote, connectMode, onExitConnectMode, onCreateConnection, activeCampaignId, pathMode: pathModeProp = false, pathSource: pathSourceProp = null, onPathSourceSet, onPathResult, onExitPathMode, isMobile = false }) {
+export default function GraphView3D({ notes, connections, onSelectNote, onOpenNote, connectMode, onExitConnectMode, onCreateConnection, activeCampaignId, pathMode: pathModeProp = false, pathSource: pathSourceProp = null, onPathSourceSet, onPathResult, onExitPathMode, isMobile = false, tutorialRefs = null }) {
   const mountRef         = useRef(null);
   const graphRef         = useRef(null);
   const lastClickRef     = useRef({ id: null, time: 0 });
@@ -736,7 +736,7 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
 
       {/* Right slide-out controls panel */}
-      <ControlsPanel isMobile={isMobile} />
+      <ControlsPanel isMobile={isMobile} tutorialRefs={tutorialRefs} />
 
       <div style={{ position: 'absolute', top: 12, left: 16, fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.35)', pointerEvents: 'none' }}>
         {notes.length} nodes · {connections.length} connections
@@ -745,7 +745,7 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
   );
 }
 
-function ControlsPanel({ isMobile = false }) {
+function ControlsPanel({ isMobile = false, tutorialRefs = null }) {
   const [open, setOpen] = useState(false);
 
   const desktopControls = [
@@ -767,12 +767,13 @@ function ControlsPanel({ isMobile = false }) {
   const items = isMobile ? mobileControls : desktopControls;
 
   return (
-    <div style={{
+    <div ref={tutorialRefs?.controls3d || null} style={{
       position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
       zIndex: 10, display: 'flex', alignItems: 'stretch', pointerEvents: 'none',
     }}>
       {/* Tab */}
       <button
+        ref={tutorialRefs?.controls3dTab || null}
         onClick={() => setOpen(o => !o)}
         style={{
           pointerEvents: 'all',

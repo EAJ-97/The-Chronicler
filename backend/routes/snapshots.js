@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOfFolder } = require('../utils/access');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 
 const router = express.Router();
 
@@ -155,6 +156,8 @@ router.post('/:folderId', authenticateToken, (req, res) => {
   if (!canManageFolder(folderId, req.user.id)) {
     return res.status(403).json({ error: 'Only the folder owner or an admin can create snapshots' });
   }
+  const dmSnap = demoMutateForbiddenMessage(req.user.id, parseInt(folderId, 10));
+  if (dmSnap) return res.status(403).json({ error: dmSnap });
 
   const folder = db.prepare('SELECT * FROM notes WHERE id = ? AND is_folder = 1').get(folderId);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
@@ -213,6 +216,8 @@ router.post('/:folderId/restore/:snapshotId', authenticateToken, (req, res) => {
   if (!canManageFolder(folderId, req.user.id)) {
     return res.status(403).json({ error: 'Only the folder owner or an admin can restore snapshots' });
   }
+  const dmRest = demoMutateForbiddenMessage(req.user.id, parseInt(folderId, 10));
+  if (dmRest) return res.status(403).json({ error: dmRest });
 
   const snap = db.prepare('SELECT * FROM folder_snapshots WHERE id = ? AND folder_id = ?').get(snapshotId, folderId);
   if (!snap) return res.status(404).json({ error: 'Snapshot not found' });

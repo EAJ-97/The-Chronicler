@@ -14,7 +14,7 @@ export default function App() {
     if (token && savedUser) {
       // Verify token is still valid before trusting it
       api.get('/auth/me')
-        .then((res) => setUser(res.data.user))
+        .then((res) => setUser({ ...res.data.user, demo_seeded: !!res.data.demo_seeded }))
         .catch(() => {
           localStorage.removeItem('token');
           localStorage.removeItem('user');

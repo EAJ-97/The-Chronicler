@@ -6,6 +6,7 @@ const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive, isWorldOrCampaignRootFolder } = require('../utils/access');
+const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { buildLoreCorpus, buildJournalCorpusText, buildAttachmentContextFromPrompt } = require('../utils/aiCorpus');
 const {
   loreSoFarPrompts,
@@ -137,6 +138,10 @@ router.post('/lore/:campaignId/generate', authenticateToken, async (req, res) =>
   if (!admin && isNoteUnderCompletedArchive(campaignId)) {
     return res.status(403).json({ error: 'Lore So Far generation is disabled while this campaign or world is marked completed.' });
   }
+  if (save) {
+    const dmLore = demoMutateForbiddenMessage(uid, campaignId);
+    if (dmLore) return res.status(403).json({ error: dmLore });
+  }
 
   const folder = db.prepare('SELECT title FROM notes WHERE id = ? AND is_folder = 1 AND deleted_at IS NULL').get(campaignId);
   if (!folder) return res.status(400).json({ error: 'Campaign folder not found' });
@@ -188,6 +193,8 @@ router.put('/lore/:campaignId', authenticateToken, (req, res) => {
   if (!admin && isNoteUnderCompletedArchive(campaignId)) {
     return res.status(403).json({ error: 'Saving lore cache is disabled while this campaign or world is marked completed.' });
   }
+  const dmPut = demoMutateForbiddenMessage(uid, campaignId);
+  if (dmPut) return res.status(403).json({ error: dmPut });
 
   db.prepare(
     `
@@ -273,6 +280,8 @@ router.post('/npc-generate', authenticateToken, async (req, res) => {
   if (!admin && isNoteUnderCompletedArchive(pid)) {
     return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
   }
+  const dmNpc = demoMutateForbiddenMessage(uid, pid);
+  if (dmNpc) return res.status(403).json({ error: dmNpc });
 
   const cat = category === 'character' ? 'character' : 'npc';
   const dmOnly = !!is_dm_only;
@@ -332,6 +341,8 @@ router.post('/location-generate', authenticateToken, async (req, res) => {
   if (!admin && isNoteUnderCompletedArchive(pid)) {
     return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
   }
+  const dmLoc = demoMutateForbiddenMessage(uid, pid);
+  if (dmLoc) return res.status(403).json({ error: dmLoc });
 
   const dmOnly = !!is_dm_only;
 
@@ -390,6 +401,8 @@ router.post('/item-generate', authenticateToken, async (req, res) => {
   if (!admin && isNoteUnderCompletedArchive(pid)) {
     return res.status(403).json({ error: 'AI generation is disabled while this campaign or world is marked completed.' });
   }
+  const dmItem = demoMutateForbiddenMessage(uid, pid);
+  if (dmItem) return res.status(403).json({ error: dmItem });
 
   const dmOnly = !!is_dm_only;
 
@@ -452,6 +465,8 @@ router.post('/continuity/:folderId/generate', authenticateToken, async (req, res
   if (!admin && isNoteUnderCompletedArchive(folderId)) {
     return res.status(403).json({ error: 'Continuity generation is disabled while this campaign or world is marked completed.' });
   }
+  const dmCont = demoMutateForbiddenMessage(uid, folderId);
+  if (dmCont) return res.status(403).json({ error: dmCont });
 
   try {
     const { corpusUser } = buildLoreCorpus(folderId, uid, admin);
