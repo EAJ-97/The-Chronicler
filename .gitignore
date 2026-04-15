@@ -28,8 +28,9 @@ CONTEXT.md
 roadmaps.md
 plans/
 
-# One-off release notes (used for GitHub release, not committed)
+# One-off release notes (used for GitHub release / chat paste only, not committed)
 release-*-notes.txt
+RELEASE_NOTES*.md
 
 # Local docs (not tracked unless we explicitly add something worth shipping)
 docs/
