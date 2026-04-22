@@ -395,30 +395,71 @@ function compareSemver(a, b) {
   return 0;
 }
 
+/**
+ * Fetches JSON from GitHub API and throws on non-2xx responses.
+ * @param {string} url Full GitHub API URL.
+ * @returns {Promise<any>} Parsed JSON body.
+ */
+async function githubJson(url) {
+  const response = await fetch(url, {
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'Chronicler-Update-Check',
+    },
+  });
+  if (!response.ok) throw new Error(`GitHub request failed (${response.status})`);
+  return response.json();
+}
+
+/**
+ * Resolves a git tag name to the underlying commit SHA.
+ * Handles both lightweight tags and annotated tags.
+ * @param {string} tagName Tag like "v1.2.2".
+ * @returns {Promise<string|null>} Commit SHA if resolvable, else null.
+ */
+async function resolveTagToCommitSha(tagName) {
+  if (!tagName) return null;
+  const ref = await githubJson(`https://api.github.com/repos/${GITHUB_REPO}/git/ref/tags/${encodeURIComponent(tagName)}`);
+  if (ref?.object?.type === 'commit') return ref.object.sha || null;
+  if (ref?.object?.type !== 'tag' || !ref.object?.sha) return null;
+
+  const annotatedTag = await githubJson(`https://api.github.com/repos/${GITHUB_REPO}/git/tags/${ref.object.sha}`);
+  if (annotatedTag?.object?.type === 'commit') return annotatedTag.object.sha || null;
+  return null;
+}
+
 // GET /admin/update-check — tells admin if a newer release exists on GitHub (read-only, no action button)
 const GITHUB_REPO = process.env.GITHUB_REPOSITORY || 'EAJ-97/The-Chronicler';
 router.get('/update-check', authenticateToken, adminOnly, async (req, res) => {
   const currentVersion = require('../package.json').version;
+  const currentCommit = (process.env.GIT_COMMIT || '').trim();
   const now = Date.now();
-  if (updateCheckCache && (now - updateCheckCache.at) < UPDATE_CHECK_CACHE_MS) {
+  if (updateCheckCache && updateCheckCache.commit === currentCommit && (now - updateCheckCache.at) < UPDATE_CHECK_CACHE_MS) {
     return res.json(updateCheckCache.data);
   }
   try {
-    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'Chronicler-Update-Check' },
-    });
-    if (!r.ok) {
-      updateCheckCache = { at: now, data: { updateAvailable: false, currentVersion, latestVersion: null, latestTag: null, error: 'Could not fetch releases' } };
-      return res.json(updateCheckCache.data);
-    }
-    const data = await r.json();
+    const data = await githubJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
     const latestTag = data.tag_name || '';
     const latestVersion = latestTag.replace(/^v/, '');
-    const updateAvailable = compareSemver(currentVersion, latestVersion) < 0;
-    updateCheckCache = { at: now, data: { updateAvailable, currentVersion, latestVersion, latestTag } };
+    const latestCommit = await resolveTagToCommitSha(latestTag);
+
+    // Primary signal: if this build commit equals the latest release commit, no update is needed.
+    // Fallback: if commit metadata is unavailable, use semver comparison to preserve old behavior.
+    let updateAvailable;
+    if (currentCommit && latestCommit) {
+      updateAvailable = currentCommit !== latestCommit;
+    } else {
+      updateAvailable = compareSemver(currentVersion, latestVersion) < 0;
+    }
+
+    updateCheckCache = {
+      at: now,
+      commit: currentCommit,
+      data: { updateAvailable, currentVersion, latestVersion, latestTag, currentCommit: currentCommit || null, latestCommit: latestCommit || null },
+    };
     res.json(updateCheckCache.data);
   } catch (e) {
-    updateCheckCache = { at: now, data: { updateAvailable: false, currentVersion, latestVersion: null, latestTag: null, error: e.message } };
+    updateCheckCache = { at: now, commit: currentCommit, data: { updateAvailable: false, currentVersion, latestVersion: null, latestTag: null, currentCommit: currentCommit || null, latestCommit: null, error: e.message } };
     res.json(updateCheckCache.data);
   }
 });
