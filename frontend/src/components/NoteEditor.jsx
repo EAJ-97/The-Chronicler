@@ -741,6 +741,7 @@ export default function NoteEditor({
     setIsDmOnly(!!note?.is_dm_only);
     setDisplayIcon(note?.display_icon || '');
     setDisplaySummary(note?.display_summary || '');
+    setSidebarIconUploadErr(null);
     setFolderDmContent(note?.folder_dm_content || '');
     setTagInput('');
     setDirty(false);
