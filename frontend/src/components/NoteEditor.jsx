@@ -985,7 +985,10 @@ export default function NoteEditor({
       setUploadingSidebarIcon(true);
       const up = await api.post(`/images/sidebar-icon/${noteIdRef.current}`, fd);
       const url = up.data?.url;
-      if (!url) return;
+      if (!url) {
+        setSidebarIconUploadErr('Upload succeeded but no image URL was returned');
+        return;
+      }
       await persistSidebarIconUrl(url);
       setNoteIconMenuOpen(false);
     } catch (err) {
@@ -1906,7 +1909,7 @@ export default function NoteEditor({
                       type="button"
                       onClick={() => sidebarIconInputRef.current?.click()}
                       disabled={uploadingSidebarIcon}
-                      title="Upload a small image (DM / admin, max 512KB)"
+                      title="Upload an image for the sidebar (scaled automatically, max 8MB)"
                       style={{
                         width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
                         border: `1px solid ${isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`,
@@ -2167,7 +2170,7 @@ export default function NoteEditor({
                 <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
                 <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
                   Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
-                  {isDM && ' DMs and admins can upload a small image for the sidebar (max 512KB); the server enforces size limits.'}
+                  {isDM && ' DMs and admins can upload an image for the sidebar (max 8MB); it is scaled automatically in the tree.'}
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
                   <button
@@ -2644,7 +2647,7 @@ export default function NoteEditor({
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
               Choose an icon and short description for the sidebar. Worlds use cosmic symbols; campaigns use adventure motifs; nested folders use organizer icons.
-              {isDM && ' DMs and admins can upload a small image for the sidebar (max 512KB); the server enforces size limits.'}
+              {isDM && ' DMs and admins can upload an image for the sidebar (max 8MB); it is scaled automatically in the tree.'}
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px', alignItems: 'center' }}>
               <button

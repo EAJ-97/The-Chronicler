@@ -17,6 +17,7 @@ const recapsRoutes      = require('./routes/recaps');
 const backupRoutes      = require('./routes/backup');
 const aiToolsRoutes     = require('./routes/aiTools');
 const integrityRoutes   = require('./routes/integrity');
+const { getImagesDataDir, ensureImagesDataDir } = require('./utils/sidebarIcon');
 
 const app = express();
 
@@ -36,9 +37,9 @@ app.use(cors({
 
 app.use(express.json({ limit: '20mb' }));
 
-// Serve uploaded images statically
-const IMAGES_DIR = path.join(__dirname, '../../data/images');
-if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+// Serve uploaded images statically (persistent volume via DB_DIR/images)
+ensureImagesDataDir();
+const IMAGES_DIR = getImagesDataDir();
 app.use('/api/images/files', express.static(IMAGES_DIR));
 
 // API routes

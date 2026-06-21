@@ -184,7 +184,7 @@ function TreeNode({
               <img
                 src={ic}
                 alt=""
-                style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: '4px', display: 'block' }}
+                style={{ width: 18, height: 18, minWidth: 18, minHeight: 18, objectFit: 'cover', borderRadius: '4px', display: 'block' }}
               />
             ) : (
               ic
