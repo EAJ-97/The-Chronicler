@@ -5,7 +5,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isDMOf } = require('../utils/access');
+const { isAdmin, isDMOf, isNoteUnderCompletedArchive } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { getImagesDataDir } = require('../utils/sidebarIcon');
 
@@ -67,6 +67,13 @@ router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('im
   if (dmImg) {
     try { fs.unlinkSync(req.file.path); } catch (_) {}
     return res.status(403).json({ error: dmImg });
+  }
+
+  if (!isAdmin(req.user.id) && isNoteUnderCompletedArchive(noteId)) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(403).json({
+      error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+    });
   }
 
   if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {

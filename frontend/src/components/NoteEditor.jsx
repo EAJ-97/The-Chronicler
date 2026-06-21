@@ -19,6 +19,7 @@ import {
   defaultNoteIconEmoji,
   isManagedSidebarIconUrl,
 } from '../utils/displayIcons.js';
+import { isDmOfNote } from '../utils/dmAccess.js';
 
 /**
  * If the cursor is in an active @mention segment on the current line, returns the query text (may
@@ -269,6 +270,8 @@ export default function NoteEditor({
   /** Hidden file input for DM/admin sidebar icon uploads (folders + notes). */
   const sidebarIconInputRef = useRef(null);
   const [uploadingSidebarIcon, setUploadingSidebarIcon] = useState(false);
+  /** User-visible error from the last sidebar icon upload attempt (403/400 etc.). */
+  const [sidebarIconUploadErr, setSidebarIconUploadErr] = useState(null);
   const titleInputRef = useRef(null);
   // Permissions
   const [noteVisibility, setNoteVisibility] = useState(note?.visibility || 'hidden');
@@ -354,18 +357,8 @@ export default function NoteEditor({
     : simulatedRole ? false
     : (!isOwner && !isAdminUser && (note?.granted_users || []).includes(currentUser.id));
 
-  // Check if current user is DM of this note's campaign
-  const isDM = (() => {
-    if (isAdminUser) return true;
-    if (!note || !dmCampaignIds || dmCampaignIds.length === 0) return false;
-    const notesById = new Map((notes || []).map((n) => [n.id, n]));
-    let current = note;
-    while (current.parent_id) {
-      current = notesById.get(current.parent_id);
-      if (!current) return false;
-    }
-    return dmCampaignIds.includes(current.id);
-  })();
+  // Check if current user is DM of this note's campaign (any ancestor in dmCampaignIds)
+  const isDM = isAdminUser || isDmOfNote(note, dmCampaignIds, notes);
 
   const isRootFolder = !!note?.is_folder && !note?.parent_id;
   const canFullEdit = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isGranted);
@@ -386,6 +379,8 @@ export default function NoteEditor({
     }
     return false;
   })();
+  /** DM/admin sidebar image upload — blocked on demo (non-admin) and archived campaigns. */
+  const canUploadSidebarIcon = isDM && !demoReadOnly && (!underArchive || isAdminUser);
   /** Full edit of title/body (blocked when subtree is in completed archive, except admins). */
   const canEditContent = canFullEdit && (!underArchive || isAdminUser) && !demoReadOnly;
   /** DM append to another user's note — disabled in archived campaigns (non-admin). */
@@ -981,10 +976,11 @@ export default function NoteEditor({
   const handleSidebarIconFile = useCallback(async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !noteIdRef.current || !isDM) return;
+    if (!file || !noteIdRef.current || !canUploadSidebarIcon) return;
     const fd = new FormData();
     fd.append('image', file);
     try {
+      setSidebarIconUploadErr(null);
       setUploadingSidebarIcon(true);
       const up = await api.post(`/images/sidebar-icon/${noteIdRef.current}`, fd);
       const url = up.data?.url;
@@ -993,10 +989,11 @@ export default function NoteEditor({
       setNoteIconMenuOpen(false);
     } catch (err) {
       console.error('Sidebar icon upload failed', err);
+      setSidebarIconUploadErr(err.response?.data?.error || err.message || 'Upload failed');
     } finally {
       setUploadingSidebarIcon(false);
     }
-  }, [isDM, persistSidebarIconUrl]);
+  }, [canUploadSidebarIcon, persistSidebarIconUrl]);
 
   const tagSuggestions = useMemo(
     () => allTags.filter((t) => t.includes(tagInput.toLowerCase()) && !tags.includes(t)).slice(0, 6),
@@ -1895,7 +1892,7 @@ export default function NoteEditor({
                     <span style={{ fontSize: '17px', lineHeight: 1 }}>{displayIcon || defaultNoteIconEmoji(category)}</span>
                   )}
                 </button>
-                {isDM && (
+                {canUploadSidebarIcon && (
                   <>
                     <input
                       ref={sidebarIconInputRef}
@@ -1917,6 +1914,11 @@ export default function NoteEditor({
                       }}
                     >{uploadingSidebarIcon ? '…' : '🖼'}</button>
                   </>
+                )}
+                {sidebarIconUploadErr && canUploadSidebarIcon && (
+                  <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(224,112,112,0.95)', maxWidth: '200px' }}>
+                    {sidebarIconUploadErr}
+                  </span>
                 )}
               </div>
               {noteIconMenuOpen && createPortal(
@@ -2206,7 +2208,7 @@ export default function NoteEditor({
                     >{ic}</button>
                   ))}
                 </div>
-                {isDM && !demoReadOnly && (
+                {canUploadSidebarIcon && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
                       <input
@@ -2238,6 +2240,11 @@ export default function NoteEditor({
                         />
                       )}
                     </div>
+                    {sidebarIconUploadErr && (
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.95)' }}>
+                        {sidebarIconUploadErr}
+                      </div>
+                    )}
                   </div>
                 )}
                 <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
@@ -2674,7 +2681,7 @@ export default function NoteEditor({
                 >{ic}</button>
               ))}
             </div>
-            {isDM && (
+            {canUploadSidebarIcon && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px' }}>
                   <input
@@ -2706,6 +2713,11 @@ export default function NoteEditor({
                     />
                   )}
                 </div>
+                {sidebarIconUploadErr && (
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.95)' }}>
+                    {sidebarIconUploadErr}
+                  </div>
+                )}
               </div>
             )}
             <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>

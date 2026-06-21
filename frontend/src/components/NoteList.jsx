@@ -3,6 +3,7 @@ import { getCategoryColor } from './NoteEditor.jsx';
 import api from '../api.js';
 import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
 import { resolveSidebarIcon, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
+import { isDmOfNote } from '../utils/dmAccess.js';
 
 /**
  * Builds parent_id-linked tree roots for the sidebar (no virtual inherit rows).
@@ -83,17 +84,7 @@ function TreeNode({
   const isDropTarget = dropTargetId === node.id;
 
   // Determine if current user is DM of the campaign containing this node
-  const isDM = (() => {
-    if (isAdmin) return true;
-    if (!dmCampaignIds || dmCampaignIds.length === 0) return false;
-    const notesById = new Map((allNotes || []).map(n => [n.id, n]));
-    let current = node;
-    while (current.parent_id) {
-      current = notesById.get(current.parent_id);
-      if (!current) return false;
-    }
-    return dmCampaignIds.includes(current.id);
-  })();
+  const isDM = isAdmin || isDmOfNote(node, dmCampaignIds, allNotes);
 
   const isRootFolder = isFolder && depth === 0;
   const forceShowActions = isRootFolder && tutorialForceHoverNodeId === node.id;
