@@ -732,8 +732,9 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canChangePerms = admin || isOwner || isDM;
   // Cosmetic fields: anyone who can manage the row or fully edit content
   const canStyle = canManage || canFullEdit;
-  // Custom image icons in the tree: DMs of the campaign and admins only (emoji presets stay canStyle)
-  const canSetImageSidebarIcon = admin || isDM;
+  // Custom image icons in the tree: campaign DMs and admins (emoji presets stay canStyle).
+  // Use isDMOf directly — isDM excludes owners, but owners who are also campaign DMs must set image URLs.
+  const canSetImageSidebarIcon = admin || isDMOf(note.id, req.user.id);
 
   const newVisibility = visibility !== undefined ? visibility
     : is_shared !== undefined ? (is_shared ? 'shared' : 'hidden')
