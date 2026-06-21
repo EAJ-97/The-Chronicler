@@ -11,6 +11,7 @@ import ReferencePeekPanel from './ReferencePeekPanel.jsx';
 import SnapshotPanel from './SnapshotPanel.jsx';
 import TrashPanel from './TrashPanel.jsx';
 import CampaignModal from './CampaignModal.jsx';
+import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
 import api from '../api.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
@@ -271,6 +272,7 @@ export default function Dashboard({ user, onLogout }) {
   const [viewAsUserList, setViewAsUserList] = useState([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [showIntegrity, setShowIntegrity] = useState(false);
+  const [showDdbImport, setShowDdbImport] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [tutorialForceHoverNodeId, setTutorialForceHoverNodeId] = useState(null);
@@ -924,6 +926,19 @@ export default function Dashboard({ user, onLogout }) {
         />
       )}
       {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData()} />}
+      {showDdbImport && (
+        <DdbCharacterImportWizard
+          notes={notesForList}
+          currentUser={user}
+          onClose={() => setShowDdbImport(false)}
+          onImported={(noteId) => {
+            loadData().then(() => {
+              setSelectedNoteId(noteId);
+              setView('notes');
+            });
+          }}
+        />
+      )}
 
       {/* Undo toast */}
       {undoToast && (
@@ -1092,6 +1107,7 @@ export default function Dashboard({ user, onLogout }) {
                       {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
                     </button>
                     <button ref={userMenuTrashRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
+                    <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowDdbImport(true); setShowUserMenu(false); }}>Import D&amp;D Beyond</button>
                     {!!user.is_admin && <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
                     <button ref={userMenuLeaveRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
                   </div>
@@ -1180,6 +1196,9 @@ export default function Dashboard({ user, onLogout }) {
             )}
             <button ref={userMenuTrashRef} style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
+            </button>
+            <button style={S.mobileMenuBtn} onClick={() => { setShowDdbImport(true); setMobileMenuOpen(false); }}>
+              <span>⚔</span> Import D&amp;D Beyond
             </button>
             {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
               <button style={S.mobileMenuBtn} onClick={() => { setShowIntegrity(true); setMobileMenuOpen(false); }}>

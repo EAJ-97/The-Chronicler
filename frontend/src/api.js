@@ -3,11 +3,12 @@ import axios from 'axios';
 const api = axios.create({ baseURL: '/api' });
 
 /**
- * True when a 403 body indicates an invalid/expired JWT (logout + reload), not route permission denial.
+ * True when the response indicates an invalid/expired Chronicler JWT (logout + reload).
+ * Permission-denied 403s and third-party auth failures (e.g. D&D Beyond cobalt) must not reload.
  * @param {import('axios').AxiosError} err
  * @returns {boolean}
  */
-function isSessionForbidden(err) {
+function isChroniclerSessionExpired(err) {
   return err.response?.data?.error === 'Invalid or expired session';
 }
 
@@ -18,14 +19,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401 (or 403 session invalid), clear stale credentials and reload — only when a JWT was sent.
-// Permission-denied 403s are rejected normally so callers can show errors without a full page reload.
+// On Chronicler JWT expiry (403 only), clear credentials and reload — only when a JWT was sent.
+// Do not treat all 401s as logout: D&D Beyond cobalt errors and wrong-password responses use 401/422 too.
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     const status = err.response?.status;
     const hadAuth = !!(err.config?.headers?.Authorization);
-    if (hadAuth && (status === 401 || (status === 403 && isSessionForbidden(err)))) {
+    if (hadAuth && status === 403 && isChroniclerSessionExpired(err)) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.reload();
