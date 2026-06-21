@@ -7,12 +7,16 @@ const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf, isNoteUnderCompletedArchive } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
-const { getImagesDataDir } = require('../utils/sidebarIcon');
+const {
+  SIDEBAR_ICON_MAX_BYTES,
+  getImagesDataDir,
+  ensureImagesDataDir,
+} = require('../utils/sidebarIcon');
 
 const router = express.Router();
 
+ensureImagesDataDir();
 const IMAGES_DIR = getImagesDataDir();
-if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, IMAGES_DIR),
@@ -30,59 +34,85 @@ function imageFileFilter(req, file, cb) {
   cb(null, allowed.includes(ext));
 }
 
+const NOTE_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
 const upload = multer({
   storage,
-  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
+  limits: { fileSize: NOTE_IMAGE_MAX_BYTES },
   fileFilter: imageFileFilter,
 });
 
-/** Smaller limit for sidebar tree icons (square thumbnails). */
+/** Sidebar tree icons — same max as note gallery; UI scales via CSS object-fit. */
 const uploadSidebar = multer({
   storage,
-  limits: { fileSize: 512 * 1024 }, // 512KB
+  limits: { fileSize: SIDEBAR_ICON_MAX_BYTES },
   fileFilter: imageFileFilter,
 });
+
+/**
+ * Maps multer errors to JSON responses for image upload routes.
+ * @param {Error & { code?: string }} err
+ * @param {import('express').Response} res
+ * @returns {boolean} true when a response was sent
+ */
+function respondMulterError(err, res) {
+  if (!err) return false;
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    const maxMb = Math.round(SIDEBAR_ICON_MAX_BYTES / (1024 * 1024));
+    res.status(400).json({ error: `Image is too large (max ${maxMb}MB). It will be scaled in the sidebar automatically.` });
+    return true;
+  }
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    res.status(400).json({ error: 'Invalid upload field name (expected "image")' });
+    return true;
+  }
+  res.status(400).json({ error: err.message || 'Upload failed' });
+  return true;
+}
 
 /**
  * POST multipart image for note list / tree icon only (not the note body gallery).
  * Inserts no note_images row. Allowed for admins and DMs of the note's campaign.
  * Body field name: image (same as /upload/:noteId).
  */
-router.post('/sidebar-icon/:noteId', authenticateToken, uploadSidebar.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No valid image file provided' });
+router.post('/sidebar-icon/:noteId', authenticateToken, (req, res) => {
+  uploadSidebar.single('image')(req, res, (err) => {
+    if (respondMulterError(err, res)) return;
+    if (!req.file) return res.status(400).json({ error: 'No valid image file provided (use JPG, PNG, GIF, or WebP)' });
 
-  const noteId = parseInt(req.params.noteId, 10);
-  if (Number.isNaN(noteId)) {
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
-    return res.status(400).json({ error: 'Invalid note id' });
-  }
+    const noteId = parseInt(req.params.noteId, 10);
+    if (Number.isNaN(noteId)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(400).json({ error: 'Invalid note id' });
+    }
 
-  const note = db.prepare('SELECT id FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
-  if (!note) {
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
-    return res.status(404).json({ error: 'Note not found' });
-  }
+    const note = db.prepare('SELECT id FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
+    if (!note) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(404).json({ error: 'Note not found' });
+    }
 
-  const dmImg = demoMutateForbiddenMessage(req.user.id, noteId);
-  if (dmImg) {
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
-    return res.status(403).json({ error: dmImg });
-  }
+    const dmImg = demoMutateForbiddenMessage(req.user.id, noteId);
+    if (dmImg) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(403).json({ error: dmImg });
+    }
 
-  if (!isAdmin(req.user.id) && isNoteUnderCompletedArchive(noteId)) {
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
-    return res.status(403).json({
-      error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+    if (!isAdmin(req.user.id) && isNoteUnderCompletedArchive(noteId)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(403).json({
+        error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+      });
+    }
+
+    if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.status(403).json({ error: 'Only campaign DMs and admins can upload sidebar icons' });
+    }
+
+    res.status(201).json({
+      url: `/api/images/files/${req.file.filename}`,
     });
-  }
-
-  if (!isAdmin(req.user.id) && !isDMOf(noteId, req.user.id)) {
-    try { fs.unlinkSync(req.file.path); } catch (_) {}
-    return res.status(403).json({ error: 'Only campaign DMs and admins can upload sidebar icons' });
-  }
-
-  res.status(201).json({
-    url: `/api/images/files/${req.file.filename}`,
   });
 });
 

@@ -1,12 +1,41 @@
 const fs = require('fs');
 const path = require('path');
 
+/** Max upload bytes for sidebar tree icons (same as note-body gallery uploads). */
+const SIDEBAR_ICON_MAX_BYTES = 8 * 1024 * 1024;
+
 /**
- * Absolute path to user-uploaded images (same tree served at GET /api/images/files/*).
- * Resolved from backend/utils → project root data/images.
+ * Absolute path to user-uploaded images on the persistent data volume (served at GET /api/images/files/*).
+ * Uses DB_DIR (/data in Docker) so files survive container rebuilds.
+ * @returns {string}
  */
 function getImagesDataDir() {
-  return path.join(__dirname, '..', '..', 'data', 'images');
+  const base = process.env.DB_DIR || '/data';
+  return path.join(base, 'images');
+}
+
+/**
+ * Ensures the images directory exists and copies any files from the legacy dev path
+ * (/app/data/images) into the persistent volume once.
+ * @returns {void}
+ */
+function ensureImagesDataDir() {
+  const imagesDir = getImagesDataDir();
+  if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+
+  const legacyDir = path.join(__dirname, '..', '..', 'data', 'images');
+  if (legacyDir === imagesDir || !fs.existsSync(legacyDir)) return;
+
+  try {
+    for (const name of fs.readdirSync(legacyDir)) {
+      const from = path.join(legacyDir, name);
+      const to = path.join(imagesDir, name);
+      if (!fs.statSync(from).isFile() || fs.existsSync(to)) continue;
+      fs.copyFileSync(from, to);
+    }
+  } catch (_) {
+    /* ignore migration errors */
+  }
 }
 
 /** Allowed relative URLs stored in notes.display_icon for custom tree icons (matches generated filenames). */
@@ -49,7 +78,9 @@ function unlinkManagedSidebarIconFile(url) {
 }
 
 module.exports = {
+  SIDEBAR_ICON_MAX_BYTES,
   getImagesDataDir,
+  ensureImagesDataDir,
   isManagedSidebarIconUrl,
   filenameFromManagedSidebarIconUrl,
   unlinkManagedSidebarIconFile,
