@@ -21,6 +21,19 @@ function canSeeNote(noteId, userId) {
   return isGrantedUser(noteId, userId);
 }
 
+/** Allowed graph edge directions: bidirectional, forward (source→target), reverse (target→source). */
+const VALID_DIRECTIONS = new Set(['bidirectional', 'forward', 'reverse']);
+
+/**
+ * Normalises direction from API body; defaults to bidirectional.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function normalizeDirection(raw) {
+  const d = String(raw || 'bidirectional').toLowerCase();
+  return VALID_DIRECTIONS.has(d) ? d : 'bidirectional';
+}
+
 /**
  * True if category is allowed for Character Shipping (NPC or Character notes).
  * @param {string} [category]
@@ -107,15 +120,18 @@ router.post('/', authenticateToken, (req, res) => {
   }
 
   try {
+    const direction = normalizeDirection(req.body.direction);
+
     const result = db.prepare(
-      `INSERT INTO connections (source_note_id, target_note_id, label, is_speculative, connection_kind, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO connections (source_note_id, target_note_id, label, is_speculative, connection_kind, direction, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       source_note_id,
       target_note_id,
       label,
       is_speculative,
       connection_kind,
+      direction,
       req.user.id
     );
 
@@ -129,9 +145,9 @@ router.post('/', authenticateToken, (req, res) => {
   }
 });
 
-// PUT update label — owner, DM, or admin
+// PUT update label and/or direction — owner, DM, or admin
 router.put('/:id', authenticateToken, (req, res) => {
-  const { label = '' } = req.body;
+  const { label } = req.body;
   const admin = isAdmin(req.user.id);
   const conn  = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (!conn) return res.status(404).json({ error: 'Connection not found' });
@@ -146,7 +162,18 @@ router.put('/:id', authenticateToken, (req, res) => {
   ) {
     return res.status(403).json({ error: 'This campaign or world is marked completed; connections are read-only.' });
   }
-  db.prepare('UPDATE connections SET label = ? WHERE id = ?').run(label, req.params.id);
+
+  const nextLabel = label !== undefined ? String(label) : conn.label;
+  let nextDirection = conn.direction || 'bidirectional';
+  if (req.body.direction !== undefined) {
+    const d = String(req.body.direction).toLowerCase();
+    if (!VALID_DIRECTIONS.has(d)) {
+      return res.status(400).json({ error: 'direction must be bidirectional, forward, or reverse' });
+    }
+    nextDirection = d;
+  }
+
+  db.prepare('UPDATE connections SET label = ?, direction = ? WHERE id = ?').run(nextLabel, nextDirection, req.params.id);
   const updated = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (req.app.broadcast) req.app.broadcast({ type: 'connections_changed' });
   res.json(updated);

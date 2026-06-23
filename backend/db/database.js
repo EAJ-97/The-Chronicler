@@ -122,6 +122,7 @@ db.exec(`
     label            TEXT    DEFAULT '',
     is_speculative   INTEGER DEFAULT 0,
     connection_kind  TEXT    DEFAULT 'canon',
+    direction        TEXT    DEFAULT 'bidirectional',
     created_by       INTEGER NOT NULL,
     created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
@@ -540,6 +541,15 @@ migrate('041_notes_folder_dm_content', () => {
     db.exec('ALTER TABLE notes ADD COLUMN folder_dm_content TEXT DEFAULT NULL');
   } catch (e) {
     /* column may already exist on fresh installs */
+  }
+});
+
+// Graph: one-way vs bidirectional edges (forward = source_note_id → target_note_id)
+migrate('042_connections_direction', () => {
+  try {
+    db.exec("ALTER TABLE connections ADD COLUMN direction TEXT DEFAULT 'bidirectional'");
+  } catch (e) {
+    /* column may already exist */
   }
 });
 

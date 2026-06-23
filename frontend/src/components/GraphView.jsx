@@ -24,6 +24,58 @@ const FLOOR_OPACITY = 0.04;
 const PATH_FIND_PICK_DIM_OPACITY = 0.65;
 const MAX_HOPS = 6;
 
+/** Per-kind edge appearance defaults (line, label, arrows share brightness). */
+const DEFAULT_EDGE_THEME = {
+  canon: { color: '#c8943a', brightness: 0.2 },
+  theory: { color: '#9664c8', brightness: 0.24 },
+  ship: { color: '#d05090', brightness: 0.24 },
+};
+
+const EDGE_KIND_META = [
+  { key: 'canon', label: 'Canon' },
+  { key: 'theory', label: 'Theory' },
+  { key: 'ship', label: 'Ship' },
+];
+
+/**
+ * Loads persisted edge theme from localStorage, merged with defaults.
+ * @param {string} storageKey
+ * @returns {typeof DEFAULT_EDGE_THEME}
+ */
+function loadEdgeTheme(storageKey) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKey));
+    if (!raw || typeof raw !== 'object') return { ...DEFAULT_EDGE_THEME };
+    const merged = { ...DEFAULT_EDGE_THEME };
+    for (const { key } of EDGE_KIND_META) {
+      if (raw[key] && typeof raw[key] === 'object') {
+        merged[key] = {
+          color: typeof raw[key].color === 'string' ? raw[key].color : merged[key].color,
+          brightness: Number.isFinite(raw[key].brightness) ? raw[key].brightness : merged[key].brightness,
+        };
+      }
+    }
+    return merged;
+  } catch {
+    return { ...DEFAULT_EDGE_THEME };
+  }
+}
+
+/**
+ * Converts #rrggbb to rgba with the given alpha (brightness).
+ * @param {string} hex
+ * @param {number} alpha
+ * @returns {string}
+ */
+function hexToRgba(hex, alpha) {
+  const h = String(hex || '#c8943a').replace('#', '');
+  if (h.length !== 6) return `rgba(200,148,58,${alpha})`;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 /**
  * BFS hop depths from startId using **canonical edges only** — theory/ship links do not expand tiers or affect hover/selection halos.
  */
@@ -45,15 +97,23 @@ function getTiers(cy, startId, maxDepth = MAX_HOPS) {
   return tiers;
 }
 
-/** Neighbour node ids reachable via canonical (orange) edges only — theory/ship edges excluded from pathfinding. */
+/** Neighbour node ids reachable via canonical (orange) edges only — respects edge direction. */
 function getCanonNeighborIds(cy, nodeId) {
   const out = [];
   const el = cy.getElementById(nodeId);
   if (!el || el.length === 0) return out;
   el.connectedEdges('.kind-canon').forEach((edge) => {
-    edge.connectedNodes().forEach((n) => {
-      if (n.id() !== nodeId) out.push(n.id());
-    });
+    const src = edge.source().id();
+    const tgt = edge.target().id();
+    const dir = edge.data('direction') || 'bidirectional';
+    if (dir === 'bidirectional') {
+      if (src === nodeId) out.push(tgt);
+      else if (tgt === nodeId) out.push(src);
+    } else if (dir === 'forward' && src === nodeId) {
+      out.push(tgt);
+    } else if (dir === 'reverse' && tgt === nodeId) {
+      out.push(src);
+    }
   });
   return out;
 }
@@ -117,6 +177,18 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   const cyRef = useRef(null);
   const hoverTimerRef = useRef(null);
   const isFirstMount = useRef(true);
+  /** Skips redundant Cytoscape patches when parent re-renders with the same graph data. */
+  const dataFingerprintRef = useRef('');
+  const edgeThemeKey = `chronicler_graph_edge_theme_${currentUser?.id || 'anon'}`;
+  const [edgeTheme, setEdgeThemeRaw] = useState(() => loadEdgeTheme(edgeThemeKey));
+  const setEdgeTheme = useCallback((updater) => {
+    setEdgeThemeRaw((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem(edgeThemeKey, JSON.stringify(next)); } catch (e) {}
+      applyGraphStyle(cyRef.current, next);
+      return next;
+    });
+  }, [edgeThemeKey]);
   const [connectMode, setConnectMode] = useState(false);
   const [connectSource, setConnectSource] = useState(null);
   const connectModeRef = useRef(false);
@@ -217,16 +289,21 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     : connections
   ).filter(c => visibleNoteIds.has(c.source_note_id) && visibleNoteIds.has(c.target_note_id));
 
-  // Edge label editing
-  const [editingEdge, setEditingEdge] = useState(null); // { id, label, x, y, gimmickKind?: 'theory'|'ship' }
+  // Edge label + direction editor (graph-only; notes drawer unchanged)
+  const [editingEdge, setEditingEdge] = useState(null);
   const editingEdgeRef = useRef(null);
   editingEdgeRef.current = editingEdge;
 
-  const handleEdgeLabelSave = useCallback(async (connId, label) => {
+  /**
+   * Persists edge label and direction via API; refreshes connection list on success.
+   * @param {number} connId
+   * @param {{ label: string, direction: string }} payload
+   */
+  const handleEdgeSave = useCallback(async (connId, { label, direction }) => {
     if (webReadOnly) return;
     setEditingEdge(null);
     try {
-      await api.put(`/connections/${connId}`, { label });
+      await api.put(`/connections/${connId}`, { label, direction });
       onUpdateConnection();
     } catch (err) { console.error(err); }
   }, [onUpdateConnection, webReadOnly]);
@@ -283,6 +360,45 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   // Position key for localStorage per campaign
   const posKey = `chronicler_graph_positions_${activeCampaignId || 'all'}`;
 
+  /**
+   * Places nodes that have no saved coordinates near neighbours or on an outward spiral.
+   * @param {import('cytoscape').Core} cy
+   * @param {string[]} addedNodeIds - node ids to position (Cytoscape string ids)
+   * @param {Record<string, { x: number, y: number }>|null} savedPositions
+   * @param {string} posKey - localStorage key for persisting all node positions
+   */
+  const placeNewGraphNodes = useCallback((cy, addedNodeIds, savedPositions, posKey) => {
+    if (addedNodeIds.length === 0) return;
+    addedNodeIds.forEach((nid, idx) => {
+      if (savedPositions?.[nid]) return;
+      const node = cy.getElementById(nid);
+      if (!node.length) return;
+      const neighbours = node.neighborhood('node');
+      let cx = 0, cy_ = 0, count = 0;
+      neighbours.forEach(nb => {
+        if (!addedNodeIds.includes(nb.id())) {
+          const p = nb.position();
+          cx += p.x; cy_ += p.y; count++;
+        }
+      });
+      if (count > 0) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 180 + Math.random() * 80;
+        node.position({ x: cx / count + Math.cos(angle) * dist, y: cy_ / count + Math.sin(angle) * dist });
+      } else {
+        const ext = cy.nodes().not(node).boundingBox();
+        const ox = (ext.x1 + ext.x2) / 2 || 0;
+        const oy = (ext.y1 + ext.y2) / 2 || 0;
+        const angle = (idx * 2.4) + Math.random() * 0.4;
+        const dist = 220 + idx * 90;
+        node.position({ x: ox + Math.cos(angle) * dist, y: oy + Math.sin(angle) * dist });
+      }
+    });
+    const pos = {};
+    cy.nodes().forEach(n => { pos[n.id()] = { ...n.position() }; });
+    try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
+  }, []);
+
   const runExpand = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -306,23 +422,37 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     if (!containerRef.current) return;
 
     const elements = buildElements(visibleNotes, visibleConnections);
+    const nodeElements = elements.filter(e => !e.data.source);
     let savedPositions = null;
     try { savedPositions = JSON.parse(localStorage.getItem(posKey)); } catch (e) {}
-    const allSaved = savedPositions && elements.filter(e => !e.data.source).every(e => savedPositions[e.data.id]);
+    const hasAnySaved = savedPositions && nodeElements.some(e => savedPositions[e.data.id]);
+    const allSaved = savedPositions && nodeElements.every(e => savedPositions[e.data.id]);
+    const runFullLayout = !hasAnySaved;
 
     cyRef.current = cytoscape({
       container: containerRef.current,
       elements,
-      style: buildStyle(),
-      layout: allSaved
-        ? { name: 'preset', positions: (node) => savedPositions[node.id()], padding: 80 }
-        : { name: 'cose', animate: true, animationDuration: 900, nodeRepulsion: () => 80000, idealEdgeLength: () => 200, nodeOverlap: 40, gravity: 0.25, numIter: 2000, padding: 80 },
+      style: buildStyle(edgeTheme),
+      layout: runFullLayout
+        ? { name: 'cose', animate: true, animationDuration: 900, nodeRepulsion: () => 80000, idealEdgeLength: () => 200, nodeOverlap: 40, gravity: 0.25, numIter: 2000, padding: 80 }
+        : { name: 'preset', positions: (node) => savedPositions[node.id()], padding: 80 },
       wheelSensitivity: 0,   // neutralize Cytoscape's wheel — we handle it ourselves
       boxSelectionEnabled: false,
       zoomingEnabled: true,
     });
 
     const cy = cyRef.current;
+
+    // Restore saved positions and place only nodes that lack coordinates — never re-run cose for the whole graph.
+    if (hasAnySaved && !allSaved) {
+      const unsavedIds = [];
+      cy.nodes().forEach(n => {
+        const saved = savedPositions[n.id()];
+        if (saved) n.position(saved);
+        else unsavedIds.push(n.id());
+      });
+      placeNewGraphNodes(cy, unsavedIds, savedPositions, posKey);
+    }
 
     // Smooth zoom — Cytoscape's built-in wheel is disabled via wheelSensitivity:0
     let zoomTarget = cy.zoom();
@@ -356,9 +486,11 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     cy.on('dragfree', 'node', savePositions);
     cy.on('layoutstop', savePositions);
     // On first load with no saved positions, de-overlap labels after layout settles
-    if (!allSaved) {
+    if (runFullLayout) {
       cy.one('layoutstop', () => separateLabels(cy, posKey));
     }
+
+    dataFingerprintRef.current = buildGraphFingerprint(visibleNotes, visibleConnections);
 
     bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
 
@@ -379,6 +511,10 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     if (!cy) return;
     if (isFirstMount.current) { isFirstMount.current = false; return; }
 
+    const fp = buildGraphFingerprint(visibleNotes, visibleConnections);
+    if (fp === dataFingerprintRef.current) return;
+    dataFingerprintRef.current = fp;
+
     const newElements = buildElements(visibleNotes, visibleConnections);
     const newIds = new Set(newElements.map(e => e.data.id));
 
@@ -393,44 +529,17 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       if (!cy.getElementById(el.data.id).length) {
         cy.add(el);
         if (!el.data.source) addedNodeIds.push(el.data.id); // it's a node, not an edge
-      } else if (el.data.label !== undefined) {
-        cy.getElementById(el.data.id).data('label', el.data.label);
+      } else {
+        const existing = cy.getElementById(el.data.id);
+        if (el.data.label !== undefined) existing.data('label', el.data.label);
+        if (el.data.source) {
+          if (el.data.direction !== undefined) existing.data('direction', el.data.direction);
+          if (el.classes) existing.classes(el.classes);
+        }
       }
     });
 
-    // Place new nodes near their neighbours, or in a free spiral if unconnected
-    if (addedNodeIds.length > 0) {
-      addedNodeIds.forEach((nid, idx) => {
-        if (savedPositions?.[nid]) return; // already has a saved spot, skip
-        const node = cy.getElementById(nid);
-        const neighbours = node.neighborhood('node');
-        let cx = 0, cy_ = 0, count = 0;
-        neighbours.forEach(nb => {
-          if (!addedNodeIds.includes(nb.id())) {
-            const p = nb.position();
-            cx += p.x; cy_ += p.y; count++;
-          }
-        });
-        if (count > 0) {
-          // Near centroid of known neighbours + small random offset to avoid overlap
-          const angle = Math.random() * Math.PI * 2;
-          const dist  = 180 + Math.random() * 80;
-          node.position({ x: cx / count + Math.cos(angle) * dist, y: cy_ / count + Math.sin(angle) * dist });
-        } else {
-          // No connections — spiral outward from centre of existing graph
-          const ext = cy.nodes().not(node).boundingBox();
-          const ox  = (ext.x1 + ext.x2) / 2 || 0;
-          const oy  = (ext.y1 + ext.y2) / 2 || 0;
-          const angle = (idx * 2.4) + Math.random() * 0.4; // golden-angle spiral
-          const dist  = 220 + idx * 90;
-          node.position({ x: ox + Math.cos(angle) * dist, y: oy + Math.sin(angle) * dist });
-        }
-      });
-      // Save the freshly-placed positions
-      const pos = {};
-      cy.nodes().forEach(n => { pos[n.id()] = { ...n.position() }; });
-      try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
-    }
+    placeNewGraphNodes(cy, addedNodeIds, savedPositions, posKey);
 
     cy.removeAllListeners();
     const savePositions = () => {
@@ -442,6 +551,11 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     cy.on('layoutstop', savePositions);
     bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
   }, [visibleNotes, visibleConnections]);
+
+  // Re-apply edge colors / arrows when the user adjusts appearance controls
+  useEffect(() => {
+    applyGraphStyle(cyRef.current, edgeTheme);
+  }, [edgeTheme]);
 
   // Tiered highlight
   useEffect(() => {
@@ -501,51 +615,95 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
 
       <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 1, display: effectiveIs3D ? 'none' : 'block' }} />
 
-      {/* Edge label editor — inline popup */}
+      {/* Edge editor — label + direction (graph only) */}
       {editingEdge && (
         <div style={{
           position: 'absolute', zIndex: 10,
-          left: editingEdge.x - 100, top: editingEdge.y - 18,
+          left: Math.max(8, editingEdge.x - 160), top: editingEdge.y - 8,
           background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)',
-          borderRadius: '4px', padding: '6px 8px', display: 'flex', gap: '6px', alignItems: 'center',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.8)',
-        }}>
-          <input
-            autoFocus
-            style={{
-              width: '160px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)',
-              borderRadius: '3px', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
-              padding: '4px 8px', outline: 'none',
-            }}
-            value={editingEdge.label}
-            onChange={e => setEditingEdge(prev => ({ ...prev, label: e.target.value }))}
-            onKeyDown={e => {
-              if (e.key === 'Enter') handleEdgeLabelSave(editingEdge.id, editingEdge.label);
-              if (e.key === 'Escape') setEditingEdge(null);
-            }}
-            placeholder="Connection label (optional)..."
-          />
-          <button onClick={() => handleEdgeLabelSave(editingEdge.id, editingEdge.label)}
-            style={{ padding: '4px 8px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: 'pointer', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px' }}>
-            SAVE
-          </button>
-          <button onClick={() => handleEdgeLabelSave(editingEdge.id, '')}
-            style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,213,187,0.4)', fontFamily: 'Cinzel', fontSize: '9px' }}>
-            CLEAR
-          </button>
-          {editingEdge.gimmickKind && onDeleteConnection && (
-            <button
-              type="button"
-              onClick={() => handleGimmickEdgeDelete(editingEdge.id)}
-              title="Remove this theory or ship link"
+          borderRadius: '6px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.8)', maxWidth: 'min(92vw, 360px)',
+        }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              autoFocus
+              disabled={webReadOnly}
               style={{
-                padding: '4px 8px', background: 'rgba(196,80,80,0.12)', border: '1px solid rgba(196,100,100,0.35)', borderRadius: '3px',
-                cursor: 'pointer', color: 'rgba(240,160,160,0.95)', fontFamily: 'Cinzel', fontSize: '9px',
+                flex: '1 1 140px', minWidth: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)',
+                borderRadius: '3px', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                padding: '4px 8px', outline: 'none',
               }}
+              value={editingEdge.label}
+              onChange={e => setEditingEdge(prev => ({ ...prev, label: e.target.value }))}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleEdgeSave(editingEdge.id, { label: editingEdge.label, direction: editingEdge.direction });
+                if (e.key === 'Escape') setEditingEdge(null);
+              }}
+              placeholder="Connection label (optional)..."
+            />
+            <button
+              disabled={webReadOnly}
+              onClick={() => handleEdgeSave(editingEdge.id, { label: editingEdge.label, direction: editingEdge.direction })}
+              style={{ padding: '4px 8px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
             >
-              REMOVE
+              SAVE
             </button>
-          )}
+            <button
+              disabled={webReadOnly}
+              onClick={() => handleEdgeSave(editingEdge.id, { label: '', direction: editingEdge.direction })}
+              style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: 'rgba(226,213,187,0.4)', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
+            >
+              CLEAR
+            </button>
+            {editingEdge.gimmickKind && onDeleteConnection && (
+              <button
+                type="button"
+                disabled={webReadOnly}
+                onClick={() => handleGimmickEdgeDelete(editingEdge.id)}
+                title="Remove this theory or ship link"
+                style={{
+                  padding: '4px 8px', background: 'rgba(196,80,80,0.12)', border: '1px solid rgba(196,100,100,0.35)', borderRadius: '3px',
+                  cursor: webReadOnly ? 'default' : 'pointer', color: 'rgba(240,160,160,0.95)', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1,
+                }}
+              >
+                REMOVE
+              </button>
+            )}
+          </div>
+          <div>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.55)', marginBottom: '5px' }}>
+              DIRECTION
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {[
+                { value: 'bidirectional', label: '↔ Both ways' },
+                { value: 'forward', label: `→ ${truncateGraphTitle(editingEdge.sourceTitle)} → ${truncateGraphTitle(editingEdge.targetTitle)}` },
+                { value: 'reverse', label: `→ ${truncateGraphTitle(editingEdge.targetTitle)} → ${truncateGraphTitle(editingEdge.sourceTitle)}` },
+              ].map(({ value, label }) => {
+                const active = editingEdge.direction === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={webReadOnly}
+                    onClick={() => setEditingEdge(prev => ({ ...prev, direction: value }))}
+                    style={{
+                      textAlign: 'left', padding: '6px 8px', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer',
+                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.06em',
+                      background: active ? 'rgba(200,148,58,0.18)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${active ? 'rgba(200,148,58,0.45)' : 'rgba(255,255,255,0.08)'}`,
+                      color: active ? '#c8943a' : 'rgba(226,213,187,0.65)',
+                      opacity: webReadOnly ? 0.5 : 1,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -618,7 +776,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
 
       {/* Legend — anchored below the toolbar row so it never overlaps it */}
       <div ref={tutorialRefs?.legend || null}>
-        <LegendPanel selectedNoteId={selectedNoteId} tutorialRefs={tutorialRefs} />
+        <LegendPanel selectedNoteId={selectedNoteId} edgeTheme={edgeTheme} onEdgeThemeChange={setEdgeTheme} tutorialRefs={tutorialRefs} />
       </div>
 
       {/* Toolbar — top-right: buttons first, status hints below (so hints never sit above the buttons) */}
@@ -894,7 +1052,7 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
     }
   });
 
-  // Edge click → open label editor
+  // Edge click → open label + direction editor
   cy.on('tap', 'edge', (e) => {
     if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
     const edge = e.target;
@@ -908,7 +1066,16 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
     const zoom = cy.zoom();
     const x = pos.x * zoom + pan.x;
     const y = pos.y * zoom + pan.y;
-    setEditingEdge({ id: connId, label: edge.data('label') || '', x, y, gimmickKind });
+    setEditingEdge({
+      id: connId,
+      label: edge.data('label') || '',
+      direction: edge.data('direction') || 'bidirectional',
+      sourceTitle: edge.source().data('label') || '',
+      targetTitle: edge.target().data('label') || '',
+      x,
+      y,
+      gimmickKind,
+    });
   });
 
   cy.on('mouseover', 'node', (e) => {
@@ -990,6 +1157,112 @@ function separateLabels(cy, posKey, maxPasses = 12) {
 }
 
 /**
+ * Truncates note titles for compact edge-direction buttons in the graph editor.
+ * @param {string} title
+ * @returns {string}
+ */
+function truncateGraphTitle(title) {
+  const s = String(title || '');
+  return s.length > 16 ? `${s.slice(0, 14)}…` : s;
+}
+
+/**
+ * Returns a Cytoscape edge class for connection direction.
+ * @param {{ direction?: string }} conn
+ * @returns {string}
+ */
+function connectionDirectionClass(conn) {
+  const d = conn.direction || 'bidirectional';
+  if (d === 'forward') return 'dir-forward';
+  if (d === 'reverse') return 'dir-reverse';
+  return 'dir-bidirectional';
+}
+
+/**
+ * Endpoint arrows for one-way edges only (bidirectional = no arrowheads).
+ * @param {typeof DEFAULT_EDGE_THEME} theme
+ * @returns {object[]}
+ */
+function buildDirectionArrowStyles(theme) {
+  const rules = [];
+  for (const { key } of EDGE_KIND_META) {
+    const t = theme[key] || DEFAULT_EDGE_THEME[key];
+    const b = Math.max(0.05, Math.min(1, t.brightness));
+    const arrowOp = Math.min(1, b * 1.6);
+    rules.push(
+      {
+        selector: `edge.kind-${key}.dir-forward`,
+        style: {
+          'target-arrow-shape': 'triangle',
+          'target-arrow-color': t.color,
+          'target-arrow-opacity': arrowOp,
+          'arrow-scale': 1.3,
+        },
+      },
+      {
+        selector: `edge.kind-${key}.dir-reverse`,
+        style: {
+          'source-arrow-shape': 'triangle',
+          'source-arrow-color': t.color,
+          'source-arrow-opacity': arrowOp,
+          'arrow-scale': 1.3,
+        },
+      },
+      {
+        selector: `edge.kind-${key}.dir-bidirectional`,
+        style: { 'source-arrow-shape': 'none', 'target-arrow-shape': 'none' },
+      },
+    );
+  }
+  return rules;
+}
+
+/**
+ * Builds per-kind edge line + label colors from the user theme.
+ * @param {typeof DEFAULT_EDGE_THEME} theme
+ * @returns {object[]}
+ */
+function buildKindEdgeStyles(theme) {
+  return EDGE_KIND_META.map(({ key }) => {
+    const t = theme[key] || DEFAULT_EDGE_THEME[key];
+    const b = Math.max(0.05, Math.min(1, t.brightness));
+    const labelOp = Math.min(1, b * 1.1);
+    const highlightOp = Math.min(1, b * 2.2);
+    const base = {
+      'line-color': t.color,
+      'line-opacity': b,
+      'color': t.color,
+      'text-opacity': labelOp,
+    };
+    if (key === 'theory' || key === 'ship') base['line-style'] = 'dashed';
+    else base['line-style'] = 'solid';
+    return [
+      { selector: `edge.kind-${key}`, style: base },
+      {
+        selector: `edge.kind-${key}.highlighted`,
+        style: {
+          'line-color': t.color,
+          'line-opacity': highlightOp,
+          'text-opacity': Math.min(1, highlightOp * 1.05),
+          'opacity': 1,
+        },
+      },
+    ];
+  }).flat();
+}
+
+/**
+ * Pushes an updated Cytoscape stylesheet and refreshes edge rendering.
+ * @param {import('cytoscape').Core|null} cy
+ * @param {typeof DEFAULT_EDGE_THEME} theme
+ */
+function applyGraphStyle(cy, theme) {
+  if (!cy) return;
+  cy.style().fromJson(buildStyle(theme));
+  cy.style().update();
+}
+
+/**
  * Returns a Cytoscape edge class for connection_kind (canon / theory / ship).
  * Legacy rows use is_speculative → theory; unknown values default to canon.
  */
@@ -1001,6 +1274,18 @@ function connectionKindClass(conn) {
   return 'kind-canon';
 }
 
+/**
+ * Stable fingerprint of visible graph data — ignores parent re-render array identity.
+ * @param {object[]} notes
+ * @param {object[]} connections
+ * @returns {string}
+ */
+function buildGraphFingerprint(notes, connections) {
+  return notes.map(n => `${n.id}:${n.title}:${n.category}`)
+    .concat(connections.map(c => `${c.id}:${c.source_note_id}-${c.target_note_id}:${c.label || ''}:${c.connection_kind || ''}:${c.direction || 'bidirectional'}:${c.is_speculative ? 1 : 0}`))
+    .join('|');
+}
+
 function buildElements(notes, connections) {
   const nodeIds = new Set(notes.map(n => String(n.id)));
   return [
@@ -1010,13 +1295,20 @@ function buildElements(notes, connections) {
     ...connections
       .filter(conn => nodeIds.has(String(conn.source_note_id)) && nodeIds.has(String(conn.target_note_id)))
       .map(conn => ({
-        data: { id: `e${conn.id}`, connId: conn.id, source: String(conn.source_note_id), target: String(conn.target_note_id), label: conn.label || '' },
-        classes: connectionKindClass(conn),
+        data: {
+          id: `e${conn.id}`,
+          connId: conn.id,
+          source: String(conn.source_note_id),
+          target: String(conn.target_note_id),
+          label: conn.label || '',
+          direction: conn.direction || 'bidirectional',
+        },
+        classes: `${connectionKindClass(conn)} ${connectionDirectionClass(conn)}`,
       })),
   ];
 }
 
-function buildStyle() {
+function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
   // Node opacity per tier using HOP_OPACITY table
   const nodeTierStyles = HOP_OPACITY.map((op, i) => {
     const base = { 'opacity': op };
@@ -1024,10 +1316,17 @@ function buildStyle() {
     if (i === 1) Object.assign(base, { 'background-opacity': 0.35, 'border-width': 2, 'border-opacity': 0.9, 'width': 38, 'height': 38 });
     return { selector: `node.tier-${i}`, style: base };
   });
+  const canon = edgeTheme.canon || DEFAULT_EDGE_THEME.canon;
+  const canonB = Math.max(0.05, Math.min(1, canon.brightness));
   // Edge opacity per tier: edge takes opacity of its deeper endpoint
   const edgeTierStyles = HOP_OPACITY.map((op, i) => ({
     selector: `edge.tier-${i}`,
-    style: { 'opacity': op, 'line-color': `rgba(200,148,58,${Math.min(op * 0.6 + 0.1, 0.7)})`, 'width': i <= 1 ? 2 : 1.5 },
+    style: {
+      'opacity': op,
+      'line-color': canon.color,
+      'line-opacity': Math.min(1, canonB * 2.2) * op,
+      'width': i <= 1 ? 2 : 1.5,
+    },
   }));
 
   return [
@@ -1053,50 +1352,24 @@ function buildStyle() {
     {
       selector: 'edge',
       style: {
-        'width': 2, 'line-color': 'rgba(200,148,58,0.25)', 'curve-style': 'bezier',
-        'label': 'data(label)', 'font-size': '9px', 'color': 'rgba(200,148,58,0.35)',
+        'width': 2, 'line-color': canon.color, 'line-opacity': canonB, 'curve-style': 'bezier',
+        'label': 'data(label)', 'font-size': '9px', 'color': canon.color,
+        'text-opacity': Math.min(1, canonB * 1.1),
         'font-family': 'Cinzel, serif', 'text-background-color': '#07080e',
         'text-background-opacity': 0.7, 'text-background-padding': '2px',
-        'transition-property': 'opacity, line-color, width', 'transition-duration': '200ms',
+        'transition-property': 'opacity, line-color, line-opacity, width', 'transition-duration': '200ms',
       },
     },
-    {
-      selector: 'edge.kind-canon',
-      style: {
-        'line-style': 'solid',
-        'line-color': 'rgba(200,148,58,0.35)',
-      },
-    },
-    {
-      selector: 'edge.kind-theory',
-      style: {
-        'line-style': 'dashed',
-        'line-color': 'rgba(160,110,210,0.65)',
-      },
-    },
-    {
-      selector: 'edge.kind-theory.highlighted',
-      style: { 'line-color': 'rgba(190,150,235,0.95)', 'opacity': 1 },
-    },
+    ...buildKindEdgeStyles(edgeTheme),
     {
       selector: 'edge.kind-theory.dimmed',
       style: { 'opacity': FLOOR_OPACITY },
     },
     {
-      selector: 'edge.kind-ship',
-      style: {
-        'line-style': 'dashed',
-        'line-color': 'rgba(235,100,160,0.8)',
-      },
-    },
-    {
-      selector: 'edge.kind-ship.highlighted',
-      style: { 'line-color': 'rgba(255,140,190,0.98)', 'opacity': 1 },
-    },
-    {
       selector: 'edge.kind-ship.dimmed',
       style: { 'opacity': FLOOR_OPACITY },
     },
+    ...buildDirectionArrowStyles(edgeTheme),
     ...edgeTierStyles,
     { selector: 'edge.dimmed',     style: { 'opacity': FLOOR_OPACITY } },
     { selector: 'edge.path-edge',  style: { 'opacity': 1, 'line-color': 'rgba(200,148,58,0.85)', 'width': 4 } },
@@ -1109,8 +1382,142 @@ function buildStyle() {
   ];
 }
 
-function LegendPanel({ selectedNoteId, tutorialRefs = null }) {
+/** Preset swatches for the in-app edge color picker (no native OS dialog). */
+const EDGE_COLOR_PRESETS = [
+  '#c8943a', '#d4a84a', '#e2d5bb',
+  '#9664c8', '#7a50a8',
+  '#d05090', '#c07088',
+  '#6a9cb8', '#7ab87a', '#a08060',
+];
+
+/**
+ * In-app color picker: preset swatches + hex field (Chronicler styling).
+ * @param {{ value: string, onChange: (hex: string) => void, label: string }} props
+ */
+function ChroniclerColorPicker({ value, onChange, label }) {
   const [open, setOpen] = useState(false);
+  const [hexDraft, setHexDraft] = useState(value);
+  const wrapRef = useRef(null);
+
+  useEffect(() => { setHexDraft(value); }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const commitHex = () => {
+    const v = hexDraft.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v.toLowerCase());
+    else setHexDraft(value);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        aria-label={`${label} color`}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: 32, height: 26, padding: 2, borderRadius: 4, cursor: 'pointer',
+          background: '#07080e', border: `1px solid ${open ? 'rgba(200,148,58,0.55)' : 'rgba(200,148,58,0.35)'}`,
+        }}
+      >
+        <span style={{ display: 'block', width: '100%', height: '100%', borderRadius: 2, background: value }} />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', left: 0, top: '100%', marginTop: 4, zIndex: 50,
+            background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)',
+            borderRadius: 6, padding: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.8)', width: 156,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.65)', marginBottom: 8 }}>
+            {label.toUpperCase()}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 5, marginBottom: 10 }}>
+            {EDGE_COLOR_PRESETS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                aria-label={`Set color ${c}`}
+                onClick={() => { onChange(c); setOpen(false); }}
+                style={{
+                  width: 24, height: 24, borderRadius: 3, padding: 0, cursor: 'pointer',
+                  background: c,
+                  border: c.toLowerCase() === value.toLowerCase() ? '2px solid #e2d5bb' : '1px solid rgba(255,255,255,0.1)',
+                  boxShadow: c.toLowerCase() === value.toLowerCase() ? '0 0 6px rgba(200,148,58,0.4)' : 'none',
+                }}
+              />
+            ))}
+          </div>
+          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.55)', marginBottom: 4 }}>HEX</div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input
+              type="text"
+              value={hexDraft}
+              onChange={(e) => setHexDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { commitHex(); setOpen(false); } }}
+              onBlur={commitHex}
+              style={{
+                flex: 1, minWidth: 0, padding: '5px 8px', borderRadius: 3,
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.25)',
+                color: '#e2d5bb', fontFamily: 'monospace', fontSize: 11, outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => { commitHex(); setOpen(false); }}
+              style={{
+                padding: '4px 7px', borderRadius: 3, cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px',
+                background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', color: '#c8943a',
+              }}
+            >
+              SET
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Brightness slider styled for the graph legend panel.
+ * @param {{ value: number, onChange: (n: number) => void, accentColor: string, label: string }} props
+ */
+function ChroniclerBrightnessSlider({ value, onChange, accentColor, label }) {
+  const pct = Math.round(value * 100);
+  return (
+    <input
+      type="range"
+      min={5}
+      max={100}
+      value={pct}
+      aria-label={label}
+      onChange={(e) => onChange(Number(e.target.value) / 100)}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        height: 20,
+        margin: 0,
+        cursor: 'pointer',
+        accentColor: accentColor || '#c8943a',
+      }}
+    />
+  );
+}
+
+function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRefs = null }) {
+  const [open, setOpen] = useState(false);
+  const panelW = 210;
   return (
     <div style={{
       position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
@@ -1121,14 +1528,16 @@ function LegendPanel({ selectedNoteId, tutorialRefs = null }) {
         pointerEvents: 'all',
         background: 'rgba(7,8,14,0.92)', border: '1px solid rgba(200,148,58,0.3)',
         borderLeft: 'none', borderRadius: '0 6px 6px 0',
-        padding: open ? '14px 16px' : '0',
-        width: open ? '160px' : '0',
-        overflow: 'hidden',
+        padding: open ? '14px 12px' : '0',
+        width: open ? `${panelW}px` : '0',
+        maxHeight: 'min(88vh, 720px)',
+        overflowY: open ? 'auto' : 'hidden',
+        overflowX: 'hidden',
         transition: 'width 0.22s ease, padding 0.22s ease',
         backdropFilter: 'blur(10px)',
         flexShrink: 0,
       }}>
-        <div style={{ width: '140px' }}>
+        <div style={{ width: `${panelW - 24}px` }}>
           <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CATEGORIES</div>
           {[
             { cat: 'npc', label: 'NPC' }, { cat: 'location', label: 'Location' },
@@ -1152,19 +1561,66 @@ function LegendPanel({ selectedNoteId, tutorialRefs = null }) {
           </div>
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
             <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CONNECTIONS</div>
+            {EDGE_KIND_META.map(({ key, label }) => {
+              const t = edgeTheme?.[key] || DEFAULT_EDGE_THEME[key];
+              const dash = key !== 'canon';
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                  <span style={{ width: '22px', flexShrink: 0, borderTop: `2px ${dash ? 'dashed' : 'solid'} ${t.color}`, opacity: t.brightness }} />
+                  <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
+            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>DIRECTION</div>
             {[
-              { label: 'Canon', line: 'rgba(200,148,58,0.75)', dash: false },
-              { label: 'Theory', line: 'rgba(160,110,210,0.85)', dash: true },
-              { label: 'Ship', line: 'rgba(235,100,160,0.9)', dash: true },
-            ].map(({ label, line, dash }) => (
+              { label: 'Both ways', glyph: '—' },
+              { label: 'One way', glyph: '→' },
+            ].map(({ label, glyph }) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
-                <span style={{ width: '22px', flexShrink: 0, borderTop: `2px ${dash ? 'dashed' : 'solid'} ${line}` }} />
+                <span style={{ fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(200,148,58,0.55)', width: '22px', flexShrink: 0, textAlign: 'center' }}>{glyph}</span>
                 <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
               </div>
             ))}
           </div>
+          {onEdgeThemeChange && edgeTheme && (
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>EDGE APPEARANCE</div>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px', lineHeight: 1.4 }}>
+                Color and brightness per link type (line, label, arrows)
+              </div>
+              {EDGE_KIND_META.map(({ key, label }) => (
+                <div key={key} style={{ marginBottom: '12px' }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', marginBottom: '5px', letterSpacing: '0.06em' }}>{label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ChroniclerColorPicker
+                      label={label}
+                      value={edgeTheme[key].color}
+                      onChange={(color) => onEdgeThemeChange((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], color },
+                      }))}
+                    />
+                    <ChroniclerBrightnessSlider
+                      label={`${label} edge brightness`}
+                      accentColor={edgeTheme[key].color}
+                      value={edgeTheme[key].brightness}
+                      onChange={(brightness) => onEdgeThemeChange((prev) => ({
+                        ...prev,
+                        [key]: { ...prev[key], brightness },
+                      }))}
+                    />
+                    <span style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(200,148,58,0.55)', width: 30, textAlign: 'right', flexShrink: 0 }}>
+                      {Math.round(edgeTheme[key].brightness * 100)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '8px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.55)' }}>
-            CLICK EDGE TO EDIT LABEL
+            CLICK EDGE TO EDIT LABEL & DIRECTION
           </div>
         </div>
       </div>
