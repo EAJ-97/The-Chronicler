@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import api from '../api.js';
 import { getGraphCampaignRoots } from '../utils/campaignTree.js';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
+import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
 
 /**
  * Parses SQLite datetime strings into a JavaScript Date (UTC-safe for "Z" suffix).
@@ -239,7 +240,11 @@ export default function TimelineView({ notes, currentUser }) {
                       }}
                     >
                       <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', lineHeight: 1.75, color: '#e2d5bb' }} className="md-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={chroniclerUrlTransform}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          urlTransform={chroniclerUrlTransform}
+                          components={buildMarkdownComponents()}
+                        >
                           {entry.content || ''}
                         </ReactMarkdown>
                       </div>

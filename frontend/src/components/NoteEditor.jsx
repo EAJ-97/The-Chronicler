@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
+import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
 import {
@@ -389,6 +390,13 @@ export default function NoteEditor({
   const canManageUi = canManage && (!underArchive || isAdminUser) && !demoReadOnly;
   /** Same as legacy `canEdit`: full content edit only (DM append uses a separate textarea). */
   const canEdit = canEditContent;
+
+  /** Shared markdown link + zoomable image renderers for preview panes. */
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents({ onOpenReferenceNote }),
+    [onOpenReferenceNote],
+  );
+
   /** Folders: icon + description when user can manage or fully edit the folder */
   const canFolderStyle = !!(note?.is_folder && (canManage || canFullEdit));
   const folderTreeKind = useMemo(() => {
@@ -3045,46 +3053,7 @@ export default function NoteEditor({
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   urlTransform={chroniclerUrlTransform}
-                  components={{
-                    a: ({ href, children }) => {
-                      const h = href != null ? String(href).trim() : '';
-                      if (h && /^note:\d+$/i.test(h)) {
-                        const nid = parseInt(h.replace(/^note:/i, ''), 10);
-                        return (
-                          <button
-                            type="button"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: onOpenReferenceNote ? 'pointer' : 'default',
-                              color: '#c8943a',
-                              textDecoration: 'underline',
-                              fontFamily: 'inherit',
-                              fontSize: 'inherit',
-                              padding: 0,
-                            }}
-                            onClick={(ev) => {
-                              ev.preventDefault();
-                              ev.stopPropagation();
-                              if (onOpenReferenceNote) onOpenReferenceNote(nid);
-                            }}
-                          >
-                            {children}
-                          </button>
-                        );
-                      }
-                      return (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: '#c8943a' }}
-                        >
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
+                  components={markdownComponents}
                 >
                   {content || '*No content yet.*'}
                 </ReactMarkdown>
@@ -3112,121 +3081,23 @@ export default function NoteEditor({
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   urlTransform={chroniclerUrlTransform}
-                  components={{
-                    a: ({ href, children }) => {
-                      const h = href != null ? String(href).trim() : '';
-                      if (h && /^note:\d+$/i.test(h)) {
-                        const nid = parseInt(h.replace(/^note:/i, ''), 10);
-                        return (
-                          <button
-                            type="button"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: onOpenReferenceNote ? 'pointer' : 'default',
-                              color: '#c8943a',
-                              textDecoration: 'underline',
-                              fontFamily: 'inherit',
-                              fontSize: 'inherit',
-                              padding: 0,
-                            }}
-                            onClick={(ev) => {
-                              ev.preventDefault();
-                              ev.stopPropagation();
-                              if (onOpenReferenceNote) onOpenReferenceNote(nid);
-                            }}
-                          >
-                            {children}
-                          </button>
-                        );
-                      }
-                      return (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ color: '#c8943a' }}
-                        >
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
+                  components={markdownComponents}
                 >
                   {folderDmContent || '*No DM notes yet.*'}
                 </ReactMarkdown>
               </div>
-            <style>{`
-              .md-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
-              .md-content h1, .md-content h2, .md-content h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 16px 0 6px; }
-              .md-content p { margin: 0 0 10px; }
-              .md-content ul, .md-content ol { padding-left: 20px; margin: 0 0 10px; }
-              .md-content blockquote { border-left: 2px solid rgba(200,148,58,0.3); margin: 0 0 10px; padding: 4px 12px; color: rgba(226,213,187,0.6); font-style: italic; }
-              .md-content code { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 5px; font-size: 14px; font-family: monospace; }
-              .md-content strong { color: #e2d5bb; } .md-content em { color: rgba(226,213,187,0.75); }
-              .md-content hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 14px 0; }
-              .md-content a { color: #c8943a; }
-            `}</style>
+            <style>{MARKDOWN_BASE_CSS}</style>
             </div>
           ) : (
           <div style={S.preview} className="md-content">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               urlTransform={chroniclerUrlTransform}
-              components={{
-                a: ({ href, children }) => {
-                  const h = href != null ? String(href).trim() : '';
-                  if (h && /^note:\d+$/i.test(h)) {
-                    const nid = parseInt(h.replace(/^note:/i, ''), 10);
-                    return (
-                      <button
-                        type="button"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: onOpenReferenceNote ? 'pointer' : 'default',
-                          color: '#c8943a',
-                          textDecoration: 'underline',
-                          fontFamily: 'inherit',
-                          fontSize: 'inherit',
-                          padding: 0,
-                        }}
-                        onClick={(ev) => {
-                          ev.preventDefault();
-                          ev.stopPropagation();
-                          if (onOpenReferenceNote) onOpenReferenceNote(nid);
-                        }}
-                      >
-                        {children}
-                      </button>
-                    );
-                  }
-                  return (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: '#c8943a' }}
-                    >
-                      {children}
-                    </a>
-                  );
-                },
-              }}
+              components={markdownComponents}
             >
               {content || '*No content yet.*'}
             </ReactMarkdown>
-            <style>{`
-              .md-content img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
-              .md-content h1, .md-content h2, .md-content h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 16px 0 6px; }
-              .md-content p { margin: 0 0 10px; }
-              .md-content ul, .md-content ol { padding-left: 20px; margin: 0 0 10px; }
-              .md-content blockquote { border-left: 2px solid rgba(200,148,58,0.3); margin: 0 0 10px; padding: 4px 12px; color: rgba(226,213,187,0.6); font-style: italic; }
-              .md-content code { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 5px; font-size: 14px; font-family: monospace; }
-              .md-content strong { color: #e2d5bb; } .md-content em { color: rgba(226,213,187,0.75); }
-              .md-content hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 14px 0; }
-              .md-content a { color: #c8943a; }
-            `}</style>
+            <style>{MARKDOWN_BASE_CSS}</style>
           </div>
           )
         )}

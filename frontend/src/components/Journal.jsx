@@ -7,6 +7,7 @@ import RecapViewer from './RecapViewer.jsx';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { getGraphCampaignRoots, isUnderCompletedArchive } from '../utils/campaignTree.js';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
+import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
 
 function parseSQLiteDate(dateStr) {
   if (!dateStr) return new Date(NaN);
@@ -954,7 +955,11 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(139,196,226,0.45)', marginBottom: '8px' }}>PREVIEW</div>
                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', lineHeight: 1.65, color: '#e2d5bb' }}>
                   {loreText.trim() ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={chroniclerUrlTransform}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      urlTransform={chroniclerUrlTransform}
+                      components={buildMarkdownComponents()}
+                    >
                       {loreText}
                     </ReactMarkdown>
                   ) : (

@@ -1,6 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
+import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
 import { getCategoryColor } from './NoteEditor.jsx';
 
 /**
@@ -31,49 +32,9 @@ export default function ReferencePeekPanel({
   const color = getCategoryColor(note?.category);
 
   /**
-   * Markdown `a` handler: `note:123` opens the reference stack; other links open in a new tab.
+   * Markdown overrides: `note:` links and zoomable uploaded images.
    */
-  const mdComponents = {
-    a: ({ href, children }) => {
-      const h = href != null ? String(href).trim() : '';
-      if (/^note:\d+$/i.test(h)) {
-        const nid = parseInt(h.replace(/^note:/i, ''), 10);
-        return (
-          <button
-            type="button"
-            className="ref-peek-md-link"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: '#c8943a',
-              textDecoration: 'underline',
-              fontFamily: 'inherit',
-              fontSize: 'inherit',
-              padding: 0,
-            }}
-            onClick={(ev) => {
-              ev.preventDefault();
-              ev.stopPropagation();
-              if (typeof onOpenReference === 'function') onOpenReference(nid);
-            }}
-          >
-            {children}
-          </button>
-        );
-      }
-      return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: '#c8943a' }}
-        >
-          {children}
-        </a>
-      );
-    },
-  };
+  const mdComponents = buildMarkdownComponents({ onOpenReferenceNote: onOpenReference });
 
   const shellStyle = isMobile
     ? {
@@ -299,36 +260,11 @@ export default function ReferencePeekPanel({
         .ref-peek-top-page {
           animation: refPeekPageIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         }
-        .md-ref-peek h1, .md-ref-peek h2, .md-ref-peek h3 {
-          font-family: 'Cinzel', serif;
-          color: #c8943a;
-          margin: 14px 0 6px;
-          letter-spacing: 0.04em;
-        }
         .md-ref-peek h1 { font-size: 17px; }
         .md-ref-peek h2 { font-size: 15px; }
         .md-ref-peek h3 { font-size: 14px; }
-        .md-ref-peek p { margin: 0 0 8px; }
-        .md-ref-peek ul, .md-ref-peek ol { padding-left: 18px; margin: 0 0 8px; }
         .md-ref-peek li { margin-bottom: 3px; }
-        .md-ref-peek blockquote {
-          border-left: 2px solid rgba(200,148,58,0.3);
-          margin: 0 0 8px;
-          padding: 4px 10px;
-          color: rgba(226,213,187,0.55);
-          font-style: italic;
-        }
-        .md-ref-peek code {
-          background: rgba(255,255,255,0.06);
-          border-radius: 2px;
-          padding: 1px 5px;
-          font-size: 13px;
-          font-family: monospace;
-        }
-        .md-ref-peek strong { color: #e2d5bb; font-weight: 600; }
-        .md-ref-peek em { color: rgba(226,213,187,0.75); }
-        .md-ref-peek hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 12px 0; }
-        .md-ref-peek img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 8px 0; }
+        ${MARKDOWN_BASE_CSS}
       `}</style>
     </div>
   );

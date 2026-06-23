@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
 import { getCategoryColor } from './NoteEditor.jsx';
 
 /**
@@ -72,7 +73,7 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
         }}>
           {note?.content ? (
             <div className="md-preview">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={buildMarkdownComponents()}>{note.content}</ReactMarkdown>
             </div>
           ) : (
             <span style={{ color: 'rgba(226,213,187,0.2)', fontStyle: 'italic' }}>No content yet.</span>
@@ -89,19 +90,7 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
         DOUBLE-CLICK NODE TO OPEN FULL EDITOR
       </div>
 
-      <style>{`
-        .md-preview h1, .md-preview h2, .md-preview h3 { font-family: 'Cinzel', serif; color: #c8943a; margin: 14px 0 6px; letter-spacing: 0.04em; }
-        .md-preview h1 { font-size: 16px; } .md-preview h2 { font-size: 14px; } .md-preview h3 { font-size: 13px; }
-        .md-preview p { margin: 0 0 8px; }
-        .md-preview ul, .md-preview ol { padding-left: 18px; margin: 0 0 8px; }
-        .md-preview li { margin-bottom: 3px; }
-        .md-preview blockquote { border-left: 2px solid rgba(200,148,58,0.3); margin: 0 0 8px; padding: 4px 10px; color: rgba(226,213,187,0.5); font-style: italic; }
-        .md-preview code { background: rgba(255,255,255,0.06); border-radius: 2px; padding: 1px 5px; font-size: 13px; font-family: monospace; }
-        .md-preview strong { color: #e2d5bb; font-weight: 600; }
-        .md-preview em { color: rgba(226,213,187,0.75); }
-        .md-preview hr { border: none; border-top: 1px solid rgba(200,148,58,0.15); margin: 12px 0; }
-        .md-preview a { color: #c8943a; }
-      `}</style>
+      <style>{MARKDOWN_BASE_CSS}</style>
     </div>
   );
 }
