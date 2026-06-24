@@ -52,7 +52,7 @@ function groupSessions(sessions, entries, serverNow) {
 
 const INDENT_PX = 24;
 
-export default function Journal({ notes, selectedNoteId, currentUser, dmCampaignIds = [], tutorialRefs = null }) {
+export default function Journal({ notes, selectedNoteId, currentUser, dmCampaignIds = [], tutorialRefs = null, tutorialCampaignId = null }) {
   const windowWidth = useWindowWidth();
   const isMobile = windowWidth <= 600;
   const [sessions, setSessions]         = useState([]);
@@ -107,34 +107,36 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     setActiveFolderIdRaw(id);
     try { if (id) localStorage.setItem(folderKey, String(id)); else localStorage.removeItem(folderKey); } catch {}
   };
+  /** Tutorial override — does not write localStorage so the user's prior pick is restored after the tour. */
+  const resolvedFolderId = tutorialCampaignId ?? activeFolderId;
 
   /** True when the user may view/edit DM prep checklists for the selected journal campaign. */
   const canPrepForJournal = useMemo(() => {
-    if (!activeFolderId) return false;
+    if (!resolvedFolderId) return false;
     if (currentUser?.is_admin) return true;
-    return (dmCampaignIds || []).includes(activeFolderId);
-  }, [activeFolderId, currentUser?.is_admin, dmCampaignIds]);
+    return (dmCampaignIds || []).includes(resolvedFolderId);
+  }, [resolvedFolderId, currentUser?.is_admin, dmCampaignIds]);
 
   /**
    * Folder row for the selected journal campaign — used to re-sync archive state when notes list updates (e.g. completion toggled).
    */
   const activeJournalFolderRow = useMemo(
-    () => (activeFolderId != null ? (notes || []).find((n) => Number(n.id) === Number(activeFolderId)) : null),
-    [notes, activeFolderId],
+    () => (resolvedFolderId != null ? (notes || []).find((n) => Number(n.id) === Number(resolvedFolderId)) : null),
+    [notes, resolvedFolderId],
   );
 
   /** GET /notes/:id `under_completed_archive` (DB walk); null until loaded. */
   const [journalArchiveFromServer, setJournalArchiveFromServer] = useState(null);
 
   useEffect(() => {
-    if (!activeFolderId) {
+    if (!resolvedFolderId) {
       setJournalArchiveFromServer(null);
       return;
     }
     let cancelled = false;
     setJournalArchiveFromServer(null);
     api
-      .get(`/notes/${activeFolderId}`)
+      .get(`/notes/${resolvedFolderId}`)
       .then((r) => {
         if (!cancelled) setJournalArchiveFromServer(!!r.data?.under_completed_archive);
       })
@@ -144,20 +146,20 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     return () => {
       cancelled = true;
     };
-  }, [activeFolderId, activeJournalFolderRow?.updated_at, activeJournalFolderRow?.is_completed]);
+  }, [resolvedFolderId, activeJournalFolderRow?.updated_at, activeJournalFolderRow?.is_completed]);
 
   /** Client walk (strict is_completed) while server flag is unknown; then prefer server result. */
-  const journalLockedClient = activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId);
+  const journalLockedClient = resolvedFolderId != null && isUnderCompletedArchive(notes, resolvedFolderId);
   const journalLocked =
-    activeFolderId != null &&
+    resolvedFolderId != null &&
     !currentUser?.is_admin &&
     (journalArchiveFromServer !== null ? journalArchiveFromServer : journalLockedClient);
 
   /** localStorage key: whether the Lore So Far panel is open for this user + campaign. */
   const loreOpenKey = useMemo(() => {
-    if (!currentUser?.id || !activeFolderId) return null;
-    return `chronicler_lore_panel_open_${currentUser.id}_${activeFolderId}`;
-  }, [currentUser?.id, activeFolderId]);
+    if (!currentUser?.id || !resolvedFolderId) return null;
+    return `chronicler_lore_panel_open_${currentUser.id}_${resolvedFolderId}`;
+  }, [currentUser?.id, resolvedFolderId]);
 
   /** Restore open/closed Lore panel preference when the active campaign changes. */
   useEffect(() => {
@@ -186,11 +188,11 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
   /** When the panel is open, load cached lore from GET /api/ai/lore/:campaignId. */
   useEffect(() => {
-    if (!lorePanelOpen || !activeFolderId) return;
+    if (!lorePanelOpen || !resolvedFolderId) return;
     let cancelled = false;
     setLoreLoading(true);
     setLoreErr('');
-    api.get(`/ai/lore/${activeFolderId}`)
+    api.get(`/ai/lore/${resolvedFolderId}`)
       .then((r) => {
         if (!cancelled) {
           setLoreText(r.data.content || '');
@@ -204,14 +206,14 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         if (!cancelled) setLoreLoading(false);
       });
     return () => { cancelled = true; };
-  }, [lorePanelOpen, activeFolderId]);
+  }, [lorePanelOpen, resolvedFolderId]);
 
   /**
    * Calls POST /api/ai/lore/:id/generate (does not persist unless user clicks Save).
    */
   const handleLoreGenerate = async () => {
     if (journalLocked) return;
-    if (!activeFolderId) return;
+    if (!resolvedFolderId) return;
     if (!aiEnabled) {
       setLoreErr('AI is disabled in Admin settings.');
       return;
@@ -219,7 +221,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     setLoreBusy(true);
     setLoreErr('');
     try {
-      const r = await api.post(`/ai/lore/${activeFolderId}/generate`, { save: false });
+      const r = await api.post(`/ai/lore/${resolvedFolderId}/generate`, { save: false });
       setLoreText(r.data.content || '');
       setLoreUpdatedAt(r.data.updated_at || null);
     } catch (e) {
@@ -232,11 +234,11 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   /** Persists current lore text with PUT /api/ai/lore/:id. */
   const handleLoreSave = async () => {
     if (journalLocked) return;
-    if (!activeFolderId) return;
+    if (!resolvedFolderId) return;
     setLoreBusy(true);
     setLoreErr('');
     try {
-      const r = await api.put(`/ai/lore/${activeFolderId}`, { content: loreText });
+      const r = await api.put(`/ai/lore/${resolvedFolderId}`, { content: loreText });
       setLoreUpdatedAt(r.data.updated_at || null);
     } catch (e) {
       setLoreErr(e.response?.data?.error || e.message || 'Save failed');
@@ -246,17 +248,18 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   };
 
   useEffect(() => {
+    if (tutorialCampaignId != null) return;
     if (journalCampaignRoots.length === 0) return;
     const ids = new Set(journalCampaignRoots.map((f) => f.id));
     if (activeFolderId == null || !ids.has(activeFolderId)) {
       setActiveFolderId(journalCampaignRoots[0].id);
     }
-  }, [journalCampaignRoots, activeFolderId]);
+  }, [journalCampaignRoots, activeFolderId, tutorialCampaignId]);
 
   const loadEntries = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await api.get('/journal', { params: activeFolderId ? { folder_id: activeFolderId } : {} });
+      const res = await api.get('/journal', { params: resolvedFolderId ? { folder_id: resolvedFolderId } : {} });
       const newSessions = res.data.sessions || [];
       setSessions(newSessions);
       // Pre-load usage for all sessions
@@ -278,7 +281,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         setRecapServerReady(!!aiRes.data.recap_generation_ready);
       } catch {}
     } catch (err) { console.error(err); } finally { if (!silent) setLoading(false); }
-  }, [activeFolderId]);
+  }, [resolvedFolderId]);
 
   useEffect(() => { loadEntries(false); }, [loadEntries]);
 
@@ -324,7 +327,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     prevLengthRef.current = newLen;
   }, [entries, loading]);
 
-  useEffect(() => { prevLengthRef.current = 0; }, [activeFolderId]);
+  useEffect(() => { prevLengthRef.current = 0; }, [resolvedFolderId]);
 
   useEffect(() => {
     if (editingId && editRef.current) {
@@ -345,7 +348,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       const res = await api.post('/journal', {
         content,
         indent_level: indent,
-        folder_id: activeFolderId,
+        folder_id: resolvedFolderId,
         session_id: currentSessionId,
         after_id: insertAfterId,
       });
@@ -381,7 +384,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const handleNewSession = async () => {
     if (journalLocked) return;
     try {
-      const res = await api.post('/journal/sessions', { folder_id: activeFolderId });
+      const res = await api.post('/journal/sessions', { folder_id: resolvedFolderId });
       setSessions(prev => [...prev, res.data]);
     } catch (err) { console.error(err); }
   };
@@ -582,13 +585,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               Move <em>Session {movingSession.sessionNum}</em> to:
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px' }}>
-              {journalCampaignRoots.filter(f => f.id !== activeFolderId).map(f => (
+              {journalCampaignRoots.filter(f => f.id !== resolvedFolderId).map(f => (
                 <button key={f.id} onClick={() => handleMoveSession(f.id)}
                   style={{ padding: '10px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.8)', textAlign: 'left' }}>
                   {f.title}
                 </button>
               ))}
-              {journalCampaignRoots.filter(f => f.id !== activeFolderId).length === 0 && (
+              {journalCampaignRoots.filter(f => f.id !== resolvedFolderId).length === 0 && (
                 <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-30)' }}>No other campaigns to move to.</div>
               )}
             </div>
@@ -834,8 +837,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 minWidth: isMobile ? undefined : '160px',
               }}
               ref={tutorialRefs?.campaignPicker || null}
-              value={activeFolderId || ''}
+              value={resolvedFolderId || ''}
               onChange={e => setActiveFolderId(e.target.value ? parseInt(e.target.value) : null)}
+              disabled={tutorialCampaignId != null}
             >
               {journalCampaignRoots.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
             </select>
@@ -851,7 +855,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 background: lorePanelOpen ? 'rgba(139,196,226,0.12)' : 'rgba(255,255,255,0.04)',
                 border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'var(--ch-text-primary-20)'}`,
                 borderRadius: '3px',
-                cursor: activeFolderId ? 'pointer' : 'not-allowed',
+                cursor: resolvedFolderId ? 'pointer' : 'not-allowed',
                 fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
@@ -860,7 +864,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               }}
               onClick={() => persistLorePanelOpen(!lorePanelOpen)}
               title="AI summary of visible campaign notes + journal (per-user cache)"
-              disabled={!activeFolderId}
+              disabled={!resolvedFolderId}
             >
               📜 Lore So Far
             </button>
@@ -872,16 +876,16 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid var(--ch-text-primary-20)',
                 borderRadius: '3px',
-                cursor: !activeFolderId || journalLocked ? 'not-allowed' : 'pointer',
+                cursor: !resolvedFolderId || journalLocked ? 'not-allowed' : 'pointer',
                 fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
-                color: !activeFolderId || journalLocked ? 'var(--ch-text-primary-25)' : 'var(--ch-text-primary-60)',
+                color: !resolvedFolderId || journalLocked ? 'var(--ch-text-primary-25)' : 'var(--ch-text-primary-60)',
                 whiteSpace: 'nowrap',
               }}
               onClick={handleNewSession}
               title={journalLocked ? 'Journal is read-only while this campaign is marked completed' : 'Start a new session'}
-              disabled={!activeFolderId || journalLocked}
+              disabled={!resolvedFolderId || journalLocked}
             >
               ⚔ New Session
             </button>
@@ -895,7 +899,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       </div>
 
       {/* Lore So Far — visibility-safe AI summary; per-user cache on server */}
-      {lorePanelOpen && activeFolderId && (
+      {lorePanelOpen && resolvedFolderId && (
         <div ref={tutorialRefs?.lorePanel || null} style={{
           flexShrink: 0,
           maxHeight: 'min(42vh, 480px)',
@@ -998,7 +1002,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       <div ref={tutorialRefs?.sessionsList || scrollAreaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '0 12px 16px' : '0 24px 16px' }}>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--ch-font-display)', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em', fontSize: '12px' }}>LOADING...</div>
-        ) : !activeFolderId ? (
+        ) : !resolvedFolderId ? (
           <div style={{ padding: '60px 0', textAlign: 'center', fontFamily: 'var(--ch-font-body)', fontSize: '15px', color: 'var(--ch-text-primary-20)' }}>Select a campaign above to view its journal</div>
         ) : groups.length === 0 ? (
           <div style={{ padding: '60px 0', textAlign: 'center' }}>
@@ -1175,7 +1179,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             <button onClick={() => setInsertAfterId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.5)', fontSize: '12px', padding: 0 }}>✕</button>
           </div>
         )}
-        {!currentSessionId && activeFolderId && !loading && (
+        {!currentSessionId && resolvedFolderId && !loading && (
           <div style={{ marginBottom: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)' }}>
             No session yet —{' '}
             <button
@@ -1198,7 +1202,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             </button>
           </div>
         )}
-        {isMobile && activeFolderId && currentSessionId && (
+        {isMobile && resolvedFolderId && currentSessionId && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <button
               type="button"
@@ -1238,15 +1242,15 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={!activeFolderId ? 'Select a campaign above first...' : !currentSessionId ? 'Start a session first...' : insertAfterId ? 'Insert entry here...' : indentLevel === 0 ? 'Log an entry...' : 'Sub-note...'}
-            disabled={!activeFolderId || !currentSessionId || journalLocked}
+            placeholder={!resolvedFolderId ? 'Select a campaign above first...' : !currentSessionId ? 'Start a session first...' : insertAfterId ? 'Insert entry here...' : indentLevel === 0 ? 'Log an entry...' : 'Sub-note...'}
+            disabled={!resolvedFolderId || !currentSessionId || journalLocked}
             autoFocus
           />
           {isMobile && inputValue.trim() && (
             <button
               type="button"
               onClick={() => submitEntry(inputValue, indentLevel)}
-              disabled={journalLocked || !activeFolderId || !currentSessionId}
+              disabled={journalLocked || !resolvedFolderId || !currentSessionId}
               style={{
                 background: 'rgba(200,148,58,0.15)',
                 border: '1px solid rgba(200,148,58,0.4)',

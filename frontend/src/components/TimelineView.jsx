@@ -122,7 +122,7 @@ function groupNotesByCategory(notes, search) {
  *   onSelectNote?: (id: number) => void,
  * }} props
  */
-export default function TimelineView({ notes, currentUser, dmCampaignIds = [], tutorialRefs = null, onSelectNote }) {
+export default function TimelineView({ notes, currentUser, dmCampaignIds = [], tutorialRefs = null, onSelectNote, tutorialCampaignId = null }) {
   const [entries, setEntries] = useState([]);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -209,18 +209,22 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     } catch { /* ignore */ }
   };
 
+  /** Tutorial override — does not write localStorage so the user's prior pick is restored after the tour. */
+  const resolvedFolderId = tutorialCampaignId ?? activeFolderId;
+
   useEffect(() => {
+    if (tutorialCampaignId != null) return;
     if (campaignRoots.length === 0) return;
     const ids = new Set(campaignRoots.map((f) => f.id));
     if (activeFolderId == null || !ids.has(activeFolderId)) {
       setActiveFolderId(campaignRoots[0].id);
     }
-  }, [campaignRoots, activeFolderId]);
+  }, [campaignRoots, activeFolderId, tutorialCampaignId]);
 
-  const extendKey = `chronicler_timeline_extend_${currentUser?.id || 'anon'}_${activeFolderId || 'none'}`;
+  const extendKey = `chronicler_timeline_extend_${currentUser?.id || 'anon'}_${resolvedFolderId || 'none'}`;
 
   useEffect(() => {
-    if (!activeFolderId) return;
+    if (!resolvedFolderId) return;
     contentFitDoneRef.current = false;
     try {
       const raw = localStorage.getItem(extendKey);
@@ -228,14 +232,14 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     } catch {
       setAxisExtend({ left: 0, right: 0 });
     }
-  }, [extendKey, activeFolderId]);
+  }, [extendKey, resolvedFolderId]);
 
   useEffect(() => {
-    if (!activeFolderId) return;
+    if (!resolvedFolderId) return;
     try {
       localStorage.setItem(extendKey, JSON.stringify(axisExtend));
     } catch { /* ignore */ }
-  }, [axisExtend, extendKey, activeFolderId]);
+  }, [axisExtend, extendKey, resolvedFolderId]);
 
   const contentOffsetX = axisExtend.left;
 
@@ -254,11 +258,11 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
   const toStoredAnchorX = useCallback((displayX) => displayX - contentOffsetX, [contentOffsetX]);
 
   const loadTimeline = useCallback(async () => {
-    if (!activeFolderId) return;
+    if (!resolvedFolderId) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get('/timeline', { params: { folder_id: activeFolderId } });
+      const res = await api.get('/timeline', { params: { folder_id: resolvedFolderId } });
       const points = res.data.points || [];
       setEntries(points);
       setCanEdit(!!res.data.can_edit);
@@ -273,7 +277,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     } finally {
       setLoading(false);
     }
-  }, [activeFolderId, windowWidth]);
+  }, [resolvedFolderId, windowWidth]);
 
   useEffect(() => {
     loadTimeline();
@@ -284,7 +288,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
       try {
         const raw = e.data || e.detail;
         const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (msg.type === 'timeline_changed' && msg.folder_id === activeFolderId) {
+        if (msg.type === 'timeline_changed' && msg.folder_id === resolvedFolderId) {
           if (interactionRef.current) return;
           if (Date.now() < wsIgnoreUntilRef.current) return;
           loadTimeline();
@@ -293,7 +297,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     };
     window.addEventListener('ws_timeline', handler);
     return () => window.removeEventListener('ws_timeline', handler);
-  }, [loadTimeline, activeFolderId]);
+  }, [loadTimeline, resolvedFolderId]);
 
   const viewportW = scrollViewportW || windowWidth || 720;
   const { canvasHeight, lineY: timelineLineY } = useMemo(
@@ -359,16 +363,16 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
   }, [entries, interaction]);
 
   const timelineLocked = useMemo(
-    () => activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId),
-    [notes, activeFolderId]
+    () => resolvedFolderId != null && isUnderCompletedArchive(notes, resolvedFolderId),
+    [notes, resolvedFolderId]
   );
 
   const showEditTools = canEdit && !timelineLocked;
 
   const campaignNotes = useMemo(() => {
-    if (!activeFolderId) return [];
-    return notesInCampaignSubtree(notes, activeFolderId);
-  }, [notes, activeFolderId]);
+    if (!resolvedFolderId) return [];
+    return notesInCampaignSubtree(notes, resolvedFolderId);
+  }, [notes, resolvedFolderId]);
 
   /**
    * Maps a mouse event to SVG user coordinates via the SVG transform matrix.
@@ -784,7 +788,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
    */
   const finishInteraction = useCallback(async () => {
     const current = interactionRef.current;
-    if (!current || !activeFolderId) {
+    if (!current || !resolvedFolderId) {
       setInteraction(null);
       pointerStartRef.current = null;
       return;
@@ -801,7 +805,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
       setBusy(true);
       try {
         const res = await api.post('/timeline/points', {
-          folder_id: activeFolderId,
+          folder_id: resolvedFolderId,
           anchor_x: storedAnchorX,
           end_x: endX,
           end_y: endY,
@@ -855,7 +859,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     if (current.mode === 'pan') {
       return;
     }
-  }, [activeFolderId, loadTimeline, saveEntryGeometry, patchEntryGeometry, entries, handleBoxOpen]);
+  }, [resolvedFolderId, loadTimeline, saveEntryGeometry, patchEntryGeometry, entries, handleBoxOpen]);
 
   useEffect(() => {
     if (!interaction) return undefined;
@@ -937,8 +941,9 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
         <span style={headerLabelStyle}>CAMPAIGN</span>
         <select
           ref={tutorialRefs?.campaignPicker || null}
-          value={activeFolderId ?? ''}
+          value={resolvedFolderId ?? ''}
           onChange={(e) => setActiveFolderId(e.target.value ? parseInt(e.target.value, 10) : null)}
+          disabled={tutorialCampaignId != null}
           style={selectStyle}
         >
           {campaignRoots.map((f) => (

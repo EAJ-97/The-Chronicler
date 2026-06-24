@@ -334,9 +334,10 @@ export default function Dashboard({ user, onLogout }) {
 
   /** Clear selection when the selected note is hidden with demo folders toggle. */
   useEffect(() => {
+    if (tutorialOpen) return;
     if (!hideDemoFolders || selectedNoteId == null || !notes.length) return;
     if (!notesForList.some((n) => n.id === selectedNoteId)) setSelectedNoteId(null);
-  }, [hideDemoFolders, selectedNoteId, notes, notesForList]);
+  }, [tutorialOpen, hideDemoFolders, selectedNoteId, notes, notesForList]);
 
   const tutorialModel = useMemo(() => {
     return buildTutorialSteps({ isAdmin: !!user?.is_admin, demoSeeded: !!user?.demo_seeded });
@@ -344,6 +345,12 @@ export default function Dashboard({ user, onLogout }) {
 
   const tutorialSteps = tutorialModel.steps || [];
   const tutorialChapters = tutorialModel.chapters || [];
+
+  /** While the tutorial runs, pin graph/journal/timeline to the Sunken Vale demo campaign. */
+  const tutorialCampaignId = useMemo(() => {
+    if (!tutorialOpen || !user?.demo_seeded) return null;
+    return findSunkenValeRootId(notes);
+  }, [tutorialOpen, user?.demo_seeded, notes]);
 
   /** Live markdown snippet for tutorial card examples (e.g. demo note links). */
   const tutorialCardExampleMarkdown = useMemo(() => {
@@ -430,6 +437,26 @@ export default function Dashboard({ user, onLogout }) {
     if (tutorialStep >= tutorialSteps.length) setTutorialStep(0);
   }, [tutorialOpen, tutorialStep, tutorialSteps.length]);
 
+  /**
+   * While the tutorial runs, force demo folders visible so Sunken Vale steps work.
+   * Restores the user's prior hide/show preference when the tutorial closes.
+   */
+  useEffect(() => {
+    if (!tutorialOpen || !user?.demo_seeded) return undefined;
+    if (hideDemoRestoreRef.current == null) {
+      hideDemoRestoreRef.current = hideDemoFolders;
+    }
+    if (hideDemoRestoreRef.current) {
+      setHideDemoFoldersPersist(false);
+    }
+    return () => {
+      if (hideDemoRestoreRef.current != null) {
+        setHideDemoFoldersPersist(!!hideDemoRestoreRef.current);
+        hideDemoRestoreRef.current = null;
+      }
+    };
+  }, [tutorialOpen, user?.demo_seeded, setHideDemoFoldersPersist]);
+
   /** Tutorial step orchestration: force view/admin/tab/selection and per-component hints. */
   useEffect(() => {
     if (!tutorialOpen) {
@@ -443,21 +470,11 @@ export default function Dashboard({ user, onLogout }) {
       setTutorialGraphForceToolMenu(false);
       setTutorialForceNoteEditMode(false);
       setTutorialExpandAdminVault(false);
-      if (hideDemoRestoreRef.current != null) {
-        setHideDemoFoldersPersist(!!hideDemoRestoreRef.current);
-        hideDemoRestoreRef.current = null;
-      }
       return;
     }
 
     const step = tutorialSteps[tutorialStep];
     const ui = step?.ui || {};
-
-    // Prevent “hide demo” from breaking demo-driven steps.
-    if (!!user?.demo_seeded) {
-      if (hideDemoRestoreRef.current == null) hideDemoRestoreRef.current = hideDemoFolders;
-      if (hideDemoFolders) setHideDemoFoldersPersist(false);
-    }
 
     // Admin panel visibility + tab.
     if (ui.openAdmin) {
@@ -480,18 +497,18 @@ export default function Dashboard({ user, onLogout }) {
       setMobileMenuOpen(false);
     }
 
-    // Select Sunken Vale demo root.
-    if (ui.selectSunkenVale) {
-      const rootId = findSunkenValeRootId(notes);
-      if (rootId != null) setSelectedNoteId(rootId);
-    }
-    if (ui.selectDemoNoteTitle) {
-      const demoNote = findDemoNoteByTitle(notes, ui.selectDemoNoteTitle);
-      if (demoNote?.id != null) setSelectedNoteId(demoNote.id);
-    }
-    if (ui.clearSelection) {
-      setSelectedNoteId(null);
-      setGraphPanelNoteId(null);
+    // Default tutorial selection to Sunken Vale; per-step overrides for specific notes or vault empty state.
+    if (user?.demo_seeded) {
+      if (ui.clearSelection) {
+        setSelectedNoteId(null);
+        setGraphPanelNoteId(null);
+      } else if (ui.selectDemoNoteTitle) {
+        const demoNote = findDemoNoteByTitle(notes, ui.selectDemoNoteTitle);
+        if (demoNote?.id != null) setSelectedNoteId(demoNote.id);
+      } else {
+        const rootId = findSunkenValeRootId(notes);
+        if (rootId != null) setSelectedNoteId(rootId);
+      }
     }
 
     // Backup actions: force sidebar root actions visible for Sunken Vale.
@@ -514,7 +531,7 @@ export default function Dashboard({ user, onLogout }) {
     setTutorialGraphForceToolMenu(!!ui.graphForceToolMenu);
     setTutorialForceNoteEditMode(!!ui.forceNoteEditMode);
     setTutorialExpandAdminVault(!!ui.expandAdminVault);
-  }, [tutorialOpen, tutorialStep, tutorialSteps, notes, user?.demo_seeded, hideDemoFolders, setHideDemoFoldersPersist]);
+  }, [tutorialOpen, tutorialStep, tutorialSteps, notes, user?.demo_seeded]);
   const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
   const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
     : simulatedRole ? []
@@ -1520,6 +1537,7 @@ export default function Dashboard({ user, onLogout }) {
                   tutorialForce3D={tutorialGraphForce3D}
                   tutorialForce2D={tutorialGraphForce2D}
                   tutorialForceToolMenu={tutorialGraphForceToolMenu}
+                  tutorialCampaignId={tutorialCampaignId}
                   tutorialRefs={{
                     canvas: graphCanvasRef,
                     campaignSelect: graphCampaignSelectRef,
@@ -1565,6 +1583,7 @@ export default function Dashboard({ user, onLogout }) {
               selectedNoteId={selectedNoteId}
               currentUser={user}
               dmCampaignIds={effectiveDmCampaignIds}
+              tutorialCampaignId={tutorialCampaignId}
               tutorialRefs={{
                 shell: journalShellRef,
                 campaignPicker: journalCampaignPickerRef,
@@ -1586,6 +1605,7 @@ export default function Dashboard({ user, onLogout }) {
               notes={notesForList}
               currentUser={user}
               dmCampaignIds={effectiveDmCampaignIds}
+              tutorialCampaignId={tutorialCampaignId}
               tutorialRefs={{
                 shell: timelineShellRef,
                 campaignPicker: timelineCampaignPickerRef,

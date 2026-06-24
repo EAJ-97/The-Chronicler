@@ -244,7 +244,7 @@ function setGraphStyleTransitions(cy, enabled) {
     .update();
 }
 
-export default memo(function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false, tutorialForceToolMenu = false }) {
+export default memo(function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false, tutorialForceToolMenu = false, tutorialCampaignId = null }) {
   const { theme } = useTheme();
   const edgeTheme = theme.edges;
   const devGraphToolsEnabled = useDevGraphToolsEnabled();
@@ -359,6 +359,8 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     setActiveCampaignIdRaw(id);
     try { if (id) localStorage.setItem(campaignKey, String(id)); else localStorage.removeItem(campaignKey); } catch {}
   };
+  /** Tutorial override — does not write localStorage so the user's prior pick is restored after the tour. */
+  const resolvedCampaignId = tutorialCampaignId ?? activeCampaignId;
   const [is3D, setIs3DRaw] = useState(() => {
     try { return localStorage.getItem(is3DKey) === 'true'; } catch { return false; }
   });
@@ -372,10 +374,10 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
   // DM View — show DM-only notes; only available to DMs/admins
   const dmViewKey = `chronicler_graph_dmview_${currentUser?.id || 'anon'}`;
   const isAdminUser = !simulatedRole && !!currentUser?.is_admin;
-  const isDMOfActiveCampaign = isAdminUser || (dmCampaignIds || []).includes(activeCampaignId);
+  const isDMOfActiveCampaign = isAdminUser || (dmCampaignIds || []).includes(resolvedCampaignId);
   /** Completed campaign/world: no new graph edges or label edits for non-admins. */
   const webReadOnly =
-    activeCampaignId != null && isUnderCompletedArchive(allNotes || [], activeCampaignId) && !isAdminUser;
+    resolvedCampaignId != null && isUnderCompletedArchive(allNotes || [], resolvedCampaignId) && !isAdminUser;
 
   const safeCreateConnection = useCallback(
     (sourceId, targetId, opts) => {
@@ -395,17 +397,18 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
 
   // Auto-select first playable campaign; migrate away from stale world-root ids in localStorage
   useEffect(() => {
+    if (tutorialCampaignId != null) return;
     if (graphCampaignRoots.length === 0) return;
     const ids = new Set(graphCampaignRoots.map((f) => f.id));
     if (activeCampaignId == null || !ids.has(activeCampaignId)) {
       setActiveCampaignId(graphCampaignRoots[0].id);
     }
-  }, [graphCampaignRoots, activeCampaignId]);
+  }, [graphCampaignRoots, activeCampaignId, tutorialCampaignId]);
 
   // Filter notes + connections to active campaign subtree (memoized — avoids fingerprint churn)
   const subtreeIds = useMemo(
-    () => (activeCampaignId ? getSubtreeIds(allNotes || [], activeCampaignId) : null),
-    [allNotes, activeCampaignId]
+    () => (resolvedCampaignId ? getSubtreeIds(allNotes || [], resolvedCampaignId) : null),
+    [allNotes, resolvedCampaignId]
   );
   const visibleNotes = useMemo(() => {
     const subtreeNotes = subtreeIds ? notes.filter(n => subtreeIds.has(n.id)) : notes;
@@ -495,10 +498,10 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
   }, [webReadOnly, exitPathMode]);
 
   // Position key for localStorage per campaign
-  const posKey = `chronicler_graph_positions_${activeCampaignId || 'all'}`;
+  const posKey = `chronicler_graph_positions_${resolvedCampaignId || 'all'}`;
   const renderPosKey = devFixture ? BENCH_FIXTURE_POS_KEY : posKey;
-  const seenKey = `chronicler_graph_seen_${activeCampaignId || 'all'}`;
-  const manualKey = `chronicler_graph_manual_${activeCampaignId || 'all'}`;
+  const seenKey = `chronicler_graph_seen_${resolvedCampaignId || 'all'}`;
+  const manualKey = `chronicler_graph_manual_${resolvedCampaignId || 'all'}`;
 
   /**
    * Counts nodes on the canvas that the user has not yet acknowledged in highlight mode.
@@ -822,7 +825,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
 
   useEffect(() => {
     lockedRendererRef.current = null;
-  }, [activeCampaignId, rendererPref]);
+  }, [resolvedCampaignId, rendererPref]);
 
   const activeEngine = useMemo(() => {
     const threshold = effectiveGraphScoreThreshold(devScoreThreshold);
@@ -842,7 +845,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     const resolved = resolveAutoRenderer(picked, lockedRendererRef.current, score, threshold);
     lockedRendererRef.current = resolved;
     return resolved;
-  }, [renderNotes.length, renderConnections.length, rendererPref, isMobile, activeCampaignId, devScoreThreshold, devFixture]);
+  }, [renderNotes.length, renderConnections.length, rendererPref, isMobile, resolvedCampaignId, devScoreThreshold, devFixture]);
 
   const useWebGL = activeEngine === 'webgl' && !effectiveIs3D;
   useWebGLRef.current = useWebGL;
@@ -1102,7 +1105,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
       suppressHoverRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCampaignId, useWebGL]);
+  }, [resolvedCampaignId, useWebGL]);
 
   // Update graph when notes/connections change after mount
   useEffect(() => {
@@ -1177,7 +1180,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     requestAnimationFrame(() => paintZoomHudRef.current());
   }, [showZoomHud, effectiveIs3D, useWebGL]);
 
-  const activeCampaignName = graphCampaignRoots.find((f) => f.id === activeCampaignId)?.title;
+  const activeCampaignName = graphCampaignRoots.find((f) => f.id === resolvedCampaignId)?.title;
 
   const rootRef = useRef(null);
   const containerWidth = useContainerWidth(rootRef);
@@ -1302,7 +1305,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     const campaignRight = campaign.getBoundingClientRect().right;
     const toolbarLeft = toolbar.getBoundingClientRect().left;
     setIsNarrowGraph(toolbarLeft - 16 < campaignRight);
-  }, [containerWidth, activeCampaignId, isDMOfActiveCampaign, is3D]);
+  }, [containerWidth, resolvedCampaignId, isDMOfActiveCampaign, is3D]);
 
   /** Tutorial: keep the ··· overflow menu open when toolbar buttons are collapsed (e.g. large text scale). */
   useEffect(() => {
@@ -1537,8 +1540,9 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             ) : (
               <select
                 ref={tutorialRefs?.campaignSelect || null}
-                value={activeCampaignId || ''}
+                value={resolvedCampaignId || ''}
                 onChange={e => setActiveCampaignId(parseInt(e.target.value))}
+                disabled={tutorialCampaignId != null}
                 style={{
                   background: 'rgba(7,8,14,0.9)', border: '1px solid rgba(200,148,58,0.3)',
                   borderRadius: '3px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '10px',
@@ -1821,7 +1825,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             connections={renderConnections}
             onSelectNote={onSelectNote}
             onOpenNote={onOpenNote}
-            activeCampaignId={activeCampaignId}
+            activeCampaignId={resolvedCampaignId}
             connectMode={connectMode}
             onExitConnectMode={exitConnectMode}
             onCreateConnection={safeCreateConnection}
