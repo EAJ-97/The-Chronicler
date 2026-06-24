@@ -414,7 +414,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
             <>
               <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.1em', color: '#c8943a', marginBottom: '8px' }}>{preview.title}</div>
               <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.45)', margin: '0 0 10px' }}>
-                When available, the character portrait becomes the sidebar icon. Opening the note later can check D&amp;D Beyond for flavor updates.
+                The portrait appears in the note under the name and as the sidebar icon (scaled to fit). Opening the note later can check D&amp;D Beyond for flavor updates.
               </p>
               <div style={{ maxHeight: '320px', overflowY: 'auto', padding: '12px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px', fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.75)' }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={chroniclerUrlTransform}>{preview.content}</ReactMarkdown>

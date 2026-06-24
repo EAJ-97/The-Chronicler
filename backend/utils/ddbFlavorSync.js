@@ -9,6 +9,33 @@ const lastCheckByNote = new Map();
 
 const DDB_CHARACTER_ID_RE = /<!--\s*ddb-character-id:\s*(\d+)\s*-->/i;
 
+/** Managed portrait URL embedded in note markdown (matches sidebarIcon.js). */
+const PORTRAIT_IN_CONTENT_RE = /!\[[^\]]*\]\((\/api\/images\/files\/[a-f0-9]{32}\.(?:jpe?g|png|gif|webp))\)/i;
+
+const MANAGED_ICON_URL_RE = /^\/api\/images\/files\/([a-f0-9]{32}\.(?:jpe?g|png|gif|webp))$/i;
+
+/**
+ * Extracts a managed portrait URL from imported note markdown, if present.
+ * @param {string} content
+ * @returns {string|null}
+ */
+function extractPortraitUrlFromContent(content) {
+  const m = String(content || '').match(PORTRAIT_IN_CONTENT_RE);
+  return m ? m[1] : null;
+}
+
+/**
+ * Resolves portrait URL from note body or legacy sidebar icon field.
+ * @param {{ content?: string, display_icon?: string|null }} note
+ * @returns {string|null}
+ */
+function resolvePortraitUrlForNote(note) {
+  const fromContent = extractPortraitUrlFromContent(note?.content);
+  if (fromContent) return fromContent;
+  const icon = String(note?.display_icon || '').trim();
+  return MANAGED_ICON_URL_RE.test(icon) ? icon : null;
+}
+
 /**
  * Parses linked D&D Beyond character id from note row or markdown comment.
  * @param {{ ddb_character_id?: number|null, content?: string }} note
@@ -37,10 +64,11 @@ function isDdbLinkedNote(note, tags) {
 /**
  * Builds flavor markdown payload from raw D&D Beyond character JSON.
  * @param {object} data
+ * @param {{ portraitUrl?: string|null }} [options]
  * @returns {{ title: string, content: string, tags: string[], characterId: number|null }}
  */
-function buildFlavorMarkdown(data) {
-  const { title, content, tags } = characterToMarkdown(data);
+function buildFlavorMarkdown(data, options = {}) {
+  const { title, content, tags } = characterToMarkdown(data, options);
   const characterId = parseInt(data?.id ?? data?.characterId, 10) || null;
   return { title, content, tags, characterId };
 }
@@ -127,4 +155,6 @@ module.exports = {
   clearNoteCheckCooldown,
   compareFlavor,
   contentPreview,
+  extractPortraitUrlFromContent,
+  resolvePortraitUrlForNote,
 };

@@ -22,7 +22,6 @@ import {
   isManagedSidebarIconUrl,
 } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
-import { isDdbLinkedNote } from '../utils/ddbCobalt.js';
 
 /**
  * If the cursor is in an active @mention segment on the current line, returns the query text (may
@@ -452,13 +451,6 @@ export default function NoteEditor({
   );
   const showContinuityTab = showAiToolsTab;
   const showRootToolsTabBar = showIconsTab || showAiToolsTab;
-
-  /** D&D Beyond import portrait shown under the title (full size, not sidebar thumbnail). */
-  const ddbPortraitUrl = useMemo(() => {
-    if (!note || note.is_folder || !isDdbLinkedNote(note)) return null;
-    const icon = displayIcon || note.display_icon || '';
-    return isManagedSidebarIconUrl(icon) ? icon.trim() : null;
-  }, [note, displayIcon]);
 
   /**
    * All descendant folders under continuityFolderId (recursive), sorted by title — NPC target picker.
@@ -1990,23 +1982,6 @@ export default function NoteEditor({
             </div>
           )}
         </div>
-        {ddbPortraitUrl && (
-          <div style={{ marginBottom: '16px' }}>
-            <img
-              src={ddbPortraitUrl}
-              alt={`${title || note?.title || 'Character'} portrait from D&D Beyond`}
-              style={{
-                display: 'block',
-                maxWidth: 'min(300px, 100%)',
-                width: 'auto',
-                height: 'auto',
-                borderRadius: '6px',
-                border: '1px solid rgba(200,148,58,0.28)',
-                boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
-              }}
-            />
-          </div>
-        )}
         <div style={{ ...S.metaRow, WebkitOverflowScrolling: 'touch' }} className="toolbar-scroll">
           {!note?.is_folder && <select
             style={{ ...S.select, borderColor: `${getCategoryColor(category)}50`, color: getCategoryColor(category), ...(isMobile ? { minHeight: '44px', fontSize: '14px' } : {}) }}

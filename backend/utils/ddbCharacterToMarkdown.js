@@ -331,19 +331,33 @@ function collectNotesSections(data) {
 }
 
 /**
+ * Escapes alt text for markdown image syntax.
+ * @param {string} name
+ * @returns {string}
+ */
+function portraitAltText(name) {
+  return String(name || 'Character').replace(/[\[\]]/g, '');
+}
+
+/**
  * Converts D&D Beyond v5 character JSON to a slim Chronicler note (name, class, backstory, description, notes).
  * @param {object} data - Raw character.data from character-service
+ * @param {{ portraitUrl?: string|null }} [options] - Optional managed `/api/images/files/*` URL inserted under the name
  * @returns {{ title: string, content: string, tags: string[] }}
  */
-function characterToMarkdown(data) {
+function characterToMarkdown(data, options = {}) {
   const id = data.id ?? data.characterId;
   const name = data.name || 'Unnamed Character';
   const classSummary = formatClasses(data.classes);
   const backstory = readNotesField(data, 'backstory');
   const backgroundSections = collectBackgroundSections(data);
   const notesSections = collectNotesSections(data);
+  const portraitUrl = options.portraitUrl ? String(options.portraitUrl).trim() : '';
 
   const sections = [`# ${name}`];
+  if (portraitUrl) {
+    sections.push(`![${portraitAltText(name)}](${portraitUrl})`);
+  }
   if (classSummary) sections.push(`**Class:** ${classSummary}`);
   if (backstory) sections.push(`## Backstory\n\n${backstory}`);
   if (backgroundSections.length) {

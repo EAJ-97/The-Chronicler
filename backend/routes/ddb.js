@@ -3,6 +3,7 @@ const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
+const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 const {
   testCobalt,
   listCharacters,
@@ -21,6 +22,8 @@ const {
   clearNoteCheckCooldown,
   compareFlavor,
   contentPreview,
+  extractPortraitUrlFromContent,
+  resolvePortraitUrlForNote,
 } = require('../utils/ddbFlavorSync');
 
 const router = express.Router();
@@ -298,7 +301,8 @@ router.post('/character/fetch', authenticateToken, async (req, res) => {
     if (!characterId) return res.status(400).json({ error: 'character_id or character URL is required' });
 
     const data = await fetchCharacter(cobalt, characterId);
-    const preview = characterToMarkdown(data);
+    const previewPortrait = await downloadCharacterAvatar(data);
+    const preview = characterToMarkdown(data, { portraitUrl: previewPortrait });
     return res.json({ character_id: characterId, ...preview });
   } catch (err) {
     const sent = sendDdbError(err, res);
@@ -320,12 +324,12 @@ router.post('/import', authenticateToken, async (req, res) => {
     if (parentId == null) return res.status(400).json({ error: 'parent_id is required' });
 
     const data = await fetchCharacter(cobalt, characterId);
-    const { title, content, tags } = characterToMarkdown(data);
-    const displayIcon = await downloadCharacterAvatar(data);
+    const portraitUrl = await downloadCharacterAvatar(data);
+    const { title, content, tags } = characterToMarkdown(data, { portraitUrl });
     const hash = flavorHash(content);
 
     const note = createImportedNote(req.user.id, parentId, title, content, tags, {
-      displayIcon,
+      displayIcon: portraitUrl,
       characterId,
       flavorHashValue: hash,
     });
@@ -391,7 +395,8 @@ router.post('/flavor/check', authenticateToken, async (req, res) => {
     }
 
     recordNoteCheck(req.user.id, noteId);
-    const fresh = buildFlavorMarkdown(data);
+    const portraitUrl = resolvePortraitUrlForNote(note);
+    const fresh = buildFlavorMarkdown(data, { portraitUrl });
     const comparison = compareFlavor(note, fresh);
 
     if (!comparison.has_updates && !note.ddb_flavor_hash) {
@@ -444,15 +449,22 @@ router.post('/flavor/apply', authenticateToken, async (req, res) => {
     assertRateLimit(req.user.id);
     const cobalt = req.body?.cobalt ? String(req.body.cobalt).trim() : '';
     const data = await fetchCharacter(cobalt, characterId);
-    const fresh = buildFlavorMarkdown(data);
+    let portraitUrl = resolvePortraitUrlForNote(note);
+    if (!portraitUrl) portraitUrl = await downloadCharacterAvatar(data);
+    const fresh = buildFlavorMarkdown(data, { portraitUrl });
     const hash = flavorHash(fresh.content);
+
+    const prevIcon = note.display_icon;
+    if (prevIcon && isManagedSidebarIconUrl(prevIcon) && prevIcon !== portraitUrl) {
+      unlinkManagedSidebarIconFile(prevIcon);
+    }
 
     db.prepare(`
       UPDATE notes
-      SET title = ?, content = ?, ddb_character_id = ?, ddb_flavor_hash = ?,
+      SET title = ?, content = ?, display_icon = ?, ddb_character_id = ?, ddb_flavor_hash = ?,
           ddb_flavor_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(fresh.title, fresh.content, characterId, hash, noteId);
+    `).run(fresh.title, fresh.content, portraitUrl, characterId, hash, noteId);
 
     const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(noteId);
     if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
