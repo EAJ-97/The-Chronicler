@@ -133,6 +133,8 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   const [axisExtend, setAxisExtend] = useState({ left: 0, right: 0 });
   const [scrollViewportW, setScrollViewportW] = useState(720);
   const [shiftHeld, setShiftHeld] = useState(false);
+  /** Axis hover position for the “click and drag to add point” hint (SVG x), or null. */
+  const [axisHover, setAxisHover] = useState(null);
 
   const scrollRef = useRef(null);
   const svgRef = useRef(null);
@@ -602,6 +604,17 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   }, [fetchNoteWithContent]);
 
   /**
+   * True when a point lies on the interactive timeline axis (for create + hover hint).
+   * @param {{ x: number, y: number }} pt
+   * @returns {boolean}
+   */
+  const isOnTimelineAxis = useCallback((pt) => (
+    Math.abs(pt.y - TIMELINE_LINE_Y) <= LINE_HIT
+    && pt.x >= TIMELINE_AXIS_PAD
+    && pt.x <= canvasWidth - TIMELINE_AXIS_PAD
+  ), [canvasWidth]);
+
+  /**
    * Starts a new branch drag, pan, or ignores hits on interactive elements.
    * @param {MouseEvent} e
    */
@@ -610,11 +623,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
     const pt = eventToSvg(e);
     if (!pt) return;
 
-    const onAxis = Math.abs(pt.y - TIMELINE_LINE_Y) <= LINE_HIT
-      && pt.x >= TIMELINE_AXIS_PAD
-      && pt.x <= canvasWidth - TIMELINE_AXIS_PAD;
-
-    if (showEditTools && onAxis) {
+    if (showEditTools && isOnTimelineAxis(pt)) {
       e.preventDefault();
       setInteraction({
         mode: 'create',
@@ -682,12 +691,20 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   };
 
   /**
-   * Updates create or reposition drags while the pointer moves.
+   * Updates axis hover hint and handles active drag interactions.
    * @param {MouseEvent} e
    */
   const handleSvgMouseMove = (e) => {
-    if (!interaction) return;
     const pt = eventToSvg(e);
+    if (pt) {
+      if (!interaction && showEditTools && isOnTimelineAxis(pt)) {
+        setAxisHover({ x: pt.x });
+      } else if (!interaction) {
+        setAxisHover(null);
+      }
+    }
+
+    if (!interaction) return;
     if (!pt) return;
 
     if (interaction.mode === 'create') {
@@ -916,7 +933,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
         </select>
         <span style={hintStyle}>
           {showEditTools
-            ? 'Drag the line to place events; drag empty space to pan; Past / Present add space (hold Shift on hover to trim)'
+            ? 'Drag empty space to pan; Past / Present add space (hold Shift on hover to trim)'
             : 'Drag empty space to pan along the timeline'}
         </span>
         {timelineLocked && (
@@ -955,11 +972,12 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
                 ? 'grabbing'
                 : interaction
                   ? 'grabbing'
-                  : 'grab',
+                  : 'default',
               userSelect: 'none',
             }}
             onMouseDown={handleSvgMouseDown}
             onMouseMove={handleSvgMouseMove}
+            onMouseLeave={() => setAxisHover(null)}
           >
             <line
               x1={TIMELINE_AXIS_PAD}
@@ -978,6 +996,22 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
               strokeWidth={3}
               strokeLinecap="round"
             />
+
+            {axisHover && showEditTools && !interaction && (
+              <g pointerEvents="none">
+                <text
+                  x={axisHover.x}
+                  y={TIMELINE_LINE_Y - 22}
+                  textAnchor="middle"
+                  fill="rgba(200,148,58,0.8)"
+                  fontFamily="Cinzel, serif"
+                  fontSize="9"
+                  letterSpacing="0.12em"
+                >
+                  Click and drag to add point
+                </text>
+              </g>
+            )}
 
             <TimelineAxisLabel
               hitX={TIMELINE_AXIS_PAD}
