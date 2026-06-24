@@ -67,6 +67,29 @@ export function getGraphCampaignRoots(allNotes) {
 }
 
 /**
+ * All note/folder ids in the subtree rooted at `rootId` (includes the root).
+ * @param {Array<object>} allNotes
+ * @param {number} rootId
+ * @returns {Set<number>}
+ */
+export function getSubtreeIds(allNotes, rootId) {
+  const childrenOf = new Map();
+  for (const n of allNotes || []) {
+    const pid = n.parent_id;
+    if (!childrenOf.has(pid)) childrenOf.set(pid, []);
+    childrenOf.get(pid).push(n.id);
+  }
+  const ids = new Set();
+  const queue = [rootId];
+  while (queue.length) {
+    const id = queue.shift();
+    ids.add(id);
+    for (const cid of (childrenOf.get(id) || [])) queue.push(cid);
+  }
+  return ids;
+}
+
+/**
  * True when this folder row is a world root, standalone campaign root, or campaign folder directly under a world
  * (matches backend `isCompletionScopeRoot` — only these rows may store `is_completed`).
  * @param {object} note - Row from /api/notes

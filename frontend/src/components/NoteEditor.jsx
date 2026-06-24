@@ -9,6 +9,7 @@ import MoveModal from './MoveModal.jsx';
 import {
   notesByIdMap,
   getCampaignFolderIdForSelection,
+  getSubtreeIds,
   isCompletionScopeRootNote,
   isUnderCompletedArchive,
 } from '../utils/campaignTree.js';
@@ -1012,6 +1013,17 @@ export default function NoteEditor({
     [allTags, tagInput, tags],
   );
 
+  /** Playable campaign folder containing the open note — limits connection search to that subtree. */
+  const connectionCampaignId = useMemo(
+    () => (note?.id ? getCampaignFolderIdForSelection(notes, note.id) : null),
+    [notes, note?.id],
+  );
+
+  const connectionScopeIds = useMemo(() => {
+    if (connectionCampaignId == null) return null;
+    return getSubtreeIds(notes, connectionCampaignId);
+  }, [notes, connectionCampaignId]);
+
   const filteredNotes = useMemo(() => {
     const connsHere = connections.filter(
       (c) => c.source_note_id === note?.id || c.target_note_id === note?.id,
@@ -1019,15 +1031,20 @@ export default function NoteEditor({
     const ids = new Set(
       connsHere.map((c) => (c.source_note_id === note?.id ? c.target_note_id : c.source_note_id)),
     );
+    const q = connSearch.toLowerCase();
     return notes
       .filter(
         (n) =>
           n.id !== note?.id &&
           !ids.has(n.id) &&
-          n.title.toLowerCase().includes(connSearch.toLowerCase()),
+          !n.is_folder &&
+          (connectionScopeIds != null
+            ? connectionScopeIds.has(n.id)
+            : getCampaignFolderIdForSelection(notes, n.id) == null) &&
+          n.title.toLowerCase().includes(q),
       )
       .slice(0, 8);
-  }, [notes, note?.id, connSearch, connections]);
+  }, [notes, note?.id, connSearch, connections, connectionScopeIds]);
 
   /**
    * Updates fixed-position rect for the connection suggestion portal from connInputRef.
