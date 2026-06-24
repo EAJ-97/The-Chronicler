@@ -1,7 +1,9 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
-import { getCategoryColor } from './NoteEditor.jsx';
+import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
+import { buildMarkdownCss } from '../theme/markdownCss.js';
+import { useTheme } from '../theme/useTheme.js';
+import { getCategoryColor } from '../theme/categoryColors.js';
 
 /**
  * Graph-side note preview panel.
@@ -10,6 +12,7 @@ import { getCategoryColor } from './NoteEditor.jsx';
  * @param {{ note: any, notes: any[], connections: any[], onClose: () => void, isMobile?: boolean }} props
  */
 export default function NotePanel({ note, notes, connections, onClose, isMobile = false }) {
+  const { theme } = useTheme();
   const color = getCategoryColor(note?.category);
 
   return (
@@ -19,7 +22,7 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      background: '#0a0c14',
+      background: 'var(--ch-panel-bg)',
       borderRight: isMobile ? 'none' : '1px solid rgba(200,148,58,0.15)',
       overflow: 'hidden',
     }}>
@@ -35,8 +38,8 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontFamily: 'Cinzel', fontSize: '13px', fontWeight: '500',
-            color: '#e2d5bb', letterSpacing: '0.03em',
+            fontFamily: 'var(--ch-font-display)', fontSize: '13px', fontWeight: '500',
+            color: 'var(--ch-text-primary)', letterSpacing: '0.03em',
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             marginBottom: '4px',
           }}>
@@ -44,15 +47,15 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, flexShrink: 0 }} />
-            <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: `${color}aa`, textTransform: 'uppercase' }}>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: `${color}aa`, textTransform: 'uppercase' }}>
               {note?.category}
             </span>
             {note?.is_shared || note?.visibility === 'shared' ? (
-              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.4)' }}>⚔ SHARED</span>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.4)' }}>⚔ SHARED</span>
             ) : (note?.granted_users?.length > 0) ? (
-              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.3)' }}>👁 +{note.granted_users.length}</span>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.3)' }}>👁 +{note.granted_users.length}</span>
             ) : (
-              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.2)' }}>🔒 PRIVATE</span>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.2)' }}>🔒 PRIVATE</span>
             )}
           </div>
         </div>
@@ -69,7 +72,7 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
         <div style={{
           padding: '16px',
           fontFamily: 'Crimson Pro, serif', fontSize: '15px',
-          lineHeight: '1.75', color: '#e2d5bb',
+          lineHeight: '1.75', color: 'var(--ch-text-primary)',
         }}>
           {note?.content ? (
             <div className="md-preview">
@@ -84,13 +87,13 @@ export default function NotePanel({ note, notes, connections, onClose, isMobile 
       {/* Footer */}
       <div style={{
         padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.04)',
-        flexShrink: 0, fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+        flexShrink: 0, fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
         color: 'rgba(200,148,58,0.2)', textAlign: 'center',
       }}>
         DOUBLE-CLICK NODE TO OPEN FULL EDITOR
       </div>
 
-      <style>{MARKDOWN_BASE_CSS}</style>
+      <style>{buildMarkdownCss(theme)}</style>
     </div>
   );
 }

@@ -92,14 +92,64 @@ function mkEntry(sessionId, folderKey, authorUserId, content, indent = 0, ts) {
 // SEED
 // ---------------------------------------------------------------------------
 /**
+ * Inserts cross-note markdown links into demo content for tutorials. Idempotent.
+ * Safe to run on every boot when demo data already exists.
+ */
+function patchDemoNoteLinks() {
+  const gilded = db
+    .prepare(
+      "SELECT id FROM notes WHERE is_demo = 1 AND title = 'The Gilded Anchor' AND deleted_at IS NULL LIMIT 1",
+    )
+    .get();
+  const veldrath = db
+    .prepare(
+      "SELECT id, content FROM notes WHERE is_demo = 1 AND title = 'Veldrath City' AND deleted_at IS NULL LIMIT 1",
+    )
+    .get();
+  const sunkenLoc = db
+    .prepare(
+      "SELECT id FROM notes WHERE is_demo = 1 AND title = 'The Sunken Vale' AND is_folder = 0 AND deleted_at IS NULL LIMIT 1",
+    )
+    .get();
+  const qMain = db
+    .prepare(
+      "SELECT id, content FROM notes WHERE is_demo = 1 AND title = 'Find the Source of the Corruption' AND deleted_at IS NULL LIMIT 1",
+    )
+    .get();
+
+  if (veldrath && gilded && !String(veldrath.content).includes(`note:${gilded.id}`)) {
+    const next = String(veldrath.content).replace(
+      "- The Gilded Anchor (Boldwin's inn, party base)",
+      `- [The Gilded Anchor](note:${gilded.id}) (Boldwin's inn, party base)`,
+    );
+    if (next !== veldrath.content) {
+      db.prepare('UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, veldrath.id);
+    }
+  }
+
+  if (qMain && sunkenLoc && !String(qMain.content).includes(`note:${sunkenLoc.id}`)) {
+    const next = String(qMain.content).replace(
+      'The Sunken Vale is awakening.',
+      `[The Sunken Vale](note:${sunkenLoc.id}) is awakening.`,
+    );
+    if (next !== qMain.content) {
+      db.prepare('UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, qMain.id);
+    }
+  }
+}
+
+/**
  * Inserts the full demo dataset owned by the given admin user. Does not create users.
  * Caller must run syncDemoDmRolesForAllUsers() after a successful seed.
  * @param {number} adminUserId - Authenticated admin performing generate
- * @returns {{ skipped?: boolean, seeded?: boolean }}
+ * @returns {{ skipped?: boolean, seeded?: boolean, patched?: boolean }}
  */
 function seed(adminUserId) {
   const already = db.prepare("SELECT value FROM settings WHERE key = 'demo_seeded'").get();
-  if (already?.value === 'true') return { skipped: true };
+  if (already?.value === 'true') {
+    patchDemoNoteLinks();
+    return { skipped: true, patched: true };
+  }
 
   const run = db.transaction(() => {
     if (!adminUserId || !Number.isFinite(Number(adminUserId))) {
@@ -816,6 +866,8 @@ Use this space for clocks, fronts, and encounter math. Players only see the **pa
     db.prepare('UPDATE notes SET folder_dm_content = ? WHERE id = ?').run(dmFolderBlurb, noteId['c1']);
     db.prepare('UPDATE notes SET folder_dm_content = ? WHERE id = ?').run(dmFolderBlurb, noteId['c2']);
 
+    patchDemoNoteLinks();
+
     // Mark demo as seeded
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('demo_seeded', 'true')").run();
   });
@@ -839,4 +891,4 @@ function wipe() {
   return { wiped: true };
 }
 
-module.exports = { seed, wipe };
+module.exports = { seed, wipe, patchDemoNoteLinks };

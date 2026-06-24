@@ -51,7 +51,7 @@ function FolderOption({ node, depth, selected, onSelect }) {
         onMouseLeave={e => { if (selected !== node.id) e.currentTarget.style.background = 'transparent'; }}
       >
         <span style={{ fontSize: '12px' }}>{selected === node.id ? '📂' : '📁'}</span>
-        <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.05em', color: selected === node.id ? '#c8943a' : 'rgba(226,213,187,0.7)' }}>
+        <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.05em', color: selected === node.id ? '#c8943a' : 'rgba(226,213,187,0.7)' }}>
           {node.title}
         </span>
       </div>
@@ -84,7 +84,7 @@ function NoteTreePicker({ nodes, selectedNote, onSelect, depth = 0 }) {
               >
                 <span style={{ fontSize: '10px', color: 'rgba(200,148,58,0.5)', width: '10px', flexShrink: 0 }}>{hasKids ? (isOpen ? '▾' : '▸') : ' '}</span>
                 <span style={{ fontSize: '11px' }}>📁</span>
-                <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.65)' }}>{node.title}</span>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.65)' }}>{node.title}</span>
               </div>
               {isOpen && hasKids && (
                 <NoteTreePicker nodes={node.children} selectedNote={selectedNote} onSelect={onSelect} depth={depth + 1} />
@@ -162,20 +162,20 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         width: '100%', maxWidth: '480px', maxHeight: '85vh',
-        background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+        background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)',
         borderRadius: '4px', display: 'flex', flexDirection: 'column',
         boxShadow: '0 0 60px rgba(0,0,0,0.9)',
       }}>
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: '#c8943a' }}>PROMOTE TO NOTE</span>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'var(--ch-accent)' }}>PROMOTE TO NOTE</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.3)', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}>×</button>
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: '16px 20px' }}>
           {/* Entry preview */}
           <div style={{ padding: '10px 14px', marginBottom: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px', borderLeft: '2px solid rgba(200,148,58,0.3)' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '6px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '6px' }}>
               JOURNAL ENTRY {childCount > 0 ? `+ ${childCount} CHILD ${childCount === 1 ? 'LINE' : 'LINES'}` : ''}
             </div>
             <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.6)', lineHeight: '1.5' }}>
@@ -188,7 +188,7 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
             <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
               {[{ v: 'create', l: '+ Create New Note' }, { v: 'append', l: '→ Append to Note' }].map(({ v, l }) => (
                 <button key={v} onClick={() => setMode(v)}
-                  style={{ flex: 1, padding: '7px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', borderRadius: '3px', cursor: 'pointer', background: mode === v ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${mode === v ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`, color: mode === v ? '#c8943a' : 'rgba(226,213,187,0.35)' }}>
+                  style={{ flex: 1, padding: '7px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', borderRadius: '3px', cursor: 'pointer', background: mode === v ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${mode === v ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`, color: mode === v ? '#c8943a' : 'rgba(226,213,187,0.35)' }}>
                   {l}
                 </button>
               ))}
@@ -197,8 +197,8 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
 
           {/* Markdown preview of what will be written */}
           {markdownContent && (
-            <div style={{ marginBottom: '14px', padding: '10px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid rgba(200,148,58,0.12)', borderRadius: '3px' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '6px' }}>WILL BE WRITTEN AS</div>
+            <div style={{ marginBottom: '14px', padding: '10px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid var(--ch-border)', borderRadius: '3px' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '6px' }}>WILL BE WRITTEN AS</div>
               <pre style={{ fontFamily: 'monospace', fontSize: '12px', color: 'rgba(226,213,187,0.5)', margin: 0, whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{markdownContent}</pre>
             </div>
           )}
@@ -207,9 +207,9 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
             <>
               {/* Note title */}
               <div style={{ marginBottom: '14px' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>NOTE TITLE</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>NOTE TITLE</div>
                 <input
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '16px', padding: '8px 12px', outline: 'none', boxSizing: 'border-box' }}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', color: 'var(--ch-text-primary)', fontFamily: 'Crimson Pro, serif', fontSize: '16px', padding: '8px 12px', outline: 'none', boxSizing: 'border-box' }}
                   value={title}
                   onChange={e => setTitle(e.target.value)}
                   autoFocus
@@ -217,14 +217,14 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
               </div>
               {/* Category */}
               <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>CATEGORY</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>CATEGORY</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {CATEGORIES.map(c => {
                     const active = category === c.value;
                     const col = getCategoryColor(c.value);
                     return (
                       <button key={c.value} onClick={() => setCategory(c.value)}
-                        style={{ padding: '5px 10px', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', background: active ? `${col}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? col : 'rgba(255,255,255,0.08)'}`, color: active ? col : 'rgba(226,213,187,0.4)' }}>
+                        style={{ padding: '5px 10px', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', background: active ? `${col}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? col : 'rgba(255,255,255,0.08)'}`, color: active ? col : 'rgba(226,213,187,0.4)' }}>
                         {c.label}
                       </button>
                     );
@@ -233,13 +233,13 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
               </div>
               {/* Folder picker */}
               <div>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
-                  PLACE IN FOLDER {selectedFolderName && <span style={{ marginLeft: '8px', color: '#c8943a' }}>→ {selectedFolderName}</span>}
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
+                  PLACE IN FOLDER {selectedFolderName && <span style={{ marginLeft: '8px', color: 'var(--ch-accent)' }}>→ {selectedFolderName}</span>}
                 </div>
                 <div onClick={() => setSelectedFolder(null)}
                   style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: selectedFolder === null ? 'rgba(200,148,58,0.08)' : 'transparent', border: `1px solid ${selectedFolder === null ? 'rgba(200,148,58,0.2)' : 'transparent'}`, borderRadius: '3px', marginBottom: '2px' }}>
                   <span style={{ fontSize: '12px' }}>📂</span>
-                  <span style={{ fontFamily: 'Cinzel', fontSize: '11px', color: selectedFolder === null ? 'rgba(200,148,58,0.7)' : 'rgba(226,213,187,0.3)' }}>No folder (root level)</span>
+                  <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: selectedFolder === null ? 'rgba(200,148,58,0.7)' : 'rgba(226,213,187,0.3)' }}>No folder (root level)</span>
                 </div>
                 {tree.map(node => <FolderOption key={node.id} node={node} depth={0} selected={selectedFolder} onSelect={setSelectedFolder} />)}
               </div>
@@ -247,8 +247,8 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
           ) : (
             /* Append mode: hierarchical note tree picker */
             <div>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
-                APPEND TO NOTE {selectedNoteName && <span style={{ marginLeft: '8px', color: '#c8943a' }}>→ {selectedNoteName}</span>}
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
+                APPEND TO NOTE {selectedNoteName && <span style={{ marginLeft: '8px', color: 'var(--ch-accent)' }}>→ {selectedNoteName}</span>}
               </div>
               <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px', padding: '4px' }}>
                 <NoteTreePicker nodes={buildNoteTree(notes)} selectedNote={selectedNote} onSelect={setSelectedNote} />
@@ -260,11 +260,11 @@ export default function PromoteModal({ entry, notes, entries = [], buildMarkdown
         {/* Footer */}
         <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
           <button onClick={onClose}
-            style={{ padding: '8px 18px', background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.4)' }}>
+            style={{ padding: '8px 18px', background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.4)' }}>
             CANCEL
           </button>
           <button onClick={handleConfirm} disabled={!canConfirm || confirming}
-            style={{ padding: '8px 22px', borderRadius: '3px', cursor: canConfirm ? 'pointer' : 'not-allowed', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', background: canConfirm ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${canConfirm ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.06)'}`, color: canConfirm ? '#c8943a' : 'rgba(226,213,187,0.2)' }}>
+            style={{ padding: '8px 22px', borderRadius: '3px', cursor: canConfirm ? 'pointer' : 'not-allowed', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', background: canConfirm ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${canConfirm ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.06)'}`, color: canConfirm ? '#c8943a' : 'rgba(226,213,187,0.2)' }}>
             {confirming ? 'SAVING...' : mode === 'append' ? 'APPEND TO NOTE' : 'CREATE NOTE'}
           </button>
         </div>

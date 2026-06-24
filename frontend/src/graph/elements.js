@@ -1,4 +1,4 @@
-import { getCategoryColor } from '../components/NoteEditor.jsx';
+import { getCategoryColor } from '../theme/categoryColors.js';
 import { connectionKindClass, connectionDirectionClass } from './connections.js';
 
 /**

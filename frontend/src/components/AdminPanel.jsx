@@ -6,34 +6,45 @@ const S = {
   overlay: {
     position: 'fixed', inset: 0, zIndex: 1000,
     background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '24px',
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+    padding: 'max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom))',
+    overflowY: 'auto',
   },
   panel: {
-    width: '100%', maxWidth: '560px', maxHeight: '90vh',
+    width: 'min(680px, calc(100vw - 48px))',
+    height: 'min(85vh, 820px)',
+    maxHeight: 'min(85vh, 820px)',
+    flexShrink: 0,
     background: 'linear-gradient(160deg, #0f1219 0%, #0a0c14 100%)',
     border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px',
     display: 'flex', flexDirection: 'column',
     boxShadow: '0 0 60px rgba(0,0,0,0.9)',
+    overflow: 'hidden',
   },
   header: {
-    padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)',
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '16px 24px 0', borderBottom: '1px solid rgba(255,255,255,0.06)',
+    display: 'flex', flexDirection: 'column', gap: '12px',
     flexShrink: 0,
   },
+  headerTopRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+  },
+  tabsRow: {
+    display: 'flex', gap: '4px', flexWrap: 'wrap', paddingBottom: '14px',
+  },
   title: {
-    fontFamily: 'Cinzel', fontSize: '14px', letterSpacing: '0.2em',
-    color: '#c8943a',
+    fontFamily: 'var(--ch-font-display)', fontSize: '14px', letterSpacing: '0.2em',
+    color: 'var(--ch-accent)',
   },
   closeBtn: {
     background: 'none', border: 'none', cursor: 'pointer',
     color: 'rgba(226,213,187,0.3)', fontSize: '20px', lineHeight: 1,
     padding: '0 4px',
   },
-  body: { flex: 1, overflowY: 'auto', padding: '20px 24px' },
+  body: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px' },
   section: { marginBottom: '28px' },
   sectionTitle: {
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.25em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.25em',
     color: 'rgba(200,148,58,0.5)', textTransform: 'uppercase',
     marginBottom: '12px',
   },
@@ -44,7 +55,7 @@ const S = {
     borderRadius: '3px',
   },
   toggleLabel: {
-    fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: '#e2d5bb',
+    fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'var(--ch-text-primary)',
   },
   toggleSub: {
     fontFamily: 'Crimson Pro, serif', fontSize: '12px',
@@ -73,29 +84,29 @@ const S = {
     background: isAdmin ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.05)',
     border: `1px solid ${isAdmin ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: 'Cinzel', fontSize: '11px',
+    fontFamily: 'var(--ch-font-display)', fontSize: '11px',
     color: isAdmin ? '#c8943a' : 'rgba(226,213,187,0.4)',
   }),
   userName: {
-    flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: '#e2d5bb',
+    flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'var(--ch-text-primary)',
   },
   adminBadge: {
-    fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em',
-    color: '#c8943a', background: 'rgba(200,148,58,0.1)',
+    fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em',
+    color: 'var(--ch-accent)', background: 'rgba(200,148,58,0.1)',
     border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px',
     padding: '2px 6px',
   },
   deleteBtn: {
     background: 'rgba(139,32,53,0.15)', border: '1px solid rgba(139,32,53,0.3)',
     borderRadius: '3px', cursor: 'pointer', padding: '4px 10px',
-    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em',
     color: 'rgba(224,112,112,0.7)', transition: 'all 0.2s',
   },
   /** Opens inline form to set a user password without the current password (admin only). */
   setPwdBtn: {
     background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)',
     borderRadius: '3px', cursor: 'pointer', padding: '4px 10px',
-    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em',
     color: 'rgba(200,148,58,0.8)', transition: 'all 0.2s', flexShrink: 0,
   },
   newUserForm: {
@@ -104,20 +115,20 @@ const S = {
     marginTop: '12px',
   },
   formTitle: {
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.2em',
     color: 'rgba(200,148,58,0.4)', marginBottom: '10px',
   },
   input: {
     width: '100%', background: 'rgba(255,255,255,0.04)',
     border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px',
-    color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif',
+    color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif',
     padding: '7px 10px', outline: 'none', marginBottom: '8px',
   },
   row: { display: 'flex', gap: '8px', alignItems: 'center' },
   createBtn: {
     padding: '7px 16px', background: 'linear-gradient(135deg, #c8943a, #a07030)',
     border: 'none', borderRadius: '3px', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em',
     color: '#07080e', whiteSpace: 'nowrap',
   },
   error: {
@@ -141,7 +152,7 @@ const S = {
  * @param {() => void} [onChroniclerImportDone] - Optional; invoked after a successful JSON tree import to refresh the main app’s note list
  */
 const AdminPanel = forwardRef(function AdminPanel(
-  { currentUser, onClose, onChroniclerImportDone, initialTab = 'users', tutorialRefs = null },
+  { currentUser, onClose, onChroniclerImportDone, initialTab = 'users', tutorialExpandVault = false, tutorialRefs = null },
   ref,
 ) {
   const windowWidth = useWindowWidth();
@@ -252,7 +263,17 @@ const AdminPanel = forwardRef(function AdminPanel(
     setTab: (nextTab) => setTab(nextTab),
     /** Focuses the tab strip (best-effort). */
     focusTabs: () => tabsRowRef.current?.focus?.(),
-  }), []);
+    /** Expands the first campaign row in the vault tree (tutorial). */
+    expandFirstVault: () => {
+      if (vault.length > 0) setExpandedCampaign(vault[0].id);
+    },
+  }), [vault]);
+
+  /** Tutorial: auto-expand the first vault campaign when the tree should be visible. */
+  useEffect(() => {
+    if (!tutorialExpandVault || tab !== 'vault' || vaultLoading || vault.length === 0) return;
+    setExpandedCampaign(vault[0].id);
+  }, [tutorialExpandVault, tab, vaultLoading, vault]);
 
   /**
    * Restores a campaign folder to a saved snapshot (admin vault). snapshotLabel is optional UI text only.
@@ -377,10 +398,13 @@ const AdminPanel = forwardRef(function AdminPanel(
         background: 'linear-gradient(160deg, #0f1219 0%, #0a0c14 100%)',
         display: 'flex', flexDirection: 'column', borderRadius: 0, border: 'none',
         boxShadow: 'none', paddingTop: 'env(safe-area-inset-top)',
-      } : { ...S.panel, maxWidth: tab === 'vault' ? '680px' : '560px' }}>
+      } : { ...S.panel }}>
         <div style={S.header}>
-          <span style={S.title}>⚔ ADMIN PANEL</span>
-          <div ref={tabsRowRef} style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          <div style={S.headerTopRow}>
+            <span style={S.title}>⚔ ADMIN PANEL</span>
+            <button style={S.closeBtn} onClick={onClose}>×</button>
+          </div>
+          <div ref={tabsRowRef} style={S.tabsRow}>
             {[
               { id: 'users', label: 'PARTY' },
               { id: 'vault', label: 'VAULT' },
@@ -390,7 +414,7 @@ const AdminPanel = forwardRef(function AdminPanel(
               { id: 'password', label: 'PWD' },
             ].map(t => (
               <button key={t.id} ref={tutorialRefs?.[`tab_${t.id}`] || null} onClick={() => setTab(t.id)} style={{
-                fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em',
+                fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em',
                 padding: isMobile ? '6px 10px' : '4px 12px', minHeight: isMobile ? '36px' : 'auto',
                 borderRadius: '3px', cursor: 'pointer',
                 background: tab === t.id ? 'rgba(200,148,58,0.15)' : 'transparent',
@@ -401,7 +425,6 @@ const AdminPanel = forwardRef(function AdminPanel(
               </button>
             ))}
           </div>
-          <button style={S.closeBtn} onClick={onClose}>×</button>
         </div>
 
         {updateCheck?.updateAvailable && (
@@ -409,7 +432,7 @@ const AdminPanel = forwardRef(function AdminPanel(
             padding: '10px 20px', margin: '0 24px 0', flexShrink: 0,
             background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.35)',
             borderRadius: '3px', fontFamily: 'Crimson Pro, serif', fontSize: '13px',
-            color: '#e2d5bb',
+            color: 'var(--ch-text-primary)',
           }}>
             A new version ({updateCheck.latestTag || updateCheck.latestVersion}) is available. To update on the server: <code style={{ background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '2px' }}>git pull origin main && ./deploy.sh</code>. Your data is not deleted.
           </div>
@@ -492,10 +515,10 @@ const AdminPanel = forwardRef(function AdminPanel(
                         padding: '12px 14px',
                         background: 'rgba(0,0,0,0.22)',
                         borderRadius: '3px',
-                        border: '1px solid rgba(200,148,58,0.12)',
+                        border: '1px solid var(--ch-border)',
                       }}
                       >
-                        <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                        <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
                           NEW PASSWORD FOR {u.username.toUpperCase()}
                         </div>
                         <input
@@ -516,7 +539,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                         />
                         <label style={{
                           display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', cursor: 'pointer',
-                          fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.55)',
+                          fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'var(--ch-text-primary-55)',
                         }}
                         >
                           <input
@@ -543,7 +566,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                 <input style={S.input} placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
                 <input style={S.input} type="password" placeholder="Password (min 6 characters)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
                 <div style={S.row}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}>
                     <input type="checkbox" checked={newIsAdmin} onChange={(e) => setNewIsAdmin(e.target.checked)} />
                     ADMIN
                   </label>
@@ -563,7 +586,7 @@ const AdminPanel = forwardRef(function AdminPanel(
               <div style={{ padding: '14px', background: 'rgba(255,255,255,0.02)', border: `1px solid ${demoSeeded ? 'rgba(58,196,139,0.2)' : 'rgba(255,255,255,0.07)'}`, borderRadius: '3px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: demoSeeded ? 'rgba(58,196,139,0.8)' : 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
                 <div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', color: demoSeeded ? 'rgba(58,196,139,0.8)' : 'rgba(226,213,187,0.4)', marginBottom: '2px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', color: demoSeeded ? 'rgba(58,196,139,0.8)' : 'rgba(226,213,187,0.4)', marginBottom: '2px' }}>
                     {demoSeeded ? 'DEMO DATA ACTIVE' : 'NO DEMO DATA'}
                   </div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)' }}>
@@ -574,19 +597,19 @@ const AdminPanel = forwardRef(function AdminPanel(
               <div style={{ display: 'flex', gap: '10px' }}>
                 {!demoSeeded && (
                   <button onClick={handleGenerateDemo} disabled={demoLoading}
-                    style={{ flex: 1, padding: '10px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', color: '#c8943a' }}>
+                    style={{ flex: 1, padding: '10px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', color: 'var(--ch-accent)' }}>
                     {demoLoading ? 'GENERATING...' : '⚗ GENERATE DEMO DATA'}
                   </button>
                 )}
                 {demoSeeded && (
                   <button onClick={handleWipeDemo} disabled={demoLoading}
-                    style={{ flex: 1, padding: '10px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', background: 'rgba(139,32,53,0.15)', border: '1px solid rgba(139,32,53,0.4)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(224,112,112,0.8)' }}>
+                    style={{ flex: 1, padding: '10px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', background: 'rgba(139,32,53,0.15)', border: '1px solid rgba(139,32,53,0.4)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(224,112,112,0.8)' }}>
                     {demoLoading ? 'WIPING...' : '✕ WIPE DEMO DATA'}
                   </button>
                 )}
               </div>
               <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid rgba(200,148,58,0.1)', borderRadius: '3px' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>HOW DEMO WORKS</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>HOW DEMO WORKS</div>
                 <ul style={{ margin: 0, paddingLeft: '18px', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: 1.55 }}>
                   <li>Party members sign in with their <strong style={{ color: 'rgba(200,148,58,0.65)' }}>normal</strong> accounts — there are no extra demo passwords.</li>
                   <li>After you generate, ask users to refresh once so the sidebar and <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_seeded</strong> menu items appear.</li>
@@ -605,7 +628,7 @@ const AdminPanel = forwardRef(function AdminPanel(
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', padding: '12px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.6)', marginBottom: '3px' }}>AI FEATURES</div>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.6)', marginBottom: '3px' }}>AI FEATURES</div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: aiEnabled ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.3)' }}>
                     {aiEnabled ? 'Enabled — session recap generation' : 'Disabled — add Anthropic key below, then enable'}
                   </div>
@@ -628,7 +651,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                 </div>
               </div>
 
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.4)', marginBottom: '8px' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.4)', marginBottom: '8px' }}>
                 ANTHROPIC API KEY
               </div>
 
@@ -640,7 +663,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                     const res = await api.post('/admin/ai/clear-key');
                     applyAiSettingsResponse(res.data);
                     setAiTestResult(null);
-                  }} style={{ background: 'none', border: '1px solid rgba(200,80,80,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,80,80,0.6)', padding: '3px 8px' }}>
+                  }} style={{ background: 'none', border: '1px solid rgba(200,80,80,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,80,80,0.6)', padding: '3px 8px' }}>
                     REMOVE
                   </button>
                 </div>
@@ -665,7 +688,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                       if (res.data.warning) setAiWarning(res.data.warning);
                     } finally { setAiSaving(false); }
                   }}
-                  style={{ padding: '8px 14px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: '#c8943a', whiteSpace: 'nowrap' }}>
+                  style={{ padding: '8px 14px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'var(--ch-accent)', whiteSpace: 'nowrap' }}>
                   {aiSaving ? 'SAVING...' : 'SAVE KEY'}
                 </button>
               </div>
@@ -681,7 +704,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                       setAiTestResult({ ok: false, msg: e.response?.data?.error || 'Test failed.' });
                     } finally { setAiTesting(false); }
                   }}
-                  style={{ padding: '7px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)', marginBottom: '10px' }}>
+                  style={{ padding: '7px 14px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)', marginBottom: '10px' }}>
                   {aiTesting ? 'TESTING...' : '⚡ TEST KEY'}
                 </button>
               )}
@@ -699,7 +722,7 @@ const AdminPanel = forwardRef(function AdminPanel(
               )}
 
               <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>SECURITY NOTICE</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>SECURITY NOTICE</div>
                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)', lineHeight: '1.6' }}>
                   Your API key is stored in the database on your server only. It is never included in source code, config files, or GitHub. Only the last 4 characters are ever shown in this panel.
                 </div>
@@ -722,7 +745,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                     { label: 'LAST MODIFIED', value: backupInfo.last_modified ? new Date(backupInfo.last_modified).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown' },
                   ].map(item => (
                     <div key={item.label} style={{ flex: 1, padding: '12px 14px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px' }}>
-                      <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.3)', marginBottom: '5px' }}>{item.label}</div>
+                      <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.3)', marginBottom: '5px' }}>{item.label}</div>
                       <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.7)' }}>{item.value}</div>
                     </div>
                   ))}
@@ -758,14 +781,14 @@ const AdminPanel = forwardRef(function AdminPanel(
                   }
                 }}
                 disabled={backupLoading}
-                style={{ padding: '10px 22px', background: backupLoading ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(200,148,58,0.25), rgba(200,148,58,0.1))', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '3px', cursor: backupLoading ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: backupLoading ? 'rgba(226,213,187,0.3)' : '#c8943a' }}>
+                style={{ padding: '10px 22px', background: backupLoading ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(200,148,58,0.25), rgba(200,148,58,0.1))', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '3px', cursor: backupLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: backupLoading ? 'rgba(226,213,187,0.3)' : '#c8943a' }}>
                 {backupLoading ? '⏳ PREPARING...' : '⬇ DOWNLOAD BACKUP'}
               </button>
 
               <div style={{ marginTop: '28px', paddingTop: '24px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                 <div style={S.sectionTitle}>Chronicler JSON import</div>
                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: '1.6', marginBottom: '14px' }}>
-                  Restore a <strong style={{ color: 'rgba(226,213,187,0.65)' }}>.json</strong> file exported by a DM from a world or campaign root. Usernames in the file must exist on this server (case-insensitive match). Uploaded note images are metadata only — copy image files from the old server’s data folder if you need binaries. Leave parent folder empty to create a new top-level root.
+                  Restore a <strong style={{ color: 'var(--ch-text-primary-65)' }}>.json</strong> file exported by a DM from a world or campaign root. Usernames in the file must exist on this server (case-insensitive match). Uploaded note images are metadata only — copy image files from the old server’s data folder if you need binaries. Leave parent folder empty to create a new top-level root.
                 </div>
                 {jsonImportErr && (
                   <div style={{ padding: '8px 12px', borderRadius: '3px', marginBottom: '12px', background: 'rgba(200,80,80,0.08)', border: '1px solid rgba(200,80,80,0.25)', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(220,100,100,0.9)' }}>
@@ -777,7 +800,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                     {jsonImportMsg}
                   </div>
                 )}
-                <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>EXPORT FILE (.JSON)</label>
+                <label style={{ display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>EXPORT FILE (.JSON)</label>
                 <input
                   id="chronicler-json-import"
                   type="file"
@@ -785,7 +808,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                   disabled={jsonImportBusy}
                   style={{ width: '100%', marginBottom: '12px', fontSize: '13px', color: 'rgba(226,213,187,0.6)' }}
                 />
-                <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>PARENT FOLDER ID (OPTIONAL)</label>
+                <label style={{ display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>PARENT FOLDER ID (OPTIONAL)</label>
                 <input
                   style={{ ...S.input, marginBottom: '12px' }}
                   placeholder="Empty = new top-level tree"
@@ -827,14 +850,14 @@ const AdminPanel = forwardRef(function AdminPanel(
                       setJsonImportBusy(false);
                     }
                   }}
-                  style={{ padding: '10px 22px', background: jsonImportBusy ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(110,180,140,0.2), rgba(110,180,140,0.08))', border: '1px solid rgba(110,180,140,0.35)', borderRadius: '3px', cursor: jsonImportBusy ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: jsonImportBusy ? 'rgba(226,213,187,0.3)' : 'rgba(110,219,176,0.9)' }}
+                  style={{ padding: '10px 22px', background: jsonImportBusy ? 'rgba(255,255,255,0.03)' : 'linear-gradient(135deg, rgba(110,180,140,0.2), rgba(110,180,140,0.08))', border: '1px solid rgba(110,180,140,0.35)', borderRadius: '3px', cursor: jsonImportBusy ? 'not-allowed' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: jsonImportBusy ? 'rgba(226,213,187,0.3)' : 'rgba(110,219,176,0.9)' }}
                 >
                   {jsonImportBusy ? '⏳ IMPORTING…' : '⬆ IMPORT JSON TREE'}
                 </button>
               </div>
 
               <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: '3px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>WHAT IS INCLUDED</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(226,213,187,0.25)', marginBottom: '6px' }}>WHAT IS INCLUDED</div>
                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)', lineHeight: '1.7' }}>
                   All notes, folders, journal sessions &amp; entries, recaps, graph connections, user accounts, tags, snapshots, and app settings. The Anthropic API key is stripped before download. The file is a standard SQLite database and can be opened with any SQLite viewer.
                 </div>
@@ -851,14 +874,14 @@ const AdminPanel = forwardRef(function AdminPanel(
               <input style={{ ...S.input, marginBottom: '8px' }} type="password" placeholder="Current password" value={curPwd} onChange={e => setCurPwd(e.target.value)} />
               <input style={{ ...S.input, marginBottom: '14px' }} type="password" placeholder="New password (min 6 characters)" value={newPwd} onChange={e => setNewPwd(e.target.value)} />
               <button onClick={handleChangePassword}
-                style={{ padding: '9px 20px', background: 'linear-gradient(135deg, #c8943a, #a07030)', border: 'none', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: '#07080e' }}>
+                style={{ padding: '9px 20px', background: 'linear-gradient(135deg, #c8943a, #a07030)', border: 'none', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: '#07080e' }}>
                 CHANGE PASSWORD
               </button>
             </div>
           )}
 
           {tab === 'vault' && (
-            <div style={S.section}>
+            <div ref={tutorialRefs?.vaultTree || null} style={S.section}>
               <div style={S.sectionTitle}>Campaign Snapshot Vault</div>
               <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)', marginBottom: '16px', lineHeight: '1.5' }}>
                 All campaign snapshots across every party member. Restore any campaign to a previous state. Non-destructive — notes created after the snapshot are preserved.
@@ -884,16 +907,16 @@ const AdminPanel = forwardRef(function AdminPanel(
                       >
                         <span style={{ fontSize: '14px', flexShrink: 0 }}>📁</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.08em', color: '#e2d5bb', marginBottom: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--ch-text-primary)', marginBottom: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {campaign.title}
                           </div>
-                          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.3)' }}>
+                          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.3)' }}>
                             {campaign.owner} · {campaign.snapshots.length} snapshot{campaign.snapshots.length !== 1 ? 's' : ''}
                             {latest && <span style={{ marginLeft: '8px', color: 'rgba(200,148,58,0.4)' }}>Last: {new Date(latest.saved_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                           </div>
                         </div>
                         {campaign.snapshots.length === 0 && (
-                          <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(226,213,187,0.2)', letterSpacing: '0.1em' }}>NO SNAPSHOTS</span>
+                          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(226,213,187,0.2)', letterSpacing: '0.1em' }}>NO SNAPSHOTS</span>
                         )}
                         <span style={{ color: 'rgba(200,148,58,0.4)', fontSize: '10px', transition: 'transform 0.15s', transform: isExpanded ? 'rotate(90deg)' : 'none' }}>▶</span>
                       </div>
@@ -914,15 +937,15 @@ const AdminPanel = forwardRef(function AdminPanel(
                                       {new Date(s.saved_at).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                     {i === 0 && (
-                                      <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>
+                                      <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>
                                     )}
                                   </div>
                                   {s.label && (
-                                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(200,148,58,0.85)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
+                                    <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'var(--ch-text-accent)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
                                       {s.label}
                                     </div>
                                   )}
-                                  <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.25)', display: 'flex', gap: '12px' }}>
+                                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.25)', display: 'flex', gap: '12px' }}>
                                     <span>by {s.saved_by}</span>
                                     <span>{s.note_count} note{s.note_count !== 1 ? 's' : ''} captured</span>
                                   </div>
@@ -930,7 +953,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                                 <button
                                   onClick={() => handleRestore(campaign.id, s.id, s.saved_at, campaign.title, s.label)}
                                   disabled={!!restoring}
-                                  style={{ padding: '6px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
+                                  style={{ padding: '6px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
                                   onMouseEnter={e => { if (!restoring) e.currentTarget.style.background = 'rgba(200,148,58,0.15)'; }}
                                   onMouseLeave={e => { e.currentTarget.style.background = 'rgba(200,148,58,0.08)'; }}
                                 >

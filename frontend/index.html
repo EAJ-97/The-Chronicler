@@ -24,21 +24,75 @@
         --safe-right:  env(safe-area-inset-right, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px);
         --safe-left:   env(safe-area-inset-left, 0px);
+        /* Chronicler default theme (overridden at runtime by ThemeProvider) */
+        --ch-shell-bg: #07080e;
+        --ch-panel-bg: #0a0c14;
+        --ch-card-bg: #0f1219;
+        --ch-topbar-bg: #0a0c14;
+        --ch-text-primary: #e2d5bb;
+        --ch-text-muted: rgba(226,213,187,0.55);
+        --ch-text-accent: rgba(200,148,58,0.85);
+        --ch-accent: #c8943a;
+        --ch-accent-dim: #a07030;
+        --ch-border: rgba(200,148,58,0.12);
+        --ch-border-strong: rgba(200,148,58,0.2);
+        --ch-success: #6edbb0;
+        --ch-error: #e07070;
+        --ch-scroll-track: #0d0f18;
+        --ch-scroll-thumb: #2a2f3e;
+        --ch-graph-bg: #07080e;
+        --ch-font-body: 'Crimson Pro', Georgia, serif;
+        --ch-font-display: 'Cinzel', serif;
+        --ch-font-brand: 'Cinzel Decorative', serif;
+        --ch-cat-npc: #c47f3a;
+        --ch-cat-location: #3a8fc4;
+        --ch-cat-faction: #8b2035;
+        --ch-cat-item: #6b3ac4;
+        --ch-cat-event: #3ac48b;
+        --ch-cat-lore: #9a8535;
+        --ch-cat-general: #4a5568;
+        --ch-accent-18: rgba(200,148,58,0.18);
+        --ch-accent-20: rgba(200,148,58,0.2);
+        --ch-accent-30: rgba(200,148,58,0.3);
+        --ch-accent-40: rgba(200,148,58,0.4);
+        --ch-accent-50: rgba(200,148,58,0.5);
+        --ch-accent-55: rgba(200,148,58,0.55);
+        --ch-accent-65: rgba(200,148,58,0.65);
+        --ch-accent-70: rgba(200,148,58,0.7);
+        --ch-accent-85: rgba(200,148,58,0.85);
+        --ch-text-primary-20: rgba(226,213,187,0.2);
+        --ch-text-primary-25: rgba(226,213,187,0.25);
+        --ch-text-primary-28: rgba(226,213,187,0.28);
+        --ch-text-primary-30: rgba(226,213,187,0.3);
+        --ch-text-primary-35: rgba(226,213,187,0.35);
+        --ch-text-primary-40: rgba(226,213,187,0.4);
+        --ch-text-primary-45: rgba(226,213,187,0.45);
+        --ch-text-primary-50: rgba(226,213,187,0.5);
+        --ch-text-primary-55: rgba(226,213,187,0.55);
+        --ch-text-primary-60: rgba(226,213,187,0.6);
+        --ch-text-primary-65: rgba(226,213,187,0.65);
+        --ch-text-primary-75: rgba(226,213,187,0.75);
+        --ch-text-primary-85: rgba(226,213,187,0.85);
+        --ch-text-primary-88: rgba(226,213,187,0.88);
+        --ch-text-primary-90: rgba(226,213,187,0.9);
+        --ch-overlay: rgba(0,0,0,0.65);
+        --ch-panel-overlay: rgba(7,8,14,0.92);
       }
       html {
         overscroll-behavior: none;
       }
       body {
-        background: #07080e;
-        color: #e2d5bb;
-        font-family: 'Crimson Pro', Georgia, serif;
+        background: var(--ch-shell-bg, #07080e);
+        color: var(--ch-text-primary, #e2d5bb);
+        font-family: var(--ch-font-body, 'Crimson Pro', Georgia, serif);
         -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
         overflow: hidden;
         overscroll-behavior: none;
       }
       ::-webkit-scrollbar { width: 6px; }
-      ::-webkit-scrollbar-track { background: #0d0f18; }
-      ::-webkit-scrollbar-thumb { background: #2a2f3e; border-radius: 3px; }
+      ::-webkit-scrollbar-track { background: var(--ch-scroll-track, #0d0f18); }
+      ::-webkit-scrollbar-thumb { background: var(--ch-scroll-thumb, #2a2f3e); border-radius: 3px; }
       ::-webkit-scrollbar-thumb:hover { background: #3d4558; }
       /* Hide scrollbar on toolbar rows — scrollable but invisible */
       .toolbar-scroll::-webkit-scrollbar { display: none; }

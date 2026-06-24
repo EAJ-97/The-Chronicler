@@ -50,7 +50,7 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
     >
       <div
         style={{
-          background: '#0a0c14',
+          background: 'var(--ch-panel-bg)',
           border: '1px solid rgba(200,148,58,0.25)',
           borderRadius: '8px',
           maxWidth: '720px',
@@ -62,8 +62,8 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(200,148,58,0.12)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.18em', color: '#c8943a' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ch-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.18em', color: 'var(--ch-accent)' }}>
             DATA INTEGRITY
           </span>
           <button
@@ -83,7 +83,7 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
           </button>
         </div>
         <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
-          <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.55)', margin: '0 0 14px', lineHeight: 1.5 }}>
+          <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary-55)', margin: '0 0 14px', lineHeight: 1.5 }}>
             Scan a campaign folder subtree for broken graph connections, notes pointing at missing parents, orphaned permission rows, and journal entries whose session is missing.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
@@ -100,8 +100,8 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(200,148,58,0.25)',
                 borderRadius: '4px',
-                color: '#e2d5bb',
-                fontFamily: 'Cinzel',
+                color: 'var(--ch-text-primary)',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '11px',
                 padding: '10px 12px',
                 cursor: 'pointer',
@@ -121,8 +121,8 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
                 borderRadius: '4px',
                 border: '1px solid rgba(200,148,58,0.4)',
                 background: canRun && folderId ? 'rgba(200,148,58,0.12)' : 'transparent',
-                color: '#c8943a',
-                fontFamily: 'Cinzel',
+                color: 'var(--ch-accent)',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
                 cursor: canRun && folderId && !loading ? 'pointer' : 'not-allowed',
@@ -151,7 +151,7 @@ export default function IntegrityPanel({ onClose, notes, currentUser, dmCampaign
                 const arr = report[key] || [];
                 return (
                   <div key={key} style={{ marginBottom: '16px' }}>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>
                       {label} ({arr.length})
                     </div>
                     {arr.length === 0 ? (

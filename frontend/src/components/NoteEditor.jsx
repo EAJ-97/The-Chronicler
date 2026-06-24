@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
-import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
+import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
+import { buildMarkdownCss } from '../theme/markdownCss.js';
+import { useTheme } from '../theme/useTheme.js';
 import api from '../api.js';
 import MoveModal from './MoveModal.jsx';
 import {
@@ -44,19 +46,19 @@ function parseMentionAtCursor(text, cursorPos) {
   };
 }
 
-const CATEGORIES = [
-  { value: 'npc',      label: 'NPC / Character', color: '#c47f3a' },
-  { value: 'location', label: 'Location',         color: '#3a8fc4' },
-  { value: 'faction',  label: 'Faction / Org',    color: '#8b2035' },
-  { value: 'item',     label: 'Item / Artifact',   color: '#6b3ac4' },
-  { value: 'event',    label: 'Quest / Event',     color: '#3ac48b' },
-  { value: 'lore',     label: 'Lore / History',    color: '#9a8535' },
-  { value: 'general',  label: 'General',           color: '#4a5568' },
-];
+import { getCategoryColor } from '../theme/categoryColors.js';
 
-export function getCategoryColor(cat) {
-  return CATEGORIES.find(c => c.value === cat)?.color || '#4a5568';
-}
+export { getCategoryColor };
+
+const CATEGORIES = [
+  { value: 'npc',      label: 'NPC / Character', color: 'var(--ch-cat-npc)' },
+  { value: 'location', label: 'Location',         color: 'var(--ch-cat-location)' },
+  { value: 'faction',  label: 'Faction / Org',    color: 'var(--ch-cat-faction)' },
+  { value: 'item',     label: 'Item / Artifact',   color: 'var(--ch-cat-item)' },
+  { value: 'event',    label: 'Quest / Event',     color: 'var(--ch-cat-event)' },
+  { value: 'lore',     label: 'Lore / History',    color: 'var(--ch-cat-lore)' },
+  { value: 'general',  label: 'General',           color: 'var(--ch-cat-general)' },
+];
 
 /**
  * Viewport-fixed box for a dropdown anchored above an input, used with createPortal(document.body)
@@ -89,7 +91,7 @@ const DRAWER_EXPANDED_MAX_HEIGHT = 'clamp(300px, 58vh, 680px)';
 const S = {
   wrap: {
     display: 'flex', flexDirection: 'column', height: '100%',
-    background: '#0a0c14', position: 'relative', overflow: 'hidden',
+    background: 'var(--ch-panel-bg)', position: 'relative', overflow: 'hidden',
   },
   /** Scrolls title bar + folder tools + editor when the header is taller than the viewport (e.g. DM AI Tools on campaign/world). */
   mainScroll: {
@@ -114,7 +116,7 @@ const S = {
   titleRow: { display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '12px' },
   titleInput: {
     flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-    fontFamily: 'Cinzel', fontSize: '20px', color: '#e2d5bb', fontWeight: '500',
+    fontFamily: 'var(--ch-font-display)', fontSize: '20px', color: 'var(--ch-text-primary)', fontWeight: '500',
     padding: '4px 0', width: '100%',
   },
   metaRow: {
@@ -125,12 +127,12 @@ const S = {
   },
   select: {
     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '3px', color: '#e2d5bb', fontSize: '13px',
-    fontFamily: 'Cinzel', padding: '5px 10px', outline: 'none', cursor: 'pointer',
+    borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px',
+    fontFamily: 'var(--ch-font-display)', padding: '5px 10px', outline: 'none', cursor: 'pointer',
   },
   toggleShared: (shared) => ({
     padding: '5px 12px', borderRadius: '3px', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.15em',
     border: '1px solid',
     background: shared ? 'rgba(200,148,58,0.15)' : 'transparent',
     borderColor: shared ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)',
@@ -142,7 +144,7 @@ const S = {
     background: dirty ? 'linear-gradient(135deg, #c8943a, #a07030)' : 'transparent',
     border: `1px solid ${dirty ? 'transparent' : 'rgba(226,213,187,0.2)'}`,
     borderRadius: '3px', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.15em',
     color: dirty ? '#07080e' : 'rgba(226,213,187,0.6)',
     transition: 'all 0.2s',
   }),
@@ -152,7 +154,7 @@ const S = {
   },
   viewBtn: (active) => ({
     padding: '4px 10px', borderRadius: '3px', border: 'none', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em',
     background: active ? 'rgba(200,148,58,0.2)' : 'transparent',
     color: active ? '#c8943a' : 'rgba(226,213,187,0.35)',
     transition: 'all 0.2s',
@@ -163,14 +165,14 @@ const S = {
   editor: {
     flex: 1, width: '100%', minHeight: 0, background: 'transparent',
     border: 'none', outline: 'none', resize: 'none',
-    color: '#e2d5bb', fontSize: '16px', fontFamily: 'Crimson Pro, serif',
+    color: 'var(--ch-text-primary)', fontSize: '16px', fontFamily: 'Crimson Pro, serif',
     lineHeight: '1.8', padding: '20px 24px',
     overflowY: 'auto',
   },
   preview: {
     flex: 1, overflowY: 'auto', padding: '20px 24px',
     fontFamily: 'Crimson Pro, serif', fontSize: '16px',
-    lineHeight: '1.8', color: '#e2d5bb',
+    lineHeight: '1.8', color: 'var(--ch-text-primary)',
   },
   connections: {
     borderTop: '1px solid rgba(255,255,255,0.05)',
@@ -178,7 +180,7 @@ const S = {
     background: 'rgba(0,0,0,0.2)',
   },
   connLabel: {
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.2em',
     color: 'rgba(200,148,58,0.5)', marginBottom: '10px', textTransform: 'uppercase',
   },
   connList: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' },
@@ -186,7 +188,7 @@ const S = {
     display: 'inline-flex', alignItems: 'center', gap: '6px',
     padding: '3px 10px', borderRadius: '20px',
     background: `${color}18`, border: `1px solid ${color}50`,
-    fontSize: '13px', fontFamily: 'Crimson Pro, serif', color: '#e2d5bb',
+    fontSize: '13px', fontFamily: 'Crimson Pro, serif', color: 'var(--ch-text-primary)',
   }),
   connRemove: {
     background: 'none', border: 'none', cursor: 'pointer',
@@ -198,7 +200,7 @@ const S = {
   },
   connInput: {
     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '3px', color: '#e2d5bb', fontSize: '13px',
+    borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px',
     fontFamily: 'Crimson Pro, serif', padding: '4px 10px', outline: 'none',
     width: '200px',
   },
@@ -211,7 +213,7 @@ const S = {
   },
   dropItem: {
     padding: '8px 12px', cursor: 'pointer', fontSize: '14px',
-    fontFamily: 'Crimson Pro, serif', color: '#e2d5bb',
+    fontFamily: 'Crimson Pro, serif', color: 'var(--ch-text-primary)',
     display: 'flex', alignItems: 'center', gap: '8px',
   },
 };
@@ -244,9 +246,12 @@ export default function NoteEditor({
   tutorialEnsureDrawerOpen = false,
   /** Tutorial: if true, collapse the drawer. */
   tutorialForceDrawerClosed = false,
+  /** Tutorial: switch to Edit mode so campaign split and completion controls are visible. */
+  tutorialForceEditMode = false,
   /** Tutorial: target refs for spotlighting specific UI areas. */
   tutorialRefs = null,
 }) {
+  const { theme } = useTheme();
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
   const [category, setCategory] = useState(note?.category || 'general');
@@ -299,6 +304,8 @@ export default function NoteEditor({
   const rootToolsTabsRef = useRef(null);
   const sidebarDescriptionRef = useRef(null);
   const campaignSplitRef = useRef(null);
+  const partyPaneRef = useRef(null);
+  const completionToggleRef = useRef(null);
   const drawerBarRef = useRef(null);
   /** Modal: pick note sidebar emoji from categorized + all-icons grid */
   const [noteIconMenuOpen, setNoteIconMenuOpen] = useState(false);
@@ -325,6 +332,21 @@ export default function NoteEditor({
     if (tutorialEnsureDrawerOpen) setDrawerOpen(true);
     if (tutorialForceDrawerClosed) setDrawerOpen(false);
   }, [tutorialRequestedDrawerTab, tutorialEnsureDrawerOpen, tutorialForceDrawerClosed]);
+
+  useEffect(() => {
+    if (tutorialForceEditMode) setAndPersistViewMode('edit');
+  }, [tutorialForceEditMode]);
+
+  /** Scroll the campaign split into view when the tutorial spotlights both panes. */
+  useEffect(() => {
+    if (!tutorialForceEditMode) return undefined;
+    const t = setTimeout(() => {
+      const el = tutorialRefs?.campaignSplit?.current || campaignSplitRef.current;
+      el?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }, 160);
+    return () => clearTimeout(t);
+  }, [tutorialForceEditMode, note?.id, tutorialRefs?.campaignSplit]);
+
   // Campaign member management (root folder only)
   const [addMemberSearch, setAddMemberSearch] = useState('');
   const [showAddMember, setShowAddMember] = useState(false);
@@ -1396,7 +1418,7 @@ export default function NoteEditor({
     return (
       <div style={{ ...S.wrap, alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', opacity: 0.3 }}>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '14px', letterSpacing: '0.2em', marginBottom: '8px', color: '#c8943a' }}>
+          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '14px', letterSpacing: '0.2em', marginBottom: '8px', color: 'var(--ch-accent)' }}>
             SELECT A NOTE
           </div>
           <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', marginBottom: isMobile ? '20px' : 0 }}>
@@ -1405,7 +1427,7 @@ export default function NoteEditor({
           {isMobile && (
             <button
               onClick={onBackToList}
-              style={{ marginTop: '16px', padding: '12px 28px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em', color: '#c8943a', opacity: 1 }}
+              style={{ marginTop: '16px', padding: '12px 28px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.15em', color: 'var(--ch-accent)', opacity: 1 }}
             >
               BROWSE NOTES
             </button>
@@ -1747,11 +1769,11 @@ export default function NoteEditor({
               marginBottom: '12px',
               padding: '10px 12px',
               borderRadius: '4px',
-              border: '1px solid rgba(200,148,58,0.2)',
+              border: '1px solid var(--ch-border-strong)',
               background: 'rgba(200,148,58,0.06)',
               fontFamily: 'Crimson Pro, serif',
               fontSize: '13px',
-              color: 'rgba(226,213,187,0.75)',
+              color: 'var(--ch-text-primary-75)',
               lineHeight: 1.45,
             }}
           >
@@ -1773,7 +1795,7 @@ export default function NoteEditor({
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
-                        color: '#c8943a',
+                        color: 'var(--ch-accent)',
                         textDecoration: 'underline',
                         fontFamily: 'inherit',
                         fontSize: 'inherit',
@@ -1802,7 +1824,7 @@ export default function NoteEditor({
               lineHeight: 1.45,
             }}
           >
-            This campaign or world is marked <strong style={{ color: '#c8943a' }}>completed</strong>. Notes and journal are read-only. A DM can clear completion on the world or campaign root folder.
+            This campaign or world is marked <strong style={{ color: 'var(--ch-accent)' }}>completed</strong>. Notes and journal are read-only. A DM can clear completion on the world or campaign root folder.
           </div>
         )}
         {ddbFlavorUpdate?.ddb_status === 'private' && !ddbFlavorDismissed && (
@@ -1833,7 +1855,7 @@ export default function NoteEditor({
               background: 'rgba(200,148,58,0.06)',
               fontFamily: 'Crimson Pro, serif',
               fontSize: '13px',
-              color: 'rgba(226,213,187,0.75)',
+              color: 'var(--ch-text-primary-75)',
               lineHeight: 1.45,
             }}
           >
@@ -1847,7 +1869,7 @@ export default function NoteEditor({
                 border: 'none',
                 color: 'rgba(200,148,58,0.65)',
                 cursor: 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '10px',
                 letterSpacing: '0.08em',
               }}
@@ -1910,9 +1932,9 @@ export default function NoteEditor({
                 background: 'transparent',
                 border: '1px solid rgba(255,255,255,0.12)',
                 borderRadius: '4px',
-                color: 'rgba(226,213,187,0.55)',
+                color: 'var(--ch-text-primary-55)',
                 cursor: 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '10px',
                 letterSpacing: '0.08em',
                 padding: '6px 12px',
@@ -1927,10 +1949,10 @@ export default function NoteEditor({
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', marginLeft: '-8px' }}>
             <button
               onClick={onBackToList}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#c8943a', fontSize: '22px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ch-accent)', fontSize: '22px', minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
               title="Back to notes"
             >←</button>
-            <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)' }}>NOTES</span>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)' }}>NOTES</span>
           </div>
         )}
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } : S.titleRow}>
@@ -2028,7 +2050,7 @@ export default function NoteEditor({
           {!note?.is_folder && canEdit && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }} title="Sidebar icon">
-                <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
                 <button
                   type="button"
                   onClick={() => setNoteIconMenuOpen(true)}
@@ -2096,7 +2118,7 @@ export default function NoteEditor({
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.18em', color: '#c8943a' }}>SIDEBAR ICON</span>
+                      <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.18em', color: 'var(--ch-accent)' }}>SIDEBAR ICON</span>
                       <button
                         type="button"
                         onClick={() => setNoteIconMenuOpen(false)}
@@ -2115,13 +2137,13 @@ export default function NoteEditor({
                       onClick={() => persistNoteDisplayIcon(null)}
                       style={{
                         width: '100%', marginBottom: '14px', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer',
-                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
-                        border: '1px solid rgba(200,148,58,0.3)', background: 'rgba(200,148,58,0.08)', color: 'rgba(200,148,58,0.85)',
+                        fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                        border: '1px solid rgba(200,148,58,0.3)', background: 'rgba(200,148,58,0.08)', color: 'var(--ch-text-accent)',
                       }}
                     >
                       USE CATEGORY DEFAULT ({defaultNoteIconEmoji(category)})
                     </button>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>ALL ICONS</div>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>ALL ICONS</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '18px' }}>
                       {uniqueNotePresetIcons.map((ic, idx) => (
                         <button
@@ -2136,13 +2158,13 @@ export default function NoteEditor({
                         >{ic}</button>
                       ))}
                     </div>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>SUGGESTIONS BY THEME</div>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(226,213,187,0.35)', marginBottom: '8px' }}>SUGGESTIONS BY THEME</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {NOTE_ICON_CATEGORIES.map(({ categoryKey, label, icons }) => (
                         <div key={categoryKey}>
                           <div
                             style={{
-                              fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                              fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em',
                               color: category === categoryKey ? 'rgba(200,148,58,0.6)' : 'rgba(226,213,187,0.28)',
                               marginBottom: '6px',
                             }}
@@ -2175,7 +2197,7 @@ export default function NoteEditor({
 
           {/* DM Only badge — visible in toolbar when flag is set */}
           {isDmOnly && (
-            <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.8)', padding: '4px 8px', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', background: 'rgba(200,148,58,0.08)', flexShrink: 0 }}>⚔ DM ONLY</span>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.8)', padding: '4px 8px', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', background: 'rgba(200,148,58,0.08)', flexShrink: 0 }}>⚔ DM ONLY</span>
           )}
 
           {/* Permissions button — owner or admin can manage */}
@@ -2187,12 +2209,12 @@ export default function NoteEditor({
             >
               {noteVisibility === 'shared' ? '⚔ Party Shared' : '🔒 Hidden'}
               {grantedUsers.length > 0 && noteVisibility === 'hidden' && (
-                <span style={{ marginLeft: '5px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.6)' }}>+{grantedUsers.length}</span>
+                <span style={{ marginLeft: '5px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.6)' }}>+{grantedUsers.length}</span>
               )}
             </button>
           )}
           {!canManage && !canFullEdit && !canAppend && (
-            <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.25)', padding: '4px 8px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px' }}>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.25)', padding: '4px 8px', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '3px' }}>
               {note?.visibility === 'shared' ? '⚔ Shared' : '👁 Granted'}
             </span>
           )}
@@ -2235,7 +2257,7 @@ export default function NoteEditor({
           )}
 
           {canEdit && !dirty && savedAt && (
-            <span style={{ marginLeft: 'auto', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.4)' }}>
+            <span style={{ marginLeft: 'auto', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.4)' }}>
               ✓ Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
@@ -2262,10 +2284,10 @@ export default function NoteEditor({
                   fontFamily: 'Crimson Pro, serif',
                   fontSize: '13px',
                   lineHeight: 1.45,
-                  color: 'rgba(226,213,187,0.65)',
+                  color: 'var(--ch-text-primary-65)',
                 }}
               >
-                <strong style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: '#c8943a' }}>DEMO SHOWCASE</strong>
+                <strong style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'var(--ch-accent)' }}>DEMO SHOWCASE</strong>
                 {' — '}You can browse Icons, AI tools, and Continuity like a DM, but only admins may change demo data or run generators here.
               </div>
             )}
@@ -2334,7 +2356,7 @@ export default function NoteEditor({
                       } catch (e) { console.error(e); }
                     }}
                     style={{
-                      minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: demoReadOnly ? 'not-allowed' : 'pointer', fontFamily: 'Cinzel',
+                      minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: demoReadOnly ? 'not-allowed' : 'pointer', fontFamily: 'var(--ch-font-display)',
                       border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent', color: 'rgba(226,213,187,0.5)',
                       opacity: demoReadOnly ? 0.45 : 1,
                     }}
@@ -2376,8 +2398,8 @@ export default function NoteEditor({
                         onClick={() => sidebarIconInputRef.current?.click()}
                         disabled={uploadingSidebarIcon}
                         style={{
-                          fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
-                          border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'rgba(226,213,187,0.75)',
+                          fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                          border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'var(--ch-text-primary-75)',
                         }}
                       >
                         {uploadingSidebarIcon ? 'Uploading…' : 'Upload image icon'}
@@ -2400,7 +2422,7 @@ export default function NoteEditor({
                     )}
                   </div>
                 )}
-                <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+                <label style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
                 <textarea
                   ref={tutorialRefs?.sidebarDescription || sidebarDescriptionRef}
                   value={displaySummary}
@@ -2411,7 +2433,7 @@ export default function NoteEditor({
                   style={{
                     width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                    color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                    color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
                   }}
                 />
               </div>
@@ -2419,15 +2441,15 @@ export default function NoteEditor({
 
             {rootToolsTab === 'ai' && showAiToolsTab && (
               <div style={{ paddingTop: '4px' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(139,196,226,0.65)', marginBottom: '6px' }}>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(139,196,226,0.65)', marginBottom: '6px' }}>
                   DM AI TOOLS
                 </div>
                 <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.38)', margin: '0 0 14px', lineHeight: 1.45 }}>
-                  Select a <strong style={{ color: 'rgba(226,213,187,0.55)' }}>world</strong> or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>campaign</strong> folder to use generators. In each prompt, paste <strong style={{ color: 'rgba(226,213,187,0.55)' }}>[Title](note:id)</strong> links (from @mentions in notes) or <strong style={{ color: 'rgba(226,213,187,0.55)' }}>note:123</strong> so the AI can use those notes as context.
+                  Select a <strong style={{ color: 'var(--ch-text-primary-55)' }}>world</strong> or <strong style={{ color: 'var(--ch-text-primary-55)' }}>campaign</strong> folder to use generators. In each prompt, paste <strong style={{ color: 'var(--ch-text-primary-55)' }}>[Title](note:id)</strong> links (from @mentions in notes) or <strong style={{ color: 'var(--ch-text-primary-55)' }}>note:123</strong> so the AI can use those notes as context.
                 </p>
 
                 <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
                     NPC / CHARACTER
                   </div>
                   <textarea
@@ -2450,12 +2472,12 @@ export default function NoteEditor({
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
                       marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'var(--ch-text-primary-55)' }}>
                       Folder
                       <select
                         value={npcParentId ?? ''}
@@ -2463,7 +2485,7 @@ export default function NoteEditor({
                         disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                          borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
                         }}
                       >
                         <option value={continuityFolderId}>
@@ -2474,7 +2496,7 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: npcDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
                       <input
                         type="checkbox"
                         checked={npcDmOnly}
@@ -2493,7 +2515,7 @@ export default function NoteEditor({
                     disabled={npcBusy || !aiAdminStatus.ai_enabled || !npcPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: npcBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em',
                       border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(139,196,226,0.4)'}`,
                       background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(139,196,226,0.12)',
                       color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.95)',
@@ -2504,7 +2526,7 @@ export default function NoteEditor({
                 </div>
 
                 <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(58,196,139,0.45)', marginBottom: '8px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(58,196,139,0.45)', marginBottom: '8px' }}>
                     LOCATION
                   </div>
                   <textarea
@@ -2527,12 +2549,12 @@ export default function NoteEditor({
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
                       marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'var(--ch-text-primary-55)' }}>
                       Folder
                       <select
                         value={locParentId ?? ''}
@@ -2540,7 +2562,7 @@ export default function NoteEditor({
                         disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                          borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
                         }}
                       >
                         <option value={continuityFolderId}>
@@ -2551,7 +2573,7 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: locDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
                       <input type="checkbox" checked={locDmOnly} disabled={demoReadOnly} onChange={(e) => setLocDmOnly(e.target.checked)} />
                       DM-only note
                     </label>
@@ -2565,7 +2587,7 @@ export default function NoteEditor({
                     disabled={locBusy || !aiAdminStatus.ai_enabled || !locPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: locBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em',
                       border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(58,196,139,0.4)'}`,
                       background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(58,196,139,0.1)',
                       color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(58,196,139,0.95)',
@@ -2576,7 +2598,7 @@ export default function NoteEditor({
                 </div>
 
                 <div style={{ marginBottom: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(107,58,196,0.55)', marginBottom: '8px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(107,58,196,0.55)', marginBottom: '8px' }}>
                     ITEM / ARTIFACT
                   </div>
                   <textarea
@@ -2599,12 +2621,12 @@ export default function NoteEditor({
                     style={{
                       width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                       background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                      color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                      color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
                       marginBottom: '10px', opacity: aiAdminStatus.ai_enabled && !demoReadOnly ? 1 : 0.5,
                     }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.55)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'var(--ch-text-primary-55)' }}>
                       Folder
                       <select
                         value={itemParentId ?? ''}
@@ -2612,7 +2634,7 @@ export default function NoteEditor({
                         disabled={demoReadOnly}
                         style={{
                           minWidth: '180px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
+                          borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '6px 10px', outline: 'none',
                         }}
                       >
                         <option value={continuityFolderId}>
@@ -2623,7 +2645,7 @@ export default function NoteEditor({
                         ))}
                       </select>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: demoReadOnly ? 'default' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: itemDmOnly ? 'rgba(200,148,58,0.85)' : 'rgba(226,213,187,0.45)' }}>
                       <input type="checkbox" checked={itemDmOnly} disabled={demoReadOnly} onChange={(e) => setItemDmOnly(e.target.checked)} />
                       DM-only note
                     </label>
@@ -2637,7 +2659,7 @@ export default function NoteEditor({
                     disabled={itemBusy || !aiAdminStatus.ai_enabled || !itemPrompt.trim() || demoReadOnly}
                     style={{
                       padding: '8px 16px', borderRadius: '4px', cursor: itemBusy || !aiAdminStatus.ai_enabled ? 'default' : 'pointer',
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em',
                       border: `1px solid ${!aiAdminStatus.ai_enabled ? 'rgba(255,255,255,0.08)' : 'rgba(107,58,196,0.45)'}`,
                       background: !aiAdminStatus.ai_enabled ? 'transparent' : 'rgba(107,58,196,0.12)',
                       color: !aiAdminStatus.ai_enabled ? 'rgba(226,213,187,0.25)' : 'rgba(200,180,240,0.95)',
@@ -2662,12 +2684,12 @@ export default function NoteEditor({
 
             {rootToolsTab === 'continuity' && showContinuityTab && (
               <div style={{ paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '6px' }}>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)', marginBottom: '6px' }}>
                   CONTINUITY CHECKER
                 </div>
                 <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
-                  Runs only on this world/campaign root. Builds a visibility-safe corpus, then writes or updates a DM-only note titled <strong style={{ color: 'rgba(226,213,187,0.65)' }}>AI Continuity Report</strong> under{' '}
-                  <strong style={{ color: 'rgba(226,213,187,0.65)' }}>{(notes || []).find((n) => n.id === continuityFolderId)?.title || 'this folder'}</strong>.
+                  Runs only on this world/campaign root. Builds a visibility-safe corpus, then writes or updates a DM-only note titled <strong style={{ color: 'var(--ch-text-primary-65)' }}>AI Continuity Report</strong> under{' '}
+                  <strong style={{ color: 'var(--ch-text-primary-65)' }}>{(notes || []).find((n) => n.id === continuityFolderId)?.title || 'this folder'}</strong>.
                 </p>
                 {contErr && (
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(224,112,112,0.9)', marginBottom: '8px' }}>{contErr}</div>
@@ -2678,7 +2700,7 @@ export default function NoteEditor({
                   disabled={contBusy || !aiAdminStatus.ai_enabled || demoReadOnly}
                   style={{
                     padding: '8px 16px', borderRadius: '4px', cursor: contBusy || !aiAdminStatus.ai_enabled || demoReadOnly ? 'default' : 'pointer',
-                    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em',
+                    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em',
                     border: `1px solid ${!aiAdminStatus.ai_enabled || demoReadOnly ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.35)'}`,
                     background: !aiAdminStatus.ai_enabled || demoReadOnly ? 'transparent' : 'rgba(200,148,58,0.1)',
                     color: !aiAdminStatus.ai_enabled || demoReadOnly ? 'rgba(226,213,187,0.25)' : '#c8943a',
@@ -2704,7 +2726,7 @@ export default function NoteEditor({
         {/* Player lore summary — gated on completed campaign/world (server + underArchive). */}
         {!note?.is_folder && underArchive && !!aiAdminStatus.ai_enabled && (!note?.is_dm_only || isDM || isAdminUser) && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
               LORE SUMMARY (AI)
             </div>
             <button
@@ -2715,7 +2737,7 @@ export default function NoteEditor({
                 padding: '8px 16px',
                 borderRadius: '4px',
                 cursor: summarizeBusy ? 'wait' : 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
                 border: '1px solid rgba(139,196,226,0.45)',
@@ -2738,7 +2760,7 @@ export default function NoteEditor({
                   color: 'rgba(226,213,187,0.88)',
                   padding: '12px 14px',
                   borderRadius: '4px',
-                  border: '1px solid rgba(200,148,58,0.2)',
+                  border: '1px solid var(--ch-border-strong)',
                   background: 'rgba(0,0,0,0.2)',
                   maxWidth: '640px',
                 }}
@@ -2751,9 +2773,12 @@ export default function NoteEditor({
 
         {/* Mark world/campaign complete — DM/admin on scope root only (above Chronicle so it stays visible). */}
         {canToggleCompletion && (
-          <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div
+            ref={tutorialRefs?.completionToggle || completionToggleRef}
+            style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}
+          >
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.42)', margin: '0 0 10px', lineHeight: 1.45 }}>
-              Select the <strong style={{ color: 'rgba(226,213,187,0.65)' }}>world or campaign root</strong> folder in the sidebar (not a subfolder). This archives the campaign for players until you clear it.
+              Select the <strong style={{ color: 'var(--ch-text-primary-65)' }}>world or campaign root</strong> folder in the sidebar (not a subfolder). This archives the campaign for players until you clear it.
             </p>
             <label
               style={{
@@ -2761,7 +2786,7 @@ export default function NoteEditor({
                 alignItems: 'center',
                 gap: '10px',
                 cursor: completionBusy ? 'wait' : 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.1em',
                 color: note?.is_completed ? 'rgba(200,148,58,0.9)' : 'rgba(226,213,187,0.65)',
@@ -2810,7 +2835,7 @@ export default function NoteEditor({
                   } catch (e) { console.error(e); }
                 }}
                 style={{
-                  minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'Cinzel',
+                  minWidth: '40px', height: '40px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)',
                   border: `1px solid ${!displayIcon ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, background: !displayIcon ? 'rgba(200,148,58,0.12)' : 'transparent', color: 'rgba(226,213,187,0.5)',
                 }}
                 title="Automatic default for this folder type"
@@ -2849,8 +2874,8 @@ export default function NoteEditor({
                     onClick={() => sidebarIconInputRef.current?.click()}
                     disabled={uploadingSidebarIcon}
                     style={{
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
-                      border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'rgba(226,213,187,0.75)',
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                      border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'var(--ch-text-primary-75)',
                     }}
                   >
                     {uploadingSidebarIcon ? 'Uploading…' : 'Upload image icon'}
@@ -2873,7 +2898,7 @@ export default function NoteEditor({
                 )}
               </div>
             )}
-            <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+            <label style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
             <textarea
               value={displaySummary}
               onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
@@ -2883,7 +2908,7 @@ export default function NoteEditor({
               style={{
                 width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                 background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
+                color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '10px 12px', outline: 'none',
               }}
             />
           </div>
@@ -2892,7 +2917,7 @@ export default function NoteEditor({
         {/* Optional sidebar blurb for notes (same column as folders; icon row is in toolbar) */}
         {!note?.is_folder && canEdit && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <label style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
+            <label style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
             <textarea
               value={displaySummary}
               onChange={(e) => { setDisplaySummary(e.target.value); markDirty(); }}
@@ -2901,7 +2926,7 @@ export default function NoteEditor({
               style={{
                 width: '100%', maxWidth: '560px', boxSizing: 'border-box', resize: 'vertical',
                 background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '8px 12px', outline: 'none',
+                color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif', padding: '8px 12px', outline: 'none',
               }}
             />
           </div>
@@ -2934,8 +2959,9 @@ export default function NoteEditor({
                 }}
               >
                 <div
+                  ref={tutorialRefs?.partyPane || partyPaneRef}
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '8px',
                     letterSpacing: '0.14em',
                     color: 'rgba(139,196,226,0.55)',
@@ -2972,7 +2998,7 @@ export default function NoteEditor({
               >
                 <div
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '8px',
                     letterSpacing: '0.14em',
                     color: 'rgba(200,148,58,0.65)',
@@ -3018,7 +3044,7 @@ export default function NoteEditor({
               >
                 <div
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '7px',
                     letterSpacing: '0.12em',
                     color: 'rgba(200,148,58,0.45)',
@@ -3045,7 +3071,7 @@ export default function NoteEditor({
                       borderLeft: `3px solid ${getCategoryColor(it.category)}`,
                       background:
                         idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
-                      color: '#e2d5bb',
+                      color: 'var(--ch-text-primary)',
                       fontFamily: 'Crimson Pro, serif',
                       fontSize: '14px',
                       cursor: 'pointer',
@@ -3056,7 +3082,7 @@ export default function NoteEditor({
                     </span>
                     <span
                       style={{
-                        fontFamily: 'Cinzel',
+                        fontFamily: 'var(--ch-font-display)',
                         fontSize: '7px',
                         letterSpacing: '0.06em',
                         color: 'rgba(226,213,187,0.35)',
@@ -3106,7 +3132,7 @@ export default function NoteEditor({
               >
                 <div
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '7px',
                     letterSpacing: '0.12em',
                     color: 'rgba(200,148,58,0.45)',
@@ -3133,7 +3159,7 @@ export default function NoteEditor({
                       borderLeft: `3px solid ${getCategoryColor(it.category)}`,
                       background:
                         idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
-                      color: '#e2d5bb',
+                      color: 'var(--ch-text-primary)',
                       fontFamily: 'Crimson Pro, serif',
                       fontSize: '14px',
                       cursor: 'pointer',
@@ -3144,7 +3170,7 @@ export default function NoteEditor({
                     </span>
                     <span
                       style={{
-                        fontFamily: 'Cinzel',
+                        fontFamily: 'var(--ch-font-display)',
                         fontSize: '7px',
                         letterSpacing: '0.06em',
                         color: 'rgba(226,213,187,0.35)',
@@ -3162,6 +3188,7 @@ export default function NoteEditor({
         ) : (
           showCampaignRootSplit && note?.is_folder ? (
             <div
+              ref={tutorialRefs?.campaignSplit || campaignSplitRef}
               style={{
                 display: 'flex',
                 flexDirection: isMobile ? 'column' : 'row',
@@ -3182,7 +3209,7 @@ export default function NoteEditor({
               >
                 <div
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '8px',
                     letterSpacing: '0.14em',
                     color: 'rgba(139,196,226,0.55)',
@@ -3210,7 +3237,7 @@ export default function NoteEditor({
               >
                 <div
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '8px',
                     letterSpacing: '0.14em',
                     color: 'rgba(200,148,58,0.65)',
@@ -3227,7 +3254,7 @@ export default function NoteEditor({
                   {folderDmContent || '*No DM notes yet.*'}
                 </ReactMarkdown>
               </div>
-            <style>{MARKDOWN_BASE_CSS}</style>
+            <style>{buildMarkdownCss(theme)}</style>
             </div>
           ) : (
           <div style={S.preview} className="md-content">
@@ -3238,7 +3265,7 @@ export default function NoteEditor({
             >
               {content || '*No content yet.*'}
             </ReactMarkdown>
-            <style>{MARKDOWN_BASE_CSS}</style>
+            <style>{buildMarkdownCss(theme)}</style>
           </div>
           )
         )}
@@ -3246,14 +3273,14 @@ export default function NoteEditor({
         {/* DM Append section — shown when DM is viewing someone else's note */}
         {canAppendEffective && (
           <div style={{ borderTop: '1px solid rgba(200,148,58,0.2)', padding: '12px 20px', background: 'rgba(200,148,58,0.04)' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '8px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '8px' }}>
               ⚔ DM ADDITION — appended with your name and date
             </div>
             <textarea
               style={{
                 width: '100%', minHeight: '80px', background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px',
-                color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif',
+                border: '1px solid var(--ch-border-strong)', borderRadius: '3px',
+                color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'Crimson Pro, serif',
                 padding: '8px 12px', resize: 'vertical', outline: 'none', boxSizing: 'border-box',
               }}
               placeholder="Write your DM addition here... It will be permanently appended to this note."
@@ -3266,7 +3293,7 @@ export default function NoteEditor({
                 background: appendContent.trim() ? 'linear-gradient(135deg, #c8943a, #a07030)' : 'rgba(255,255,255,0.05)',
                 border: `1px solid ${appendContent.trim() ? 'transparent' : 'rgba(255,255,255,0.1)'}`,
                 borderRadius: '3px', cursor: appendContent.trim() ? 'pointer' : 'not-allowed',
-                fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+                fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em',
                 color: appendContent.trim() ? '#07080e' : 'rgba(226,213,187,0.3)',
               }}
               disabled={!appendContent.trim() || appendSaving}
@@ -3311,7 +3338,7 @@ export default function NoteEditor({
             onClick={() => { setDrawerTab(tab.id); setDrawerOpen(o => drawerTab === tab.id ? !o : true); }}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+              fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
               color: drawerOpen && drawerTab === tab.id ? '#c8943a' : 'rgba(226,213,187,0.3)',
               padding: isMobile ? '12px 14px' : '8px 12px',
               minHeight: isMobile ? '44px' : 'auto',
@@ -3382,7 +3409,7 @@ export default function NoteEditor({
                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                   padding: '2px 8px', borderRadius: '10px', fontSize: '11px',
                   background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.25)',
-                  color: '#c8943a', fontFamily: 'Cinzel', letterSpacing: '0.05em',
+                  color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', letterSpacing: '0.05em',
                 }}>
                   #{tag}
                   {canEdit && <button onClick={() => handleRemoveTag(tag)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(200,148,58,0.5)', padding: '0 0 0 2px', fontSize: '12px', lineHeight: 1 }}>×</button>}
@@ -3416,7 +3443,7 @@ export default function NoteEditor({
                     <button
                       onClick={() => imageInputRef.current?.click()}
                       disabled={uploadingImage}
-                      style={{ padding: '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)' }}
+                      style={{ padding: '4px 12px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.4)' }}
                     >{uploadingImage ? 'UPLOADING...' : '+ UPLOAD IMAGE'}</button>
                   </>
                 )}
@@ -3464,7 +3491,7 @@ export default function NoteEditor({
                   <span style={{ position: 'absolute', top: '2px', width: '14px', height: '14px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.15s', left: isDmOnly ? '16px' : '2px' }} />
                 </button>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: isDmOnly ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>⚔ DM ONLY</div>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: isDmOnly ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>⚔ DM ONLY</div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', fontStyle: 'italic', marginTop: '2px' }}>
                     {isDmOnly ? 'Hidden from party members — visible to DMs and admins only' : 'Visible to all party members with access'}
                   </div>
@@ -3473,16 +3500,16 @@ export default function NoteEditor({
               {/* Root folder: campaign member + DM management */}
               {isRootFolder ? (
                 <div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '10px' }}>PARTY MEMBERS</div>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '10px' }}>PARTY MEMBERS</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' }}>
                     {allUsers.map(u => (
                       <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 10px', borderRadius: '3px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                         <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.85)', flex: 1 }}>
                           {u.username}
-                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
                         </span>
                         {/* DM label + toggle */}
-                        <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: u.is_dm ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.18)' }}>DM</span>
+                        <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.08em', color: u.is_dm ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.18)' }}>DM</span>
                         <button
                           onClick={() => handleToggleDM(u.id, !!u.is_dm)}
                           title={u.is_dm ? 'Remove DM role' : 'Assign as DM'}
@@ -3516,7 +3543,7 @@ export default function NoteEditor({
                       onClick={() => { setShowAddMember(v => !v); setAddMemberSearch(''); }}
                       style={{
                         padding: '5px 14px', borderRadius: '3px', cursor: 'pointer',
-                        fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+                        fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em',
                         background: showAddMember ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
                         border: `1px solid ${showAddMember ? 'rgba(200,148,58,0.35)' : 'rgba(255,255,255,0.1)'}`,
                         color: showAddMember ? '#c8943a' : 'rgba(226,213,187,0.45)',
@@ -3533,7 +3560,7 @@ export default function NoteEditor({
                       return (
                         <div style={{
                           position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 50,
-                          background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+                          background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)',
                           borderRadius: '4px', minWidth: '200px', maxHeight: '220px',
                           boxShadow: '0 6px 24px rgba(0,0,0,0.6)', overflow: 'hidden',
                           display: 'flex', flexDirection: 'column',
@@ -3559,8 +3586,8 @@ export default function NoteEditor({
                                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,148,58,0.08)'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                               >
-                                <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.75)', flex: 1 }}>{u.username}</span>
-                                {!!u.is_admin && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.08em' }}>ADMIN</span>}
+                                <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary-75)', flex: 1 }}>{u.username}</span>
+                                {!!u.is_admin && <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.08em' }}>ADMIN</span>}
                                 <span style={{ color: 'rgba(58,196,139,0.5)', fontSize: '14px', lineHeight: 1 }}>+</span>
                               </div>
                             ))}
@@ -3576,7 +3603,7 @@ export default function NoteEditor({
                   {isDmOnly ? (
                     /* DM Only is on — show per-member grant toggles */
                     <div>
-                      <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)', marginBottom: '10px' }}>
+                      <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)', marginBottom: '10px' }}>
                         ⚔ DM ONLY — GRANT INDIVIDUAL ACCESS
                       </div>
                       <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.35)', fontStyle: 'italic', marginBottom: '12px' }}>
@@ -3597,11 +3624,11 @@ export default function NoteEditor({
                               </button>
                               <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: granted ? 'rgba(226,213,187,0.8)' : 'rgba(226,213,187,0.3)', flex: 1 }}>
                                 {u.username}
-                                {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
-                                {!u.is_admin && !!u.is_dm && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>DM</span>}
+                                {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                                {!u.is_admin && !!u.is_dm && <span style={{ marginLeft: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>DM</span>}
                               </span>
-                              {isDmMember && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.4)', letterSpacing: '0.08em' }}>ALWAYS</span>}
-                              {!isDmMember && granted && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>GRANTED</span>}
+                              {isDmMember && <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.4)', letterSpacing: '0.08em' }}>ALWAYS</span>}
+                              {!isDmMember && granted && <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>GRANTED</span>}
                             </div>
                           );
                         })}
@@ -3622,7 +3649,7 @@ export default function NoteEditor({
                           ].map(({ val, label, desc, active }) => (
                             <button key={val} onClick={() => handleVisibilityChange(val)} style={{
                               flex: 1, padding: '8px 6px', borderRadius: '3px', cursor: 'pointer',
-                              fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em',
+                              fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em',
                               background: active ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.03)',
                               border: `1px solid ${active ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`,
                               color: active ? '#c8943a' : 'rgba(226,213,187,0.35)',
@@ -3640,7 +3667,7 @@ export default function NoteEditor({
                             const allPartyGranted = allUsers.every(u => grantedUsers.includes(u.id));
                             return (
                               <>
-                                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', marginBottom: '8px' }}>
+                                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', marginBottom: '8px' }}>
                                   {allPartyGranted ? 'ALL PARTY MEMBERS HAVE ACCESS' : 'GRANT ACCESS TO SPECIFIC USERS'}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -3653,9 +3680,9 @@ export default function NoteEditor({
                                         </button>
                                         <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: granted ? 'rgba(226,213,187,0.8)' : 'rgba(226,213,187,0.3)', flex: 1 }}>
                                           {u.username}
-                                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
+                                          {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
                                         </span>
-                                        {granted && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>CAN VIEW & EDIT</span>}
+                                        {granted && <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(58,196,139,0.5)', letterSpacing: '0.08em' }}>CAN VIEW & EDIT</span>}
                                       </div>
                                     );
                                   })}
@@ -3670,7 +3697,7 @@ export default function NoteEditor({
                   {!!note?.is_folder && (
                     <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => setCascadeChildren(c => !c)}>
                       <div style={{ width: '16px', height: '16px', borderRadius: '3px', flexShrink: 0, border: `1px solid ${cascadeChildren ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.15)'}`, background: cascadeChildren ? 'rgba(200,148,58,0.2)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {cascadeChildren && <span style={{ color: '#c8943a', fontSize: '10px', lineHeight: 1 }}>✓</span>}
+                        {cascadeChildren && <span style={{ color: 'var(--ch-accent)', fontSize: '10px', lineHeight: 1 }}>✓</span>}
                       </div>
                       <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: cascadeChildren ? 'rgba(226,213,187,0.7)' : 'rgba(226,213,187,0.35)' }}>Apply to all contents of this folder</span>
                     </div>
@@ -3699,10 +3726,10 @@ export default function NoteEditor({
         }}>
           <div style={{ width: '220px', padding: '16px 14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)' }}>MARKDOWN REFERENCE</div>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)' }}>MARKDOWN REFERENCE</div>
               <button
                 onClick={() => setShowMdHelp(false)}
-                style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,213,187,0.4)', fontSize: '12px', padding: '1px 6px', fontFamily: 'Cinzel', letterSpacing: '0.05em', lineHeight: 1.4 }}
+                style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,213,187,0.4)', fontSize: '12px', padding: '1px 6px', fontFamily: 'var(--ch-font-display)', letterSpacing: '0.05em', lineHeight: 1.4 }}
                 title="Close"
               >✕</button>
             </div>
@@ -3726,9 +3753,9 @@ export default function NoteEditor({
               { syntax: 'Enter in list',        shortcut: 'continue list' },
             ].map(({ syntax, shortcut }) => (
               <div key={syntax} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '6px', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'rgba(200,148,58,0.85)', whiteSpace: 'nowrap' }}>{syntax}</span>
+                <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'var(--ch-text-accent)', whiteSpace: 'nowrap' }}>{syntax}</span>
                 {shortcut && (
-                  <span style={{ fontFamily: 'monospace', fontSize: '8px', color: 'rgba(200,148,58,0.55)', background: 'rgba(200,148,58,0.06)', padding: '1px 4px', borderRadius: '3px', border: '1px solid rgba(200,148,58,0.12)', whiteSpace: 'nowrap', flexShrink: 0 }}>{shortcut}</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: '8px', color: 'rgba(200,148,58,0.55)', background: 'rgba(200,148,58,0.06)', padding: '1px 4px', borderRadius: '3px', border: '1px solid var(--ch-border)', whiteSpace: 'nowrap', flexShrink: 0 }}>{shortcut}</span>
                 )}
               </div>
             ))}
@@ -3843,7 +3870,7 @@ export default function NoteEditor({
           >
             <div
               style={{
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '7px',
                 letterSpacing: '0.12em',
                 color: 'rgba(200,148,58,0.45)',
@@ -3870,7 +3897,7 @@ export default function NoteEditor({
                   borderLeft: `3px solid ${getCategoryColor(it.category)}`,
                   background:
                     idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
-                  color: '#e2d5bb',
+                  color: 'var(--ch-text-primary)',
                   fontFamily: 'Crimson Pro, serif',
                   fontSize: '14px',
                   cursor: 'pointer',
@@ -3881,7 +3908,7 @@ export default function NoteEditor({
                 </span>
                 <span
                   style={{
-                    fontFamily: 'Cinzel',
+                    fontFamily: 'var(--ch-font-display)',
                     fontSize: '7px',
                     letterSpacing: '0.06em',
                     color: 'rgba(226,213,187,0.35)',
@@ -3964,12 +3991,12 @@ function WhoCanSee({ note, allUsers, currentUser }) {
         <div style={{
           position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
           marginTop: '6px', zIndex: 100,
-          background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+          background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)',
           borderRadius: '4px', padding: '8px 12px', minWidth: '160px',
           boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
           pointerEvents: 'none',
         }}>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>VISIBLE TO</div>
+          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>VISIBLE TO</div>
           {viewers.map((v, i) => (
             <div key={i} style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.7)', lineHeight: '1.6' }}>{v}</div>
           ))}
@@ -3988,7 +4015,7 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
     backdropFilter: 'blur(2px)',
   };
   const modal = {
-    background: '#0e1020',
+    background: 'var(--ch-card-bg)',
     border: '1px solid rgba(224,112,112,0.35)',
     borderRadius: '6px',
     width: '640px', maxHeight: '80vh',
@@ -4011,14 +4038,14 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
   };
   const btnBase = {
     borderRadius: '4px', padding: '8px 18px',
-    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em',
     cursor: 'pointer', border: '1px solid', transition: 'all 0.15s',
   };
   return (
     <div style={overlay}>
       <div style={modal}>
         <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.1em', color: 'rgba(224,112,112,0.9)', marginBottom: '4px' }}>
+          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.1em', color: 'rgba(224,112,112,0.9)', marginBottom: '4px' }}>
             ⚔ EDIT CONFLICT
           </div>
           <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.5)', fontStyle: 'italic' }}>
@@ -4030,21 +4057,21 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
         </div>
         <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — PARTY TEXT (server)</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — PARTY TEXT (server)</div>
             <div style={pane}>{conflict.serverContent || ''}</div>
           </div>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — PARTY TEXT (unsaved)</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — PARTY TEXT (unsaved)</div>
             <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myContent || ''}</div>
           </div>
           {conflict.hasFolderDmSplit && (
             <>
               <div>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — DM NOTES (server)</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — DM NOTES (server)</div>
                 <div style={pane}>{conflict.serverFolderDmContent || ''}</div>
               </div>
               <div>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — DM NOTES (unsaved)</div>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — DM NOTES (unsaved)</div>
                 <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myFolderDmContent || ''}</div>
               </div>
             </>
@@ -4053,7 +4080,7 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
         <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '10px', justifyContent: 'flex-end', flexShrink: 0 }}>
           <button style={{ ...btnBase, background: 'transparent', borderColor: 'rgba(226,213,187,0.15)', color: 'rgba(226,213,187,0.4)' }} onClick={onKeepTheirs}>Keep Theirs</button>
           <button style={{ ...btnBase, background: 'rgba(139,196,226,0.08)', borderColor: 'rgba(139,196,226,0.3)', color: 'rgba(139,196,226,0.8)' }} onClick={onKeepBoth}>Keep Both</button>
-          <button style={{ ...btnBase, background: 'rgba(200,148,58,0.12)', borderColor: 'rgba(200,148,58,0.4)', color: '#c8943a' }} onClick={onKeepMine}>Keep Mine</button>
+          <button style={{ ...btnBase, background: 'rgba(200,148,58,0.12)', borderColor: 'rgba(200,148,58,0.4)', color: 'var(--ch-accent)' }} onClick={onKeepMine}>Keep Mine</button>
         </div>
       </div>
     </div>

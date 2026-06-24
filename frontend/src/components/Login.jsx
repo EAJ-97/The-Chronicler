@@ -4,7 +4,7 @@ import api from '../api.js';
 const S = {
   page: {
     minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: '#07080e',
+    background: 'var(--ch-shell-bg)',
     backgroundImage: `
       radial-gradient(ellipse at 50% 0%, rgba(200,148,58,0.08) 0%, transparent 60%),
       repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(255,255,255,0.015) 60px),
@@ -29,11 +29,11 @@ const S = {
     textAlign: 'center', marginBottom: '36px',
   },
   title: {
-    fontFamily: 'Cinzel Decorative', fontSize: '22px', fontWeight: '700',
-    color: '#c8943a', letterSpacing: '0.04em', display: 'block', marginBottom: '6px',
+    fontFamily: 'var(--ch-font-brand)', fontSize: '22px', fontWeight: '700',
+    color: 'var(--ch-accent)', letterSpacing: '0.04em', display: 'block', marginBottom: '6px',
   },
   subtitle: {
-    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.3em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.3em',
     color: 'rgba(200,148,58,0.5)', textTransform: 'uppercase',
   },
   divider: {
@@ -41,18 +41,18 @@ const S = {
   },
   dividerLine: { flex: 1, height: '1px', background: 'rgba(200,148,58,0.15)' },
   dividerText: {
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.25em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.25em',
     color: 'rgba(200,148,58,0.4)',
   },
   label: {
-    display: 'block', fontFamily: 'Cinzel', fontSize: '9px',
+    display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '9px',
     letterSpacing: '0.2em', color: 'rgba(200,148,58,0.6)',
     marginBottom: '8px', textTransform: 'uppercase',
   },
   input: {
     width: '100%', padding: '10px 14px',
-    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(200,148,58,0.2)',
-    borderRadius: '2px', color: '#e2d5bb', fontSize: '15px',
+    background: 'rgba(255,255,255,0.03)', border: '1px solid var(--ch-border-strong)',
+    borderRadius: '2px', color: 'var(--ch-text-primary)', fontSize: '15px',
     fontFamily: 'Crimson Pro, serif', outline: 'none',
     transition: 'border-color 0.2s',
   },
@@ -61,7 +61,7 @@ const S = {
     width: '100%', padding: '12px',
     background: 'linear-gradient(135deg, #c8943a, #a07030)',
     border: 'none', borderRadius: '2px', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '11px', fontWeight: '600',
+    fontFamily: 'var(--ch-font-display)', fontSize: '11px', fontWeight: '600',
     letterSpacing: '0.25em', color: '#07080e', textTransform: 'uppercase',
     transition: 'opacity 0.2s', marginTop: '8px',
   },
@@ -71,7 +71,7 @@ const S = {
   },
   toggleBtn: {
     background: 'none', border: 'none', cursor: 'pointer',
-    color: '#c8943a', fontFamily: 'inherit', fontSize: 'inherit',
+    color: 'var(--ch-accent)', fontFamily: 'inherit', fontSize: 'inherit',
     textDecoration: 'underline', padding: '0 4px',
   },
   error: {

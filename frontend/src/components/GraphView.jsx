@@ -30,9 +30,9 @@ import {
 import {
   DEFAULT_EDGE_THEME,
   EDGE_KIND_META,
-  loadEdgeTheme,
   hexToRgba,
 } from '../graph/connections.js';
+import { useTheme } from '../theme/useTheme.js';
 import {
   buildCanonAdjacency,
   getTiersFromAdj,
@@ -244,7 +244,9 @@ function setGraphStyleTransitions(cy, enabled) {
     .update();
 }
 
-export default memo(function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false }) {
+export default memo(function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false, tutorialForceToolMenu = false }) {
+  const { theme } = useTheme();
+  const edgeTheme = theme.edges;
   const devGraphToolsEnabled = useDevGraphToolsEnabled();
   const containerRef = useRef(null);
   const cyRef = useRef(null);
@@ -291,16 +293,6 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
   /** Throttled live zoom stats for legend panel (React state, not per-frame). */
   const [zoomHudLive, setZoomHudLive] = useState({ zoom: 1, zone: 'comfortable', nodes: 0, edges: 0 });
   const pushZoomHudLiveRef = useRef(() => {});
-  const edgeThemeKey = `chronicler_graph_edge_theme_${currentUser?.id || 'anon'}`;
-  const [edgeTheme, setEdgeThemeRaw] = useState(() => loadEdgeTheme(edgeThemeKey));
-  const setEdgeTheme = useCallback((updater) => {
-    setEdgeThemeRaw((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      try { localStorage.setItem(edgeThemeKey, JSON.stringify(next)); } catch (e) {}
-      applyGraphStyle(cyRef.current, next);
-      return next;
-    });
-  }, [edgeThemeKey]);
   const [connectMode, setConnectMode] = useState(false);
   const [connectSource, setConnectSource] = useState(null);
   const connectModeRef = useRef(false);
@@ -922,7 +914,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     cyRef.current = cytoscape({
       container: containerRef.current,
       elements,
-      style: getCachedStyle(edgeTheme),
+      style: getCachedStyle(theme),
       layout: runFullLayout
         ? { name: 'cose', animate: true, animationDuration: 900, nodeRepulsion: () => 80000, idealEdgeLength: () => 200, nodeOverlap: 40, gravity: 0.25, numIter: 2000, padding: 80 }
         : { name: 'preset', positions: (node) => savedPositions[node.id()], padding: 80 },
@@ -1154,11 +1146,11 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     refreshUnseenCount();
   }, [renderNotes, renderConnections, placeNewGraphNodes, renderPosKey, refreshUnseenCount, useWebGL]);
 
-  // Re-apply edge colors / arrows when the user adjusts appearance controls
+  // Re-apply graph stylesheet when theme tokens change (edge colors, label text, canvas bg)
   useEffect(() => {
     if (useWebGL) return;
-    applyGraphStyle(cyRef.current, edgeTheme);
-  }, [edgeTheme]);
+    applyGraphStyle(cyRef.current, theme);
+  }, [theme, useWebGL]);
 
   // Tiered highlight for selected note — uses precomputed adjacency, batched class updates
   useEffect(() => {
@@ -1216,7 +1208,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
 
   /** Shared styles for Layout dropdown menu items (Highlight New / Organize). */
   const layoutMenuItemStyle = (opts = {}) => ({
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '9px',
     letterSpacing: '0.1em',
     padding: isMobile ? '11px 10px' : '7px 10px',
@@ -1225,7 +1217,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     cursor: opts.disabled ? 'default' : 'pointer',
     textAlign: 'left',
     background: 'transparent',
-    border: '1px solid rgba(200,148,58,0.12)',
+    border: '1px solid var(--ch-border)',
     color: 'rgba(200,148,58,0.7)',
     opacity: opts.disabled ? 0.45 : 1,
     whiteSpace: 'nowrap',
@@ -1234,8 +1226,9 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
   /**
    * Renders Layout submenu entries used in both the overflow and inline toolbars.
    * @param {() => void} closeMenu
+   * @param {{ layoutTutorialRef?: import('react').RefObject<HTMLElement|null>|null }} [opts]
    */
-  const renderLayoutMenuItems = (closeMenu) => (
+  const renderLayoutMenuItems = (closeMenu, opts = {}) => (
     <>
       <button
         type="button"
@@ -1245,6 +1238,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         Map engine: {enginePrefLabel}
       </button>
       <button
+        ref={opts.layoutTutorialRef || null}
         type="button"
         onClick={() => { enterHighlightNewMode(); closeMenu(); }}
         style={layoutMenuItemStyle()}
@@ -1261,7 +1255,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
       </button>
       {devGraphToolsEnabled && (
         <>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(58,196,120,0.55)', padding: '6px 4px 2px', borderTop: '1px solid rgba(58,196,120,0.2)', marginTop: 4 }}>
+          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(58,196,120,0.55)', padding: '6px 4px 2px', borderTop: '1px solid rgba(58,196,120,0.2)', marginTop: 4 }}>
             DEV TESTS
           </div>
           <button type="button" onClick={() => { loadDevFixture(500); closeMenu(); }} style={layoutMenuItemStyle()}>
@@ -1310,9 +1304,14 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     setIsNarrowGraph(toolbarLeft - 16 < campaignRight);
   }, [containerWidth, activeCampaignId, isDMOfActiveCampaign, is3D]);
 
+  /** Tutorial: keep the ··· overflow menu open when toolbar buttons are collapsed (e.g. large text scale). */
+  useEffect(() => {
+    if (tutorialForceToolMenu) setShowToolMenu(true);
+  }, [tutorialForceToolMenu]);
+
   if (sigmaBench) {
     return (
-      <div style={{ position: 'relative', width: '100%', height: '100%', background: '#07080e' }}>
+      <div style={{ position: 'relative', width: '100%', height: '100%', background: 'var(--ch-shell-bg)' }}>
         <GraphSigmaBench onExit={() => {
           try { localStorage.removeItem('chronicler_dev_sigma_bench'); } catch (e) {}
           setSigmaBench(false);
@@ -1327,7 +1326,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         rootRef.current = el;
         if (tutorialRefs?.canvas) tutorialRefs.canvas.current = el;
       }}
-      style={{ position: 'relative', width: '100%', height: '100%', background: '#07080e' }}
+      style={{ position: 'relative', width: '100%', height: '100%', background: 'var(--ch-shell-bg)' }}
     >
       {/* Grid background */}
       <div style={{
@@ -1341,7 +1340,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         <Suspense fallback={(
           <div style={{
             position: 'absolute', inset: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'rgba(200,148,58,0.6)', fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.12em',
+            color: 'rgba(200,148,58,0.6)', fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.12em',
           }}
           >
             Loading performance map…
@@ -1352,7 +1351,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             notes={renderNotes}
             connections={renderConnections}
             posKey={renderPosKey}
-            edgeTheme={edgeTheme}
+            theme={theme}
             selectedNoteId={selectedNoteId}
             onSelectNote={onSelectNote}
             onOpenNote={onOpenNote}
@@ -1397,7 +1396,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             fontFamily: 'Cinzel, serif',
             fontSize: '10px',
             letterSpacing: '0.08em',
-            color: 'rgba(226,213,187,0.9)',
+            color: 'var(--ch-text-primary-90)',
             background: 'rgba(7,8,14,0.92)',
             border: '1px solid rgba(200,148,58,0.35)',
             borderRadius: '4px',
@@ -1408,13 +1407,13 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
           }}
         >
           <div style={{ fontSize: '8px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.65)', marginBottom: '4px' }}>ZOOM SCALE</div>
-          <div data-zoom style={{ color: '#c8943a', fontSize: '13px' }}>—</div>
-          <div data-zone style={{ fontSize: '9px', color: 'rgba(226,213,187,0.55)', marginTop: '2px' }}>—</div>
-          <div data-visible style={{ fontSize: '9px', color: 'rgba(226,213,187,0.45)', marginTop: '2px' }}>—</div>
-          <div data-stats style={{ fontSize: '9px', color: 'rgba(226,213,187,0.5)', marginTop: '4px' }}>—</div>
+          <div data-zoom style={{ color: 'var(--ch-accent)', fontSize: '13px' }}>—</div>
+          <div data-zone style={{ fontSize: '9px', color: 'var(--ch-text-primary-55)', marginTop: '2px' }}>—</div>
+          <div data-visible style={{ fontSize: '9px', color: 'var(--ch-text-primary-45)', marginTop: '2px' }}>—</div>
+          <div data-stats style={{ fontSize: '9px', color: 'var(--ch-text-primary-50)', marginTop: '4px' }}>—</div>
           <div data-fps style={{ fontSize: '9px', color: 'rgba(139,196,226,0.75)', marginTop: '2px' }}>— FPS</div>
-          <div data-engine style={{ fontSize: '8px', color: 'rgba(226,213,187,0.45)', marginTop: '4px' }}>—</div>
-          <div style={{ fontSize: '8px', color: 'rgba(226,213,187,0.35)', marginTop: '6px', letterSpacing: '0.04em' }}>
+          <div data-engine style={{ fontSize: '8px', color: 'var(--ch-text-primary-45)', marginTop: '4px' }}>—</div>
+          <div style={{ fontSize: '8px', color: 'var(--ch-text-primary-35)', marginTop: '6px', letterSpacing: '0.04em' }}>
             Range {GRAPH_MIN_ZOOM.toFixed(2)}–{GRAPH_MAX_ZOOM.toFixed(2)} · drag pan · wheel zoom
           </div>
         </div>
@@ -1425,7 +1424,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         <div style={{
           position: 'absolute', zIndex: 10,
           left: Math.max(8, editingEdge.x - 160), top: editingEdge.y - 8,
-          background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)',
+          background: 'var(--ch-card-bg)', border: '1px solid rgba(200,148,58,0.35)',
           borderRadius: '6px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '8px',
           boxShadow: '0 4px 20px rgba(0,0,0,0.8)', maxWidth: 'min(92vw, 360px)',
         }}
@@ -1436,8 +1435,8 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
               autoFocus
               disabled={webReadOnly}
               style={{
-                flex: '1 1 140px', minWidth: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)',
-                borderRadius: '3px', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                flex: '1 1 140px', minWidth: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--ch-border-strong)',
+                borderRadius: '3px', color: 'var(--ch-text-primary)', fontFamily: 'var(--ch-font-body)', fontSize: '14px',
                 padding: '4px 8px', outline: 'none',
               }}
               value={editingEdge.label}
@@ -1451,14 +1450,14 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             <button
               disabled={webReadOnly}
               onClick={() => handleEdgeSave(editingEdge.id, { label: editingEdge.label, direction: editingEdge.direction })}
-              style={{ padding: '4px 8px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
+              style={{ padding: '4px 8px', background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
             >
               SAVE
             </button>
             <button
               disabled={webReadOnly}
               onClick={() => handleEdgeSave(editingEdge.id, { label: '', direction: editingEdge.direction })}
-              style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: 'rgba(226,213,187,0.4)', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
+              style={{ padding: '4px 8px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer', color: 'var(--ch-text-primary-40)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1 }}
             >
               CLEAR
             </button>
@@ -1470,7 +1469,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
                 title="Remove this theory or ship link"
                 style={{
                   padding: '4px 8px', background: 'rgba(196,80,80,0.12)', border: '1px solid rgba(196,100,100,0.35)', borderRadius: '3px',
-                  cursor: webReadOnly ? 'default' : 'pointer', color: 'rgba(240,160,160,0.95)', fontFamily: 'Cinzel', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1,
+                  cursor: webReadOnly ? 'default' : 'pointer', color: 'rgba(240,160,160,0.95)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', opacity: webReadOnly ? 0.45 : 1,
                 }}
               >
                 REMOVE
@@ -1478,7 +1477,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             )}
           </div>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.55)', marginBottom: '5px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.55)', marginBottom: '5px' }}>
               DIRECTION
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1496,10 +1495,10 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
                     onClick={() => setEditingEdge(prev => ({ ...prev, direction: value }))}
                     style={{
                       textAlign: 'left', padding: '6px 8px', borderRadius: '3px', cursor: webReadOnly ? 'default' : 'pointer',
-                      fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.06em',
-                      background: active ? 'rgba(200,148,58,0.18)' : 'rgba(255,255,255,0.03)',
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.06em',
+                      background: active ? 'var(--ch-accent-18)' : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${active ? 'rgba(200,148,58,0.45)' : 'rgba(255,255,255,0.08)'}`,
-                      color: active ? '#c8943a' : 'rgba(226,213,187,0.65)',
+                      color: active ? '#c8943a' : 'var(--ch-text-primary-65)',
                       opacity: webReadOnly ? 0.5 : 1,
                     }}
                   >
@@ -1532,7 +1531,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         >
           <div style={{ pointerEvents: 'auto' }}>
             {graphCampaignRoots.length === 1 ? (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', whiteSpace: 'nowrap' }}>
                 {activeCampaignName?.toUpperCase()}
               </div>
             ) : (
@@ -1542,7 +1541,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
                 onChange={e => setActiveCampaignId(parseInt(e.target.value))}
                 style={{
                   background: 'rgba(7,8,14,0.9)', border: '1px solid rgba(200,148,58,0.3)',
-                  borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px',
+                  borderRadius: '3px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '10px',
                   letterSpacing: '0.1em', padding: '5px 28px 5px 12px', cursor: 'pointer',
                   outline: 'none', appearance: 'none',
                   backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23c8943a' opacity='0.6'/%3E%3C/svg%3E")`,
@@ -1550,7 +1549,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
                 }}
               >
                 {graphCampaignRoots.map(f => (
-                  <option key={f.id} value={f.id} style={{ background: '#0f1219', color: '#e2d5bb' }}>
+                  <option key={f.id} value={f.id} style={{ background: 'var(--ch-card-bg)', color: 'var(--ch-text-primary)' }}>
                     {f.title}
                   </option>
                 ))}
@@ -1561,10 +1560,10 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
             <span
               style={{
                 display: 'inline-block',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.14em',
-                color: 'rgba(200,148,58,0.85)',
+                color: 'var(--ch-text-accent)',
                 padding: '6px 12px',
                 borderRadius: '4px',
                 border: '1px solid rgba(200,148,58,0.3)',
@@ -1584,7 +1583,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         <LegendPanel
           selectedNoteId={selectedNoteId}
           edgeTheme={edgeTheme}
-          onEdgeThemeChange={setEdgeTheme}
+          textPrimary={theme.colors.textPrimary}
           tutorialRefs={tutorialRefs}
           showZoomHud={showZoomHud}
           onToggleZoomHud={() => setShowZoomHud((v) => !v)}
@@ -1602,49 +1601,63 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
               <button
                 ref={tutorialRefs?.overflowMenu || null}
                 onClick={() => setShowToolMenu(v => !v)}
-                style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', padding: isMobile ? '10px 16px' : '6px 12px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', background: showToolMenu ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)' }}
+                style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', padding: isMobile ? '10px 16px' : '6px 12px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', background: showToolMenu ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)' }}
               >{isMobile ? 'MENU' : '···'}</button>
               {showToolMenu && (
-                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: isMobile ? '160px' : '140px', boxShadow: '0 6px 24px rgba(0,0,0,0.7)' }}>
-                  <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); })}
-                    style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: connectMode ? 'rgba(58,139,196,0.2)' : 'transparent', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.12)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.7)' }}>
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30, background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px', padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: isMobile ? '160px' : '140px', boxShadow: '0 6px 24px rgba(0,0,0,0.7)' }}>
+                  <button
+                    ref={shouldCollapseToolbar ? (tutorialRefs?.btnConnect || null) : null}
+                    onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); })}
+                    style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: connectMode ? 'rgba(58,139,196,0.2)' : 'transparent', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.12)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {connectMode ? '✕ Cancel Connect' : '⟵⟶ Connect'}
                   </button>
-                  <button onClick={() => guardStandardMapOnly(() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); })}
-                    style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: pathMode ? 'rgba(139,196,58,0.18)' : 'transparent', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.7)' }}>
+                  <button
+                    ref={shouldCollapseToolbar ? (tutorialRefs?.btnPath || null) : null}
+                    onClick={() => guardStandardMapOnly(() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); })}
+                    style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: pathMode ? 'rgba(139,196,58,0.18)' : 'transparent', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {pathMode ? '✕ Cancel Path' : '⬡ Find Path'}
                   </button>
                   {!effectiveIs3D && (
                     <>
-                      <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); })}
-                        style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'transparent', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : 'rgba(200,148,58,0.12)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.7)' }}>
+                      <button
+                        ref={shouldCollapseToolbar ? (tutorialRefs?.btnTheory || null) : null}
+                        onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); })}
+                        style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'transparent', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : 'rgba(200,148,58,0.12)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.7)' }}>
                         {theoryMode ? '✕ Theory' : '◇ Theory'}
                       </button>
-                      <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); setShowToolMenu(false); })}
-                        style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: shipMode ? 'rgba(220,80,140,0.18)' : 'transparent', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.45)' : 'rgba(200,148,58,0.12)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.7)' }}>
+                      <button
+                        ref={shouldCollapseToolbar ? (tutorialRefs?.btnShip || null) : null}
+                        onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); setShowToolMenu(false); })}
+                        style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: shipMode ? 'rgba(220,80,140,0.18)' : 'transparent', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.45)' : 'rgba(200,148,58,0.12)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.7)' }}>
                         {shipMode ? '✕ Ship' : '♥ Ship'}
                       </button>
                     </>
                   )}
-                  <button onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); setShowToolMenu(false); }}
-                    style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'transparent', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.3)' : 'rgba(200,148,58,0.12)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.7)' }}>
+                  <button
+                    ref={shouldCollapseToolbar ? (tutorialRefs?.btn3d || null) : null}
+                    onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); setShowToolMenu(false); }}
+                    style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'transparent', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.3)' : 'rgba(200,148,58,0.12)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.7)' }}>
                     {effectiveIs3D ? '↩ 2D View' : '◈ 3D View'}
                   </button>
                   {!effectiveIs3D && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                      <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(200,148,58,0.45)', padding: '2px 4px 0' }}>LAYOUT</div>
-                      {renderLayoutMenuItems(() => setShowToolMenu(false))}
+                      <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(200,148,58,0.45)', padding: '2px 4px 0' }}>LAYOUT</div>
+                      {renderLayoutMenuItems(() => setShowToolMenu(false), {
+                        layoutTutorialRef: shouldCollapseToolbar ? tutorialRefs?.btnExpand : null,
+                      })}
                     </div>
                   )}
                   {!effectiveIs3D && (
                     <button onClick={() => { setShowZoomHud(v => !v); setShowToolMenu(false); }}
-                      style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: showZoomHud ? 'rgba(200,148,58,0.15)' : 'transparent', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.35)' : 'rgba(200,148,58,0.12)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.7)' }}>
+                      style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: showZoomHud ? 'rgba(200,148,58,0.15)' : 'transparent', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.35)' : 'rgba(200,148,58,0.12)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.7)' }}>
                       {showZoomHud ? '✕ Zoom HUD' : '⌖ Zoom HUD'}
                     </button>
                   )}
                   {isDMOfActiveCampaign && (
-                    <button onClick={() => { setDmView(v => !v); setShowToolMenu(false); }}
-                      style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: dmView ? 'rgba(200,148,58,0.2)' : 'transparent', border: `1px solid ${dmView ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: dmView ? '#c8943a' : 'rgba(200,148,58,0.7)' }}>
+                    <button
+                      ref={shouldCollapseToolbar ? (tutorialRefs?.btnDmView || null) : null}
+                      onClick={() => { setDmView(v => !v); setShowToolMenu(false); }}
+                      style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: dmView ? 'rgba(200,148,58,0.2)' : 'transparent', border: `1px solid ${dmView ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: dmView ? '#c8943a' : 'rgba(200,148,58,0.7)' }}>
                       ⚔ DM View
                     </button>
                   )}
@@ -1656,44 +1669,44 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
           {/* Inline buttons — always rendered so ref can measure width; hidden when narrow */}
           <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: shouldCollapseToolbar ? 'hidden' : 'visible', pointerEvents: shouldCollapseToolbar ? 'none' : 'auto' }}>
             <button
-              ref={tutorialRefs?.btnConnect || null}
+              ref={!shouldCollapseToolbar ? (tutorialRefs?.btnConnect || null) : null}
               onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } })}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{connectMode ? '✕ Cancel' : '⟵⟶ Connect'}</button>
             <button
-              ref={tutorialRefs?.btnPath || null}
+              ref={!shouldCollapseToolbar ? (tutorialRefs?.btnPath || null) : null}
               onClick={() => guardStandardMapOnly(() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); })}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: pathMode ? 'rgba(139,196,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.5)' : 'rgba(200,148,58,0.25)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: pathMode ? 'rgba(139,196,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.5)' : 'rgba(200,148,58,0.25)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{pathMode ? '✕ Cancel' : '⬡ Find Path'}</button>
                   {!effectiveIs3D && (
               <>
                 <button
-                  ref={tutorialRefs?.btnTheory || null}
+                  ref={!shouldCollapseToolbar ? (tutorialRefs?.btnTheory || null) : null}
                   onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); })}
                   title="Add a speculative theory link (dashed violet)"
-                  style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.5)' : 'rgba(200,148,58,0.25)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+                  style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.5)' : 'rgba(200,148,58,0.25)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
                 >{theoryMode ? '✕ Theory' : '◇ Theory'}</button>
                 <button
-                  ref={tutorialRefs?.btnShip || null}
+                  ref={!shouldCollapseToolbar ? (tutorialRefs?.btnShip || null) : null}
                   onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); })}
                   title="Ship two NPC/Character notes (dashed pink)"
-                  style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: shipMode ? 'rgba(220,80,140,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.5)' : 'rgba(200,148,58,0.25)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+                  style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: shipMode ? 'rgba(220,80,140,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.5)' : 'rgba(200,148,58,0.25)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
                 >{shipMode ? '✕ Ship' : '♥ Ship'}</button>
               </>
             )}
             <button
-              ref={tutorialRefs?.btn3d || null}
+              ref={!shouldCollapseToolbar ? (tutorialRefs?.btn3d || null) : null}
               onClick={() => { setIs3D(v => !v); exitConnectMode(); exitPathMode(); exitTheoryMode(); exitShipMode(); }}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{effectiveIs3D ? '2D' : '3D'}</button>
             {!effectiveIs3D && (
               <div style={{ position: 'relative' }}>
                 <button
-                  ref={tutorialRefs?.btnExpand || null}
+                  ref={!shouldCollapseToolbar ? (tutorialRefs?.btnExpand || null) : null}
                   onClick={() => setShowLayoutMenu(v => !v)}
                   title="Layout tools — highlight new nodes or organize the graph"
                   style={{
-                    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer',
+                    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer',
                     background: (showLayoutMenu || highlightNewActive || organizePreview) ? 'rgba(200,148,58,0.18)' : 'rgba(200,148,58,0.08)',
                     border: `1px solid ${(showLayoutMenu || highlightNewActive) ? 'rgba(200,148,58,0.45)' : 'rgba(200,148,58,0.25)'}`,
                     color: (showLayoutMenu || highlightNewActive) ? '#c8943a' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap',
@@ -1704,7 +1717,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
                 {showLayoutMenu && (
                   <div style={{
                     position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30,
-                    background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px',
+                    background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px',
                     padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '168px',
                     boxShadow: '0 6px 24px rgba(0,0,0,0.7)',
                   }}>
@@ -1717,12 +1730,12 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
               <button
                 onClick={() => setShowZoomHud(v => !v)}
                 title={showZoomHud ? 'Hide zoom scale overlay' : 'Show zoom scale, FPS, and performance zone'}
-                style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: showZoomHud ? 'rgba(200,148,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.45)' : 'rgba(200,148,58,0.25)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+                style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: showZoomHud ? 'rgba(200,148,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.45)' : 'rgba(200,148,58,0.25)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
               >{showZoomHud ? '✕ HUD' : '⌖ Zoom/FPS'}</button>
             )}
             {isDMOfActiveCampaign && (
-              <button ref={tutorialRefs?.btnDmView || null} onClick={() => setDmView(v => !v)} title={dmView ? 'Showing DM-only notes — click to hide' : 'Show DM-only notes'}
-                style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: dmView ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.04)', border: `1px solid ${dmView ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, color: dmView ? '#c8943a' : 'rgba(226,213,187,0.3)', whiteSpace: 'nowrap' }}
+              <button ref={!shouldCollapseToolbar ? (tutorialRefs?.btnDmView || null) : null} onClick={() => setDmView(v => !v)} title={dmView ? 'Showing DM-only notes — click to hide' : 'Show DM-only notes'}
+                style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: dmView ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.04)', border: `1px solid ${dmView ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.1)'}`, color: dmView ? '#c8943a' : 'var(--ch-text-primary-30)', whiteSpace: 'nowrap' }}
               >⚔ DM View</button>
             )}
           </div>
@@ -1731,14 +1744,14 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
         {/* Status / hints — below the button row */}
         {(layoutHint || highlightNewActive) && (
           <div style={{
-            fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', padding: '6px 12px',
+            fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.1em', padding: '6px 12px',
             background: highlightNewActive ? 'rgba(200,148,58,0.14)' : 'rgba(255,255,255,0.04)',
             border: `1px solid ${highlightNewActive ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.2)'}`,
-            borderRadius: '3px', color: highlightNewActive ? '#e8c060' : 'rgba(226,213,187,0.75)', maxWidth: 'min(92vw, 420px)', textAlign: 'right',
+            borderRadius: '3px', color: highlightNewActive ? '#e8c060' : 'var(--ch-text-primary-75)', maxWidth: 'min(92vw, 420px)', textAlign: 'right',
           }}>
             {layoutHint || 'Acknowledge each new node'}
             {highlightNewActive && (
-              <button type="button" onClick={exitHighlightNewMode} style={{ marginLeft: '10px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', padding: '2px 6px', borderRadius: '2px', cursor: 'pointer', background: 'transparent', border: '1px solid rgba(200,148,58,0.35)', color: 'rgba(200,148,58,0.8)' }}>Cancel</button>
+              <button type="button" onClick={exitHighlightNewMode} style={{ marginLeft: '10px', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', padding: '2px 6px', borderRadius: '2px', cursor: 'pointer', background: 'transparent', border: '1px solid rgba(200,148,58,0.35)', color: 'rgba(200,148,58,0.8)' }}>Cancel</button>
             )}
           </div>
         )}
@@ -1746,7 +1759,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {(connectMode || theoryMode || shipMode) && !pathMode && (
               <div style={{
-                fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px',
+                fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px',
                 background: theoryMode ? 'rgba(150,100,200,0.15)' : shipMode ? 'rgba(220,80,140,0.12)' : 'rgba(58,139,196,0.15)',
                 border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : shipMode ? 'rgba(255,120,170,0.4)' : 'rgba(58,139,196,0.4)'}`,
                 borderRadius: '3px',
@@ -1757,17 +1770,17 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
               </div>
             )}
             {pathMode && !pathResult && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
                 {pathSource ? `FROM: ${(pathSource.title || pathSource.name || '').slice(0, 20)} → click target` : 'Click source node'}
               </div>
             )}
             {pathResult && !pathResult.found && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(196,80,58,0.12)', border: '1px solid rgba(196,80,58,0.35)', borderRadius: '3px', color: 'rgba(226,140,100,0.9)', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(196,80,58,0.12)', border: '1px solid rgba(196,80,58,0.35)', borderRadius: '3px', color: 'rgba(226,140,100,0.9)', whiteSpace: 'nowrap' }}>
                 No path found between these nodes
               </div>
             )}
             {pathResult?.found && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', padding: '6px 12px', background: 'rgba(139,196,58,0.12)', border: '1px solid rgba(139,196,58,0.35)', borderRadius: '3px', color: 'rgba(180,226,100,0.9)', whiteSpace: 'nowrap' }}>
                 {pathResult.paths.length} path{pathResult.paths.length > 1 ? 's' : ''} · {pathResult.paths[0].length - 1} hops
               </div>
             )}
@@ -1781,7 +1794,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', pointerEvents: 'auto',
         }}>
           <div style={{
-            fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.9)',
+            fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', color: 'var(--ch-text-primary-90)',
             background: 'rgba(7,8,14,0.94)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px',
             padding: '10px 14px', textAlign: 'center', maxWidth: 'min(92vw, 380px)', lineHeight: 1.45,
           }}>
@@ -1789,11 +1802,11 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button type="button" onClick={confirmOrganizePreview}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(200,148,58,0.22)', border: '1px solid rgba(200,148,58,0.5)', color: '#e8c060' }}>
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(200,148,58,0.22)', border: '1px solid rgba(200,148,58,0.5)', color: '#e8c060' }}>
               Confirm
             </button>
             <button type="button" onClick={cancelOrganizePreview}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(226,213,187,0.75)' }}>
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--ch-text-primary-75)' }}>
               Cancel
             </button>
           </div>
@@ -1826,8 +1839,8 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
       {visibleNotes.length === 0 && !devFixture && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' }}>
           <div style={{ textAlign: 'center', opacity: 0.25 }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '18px', color: '#c8943a', marginBottom: '8px' }}>No notes in this campaign</div>
-            <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: '#e2d5bb' }}>Create notes and they'll appear here</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '18px', color: 'var(--ch-accent)', marginBottom: '8px' }}>No notes in this campaign</div>
+            <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary)' }}>Create notes and they'll appear here</div>
           </div>
         </div>
       )}
@@ -2182,11 +2195,11 @@ function buildKindEdgeStyles(theme) {
  */
 /** Memoized Cytoscape stylesheet JSON — theme edits are infrequent. */
 const styleCacheByTheme = new Map();
-const STYLE_CACHE_VERSION = 6;
+const STYLE_CACHE_VERSION = 7;
 
 /**
- * Returns cached buildStyle output for a theme object.
- * @param {typeof DEFAULT_EDGE_THEME} theme
+ * Returns cached buildStyle output for a full Chronicler theme.
+ * @param {import('../theme/schema.js').ChroniclerTheme} theme
  * @returns {object[]}
  */
 function getCachedStyle(theme) {
@@ -2198,9 +2211,9 @@ function getCachedStyle(theme) {
 }
 
 /**
- * Re-applies edge theme stylesheet to a live Cytoscape instance.
+ * Re-applies graph stylesheet to a live Cytoscape instance.
  * @param {import('cytoscape').Core|null} cy
- * @param {typeof DEFAULT_EDGE_THEME} theme
+ * @param {import('../theme/schema.js').ChroniclerTheme} theme
  */
 function applyGraphStyle(cy, theme) {
   if (!cy) return;
@@ -2208,7 +2221,15 @@ function applyGraphStyle(cy, theme) {
   cy.style().update();
 }
 
-function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
+/**
+ * Builds Cytoscape stylesheet from site theme tokens (edges, labels, canvas).
+ * @param {import('../theme/schema.js').ChroniclerTheme} theme
+ */
+function buildStyle(theme) {
+  const edgeTheme = theme?.edges || DEFAULT_EDGE_THEME;
+  const labelColor = theme?.colors?.textPrimary || 'var(--ch-text-primary)';
+  const graphBg = theme?.colors?.graphBg || theme?.colors?.shellBg || '#07080e';
+  const displayFont = theme?.fonts?.display || 'Cinzel';
   // Node opacity per tier using HOP_OPACITY table
   const nodeTierStyles = HOP_OPACITY.map((op, i) => {
     const base = { 'opacity': op };
@@ -2230,15 +2251,15 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
   }));
 
   return [
-    { selector: 'core', style: { 'background-color': '#07080e' } },
+    { selector: 'core', style: { 'background-color': graphBg } },
     {
       selector: 'node',
       style: {
         'background-color': 'data(color)', 'background-opacity': 0.15,
         'border-color': 'data(color)', 'border-width': 1.5, 'border-opacity': 0.8,
-        'label': 'data(label)', 'color': '#e2d5bb', 'font-family': 'Cinzel, serif', 'font-size': '11px',
+        'label': 'data(label)', 'color': labelColor, 'font-family': `${displayFont}, serif`, 'font-size': '11px',
         'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 6,
-        'text-background-color': '#07080e', 'text-background-opacity': 0.8, 'text-background-padding': '3px',
+        'text-background-color': graphBg, 'text-background-opacity': 0.8, 'text-background-padding': '3px',
         'text-wrap': 'ellipsis', 'text-max-width': '120px',
         'width': 34, 'height': 34,
         'transition-property': 'opacity, width, height, border-width, background-opacity, border-opacity, font-size',
@@ -2278,8 +2299,8 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
         'curve-style': 'straight',
         'label': 'data(label)', 'font-size': '9px', 'color': canon.color,
         'text-opacity': Math.min(1, canonB * 1.1),
-        'font-family': 'Cinzel, serif',
-        'text-background-color': '#07080e', 'text-background-opacity': 0.75, 'text-background-padding': '2px',
+        'font-family': `${displayFont}, serif`,
+        'text-background-color': graphBg, 'text-background-opacity': 0.75, 'text-background-padding': '2px',
         'transition-property': 'opacity, width, line-opacity',
         'transition-duration': `${HOVER_TRANSITION_MS}ms`,
         'transition-timing-function': 'ease-in-out',
@@ -2308,140 +2329,7 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
   ];
 }
 
-/** Preset swatches for the in-app edge color picker (no native OS dialog). */
-const EDGE_COLOR_PRESETS = [
-  '#c8943a', '#d4a84a', '#e2d5bb',
-  '#9664c8', '#7a50a8',
-  '#d05090', '#c07088',
-  '#6a9cb8', '#7ab87a', '#a08060',
-];
-
-/**
- * In-app color picker: preset swatches + hex field (Chronicler styling).
- * @param {{ value: string, onChange: (hex: string) => void, label: string }} props
- */
-function ChroniclerColorPicker({ value, onChange, label }) {
-  const [open, setOpen] = useState(false);
-  const [hexDraft, setHexDraft] = useState(value);
-  const wrapRef = useRef(null);
-
-  useEffect(() => { setHexDraft(value); }, [value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [open]);
-
-  const commitHex = () => {
-    const v = hexDraft.trim();
-    if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v.toLowerCase());
-    else setHexDraft(value);
-  };
-
-  return (
-    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        aria-label={`${label} color`}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: 32, height: 26, padding: 2, borderRadius: 4, cursor: 'pointer',
-          background: '#07080e', border: `1px solid ${open ? 'rgba(200,148,58,0.55)' : 'rgba(200,148,58,0.35)'}`,
-        }}
-      >
-        <span style={{ display: 'block', width: '100%', height: '100%', borderRadius: 2, background: value }} />
-      </button>
-      {open && (
-        <div
-          style={{
-            position: 'absolute', left: 0, top: '100%', marginTop: 4, zIndex: 50,
-            background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)',
-            borderRadius: 6, padding: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.8)', width: 156,
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.65)', marginBottom: 8 }}>
-            {label.toUpperCase()}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 5, marginBottom: 10 }}>
-            {EDGE_COLOR_PRESETS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={`Set color ${c}`}
-                onClick={() => { onChange(c); setOpen(false); }}
-                style={{
-                  width: 24, height: 24, borderRadius: 3, padding: 0, cursor: 'pointer',
-                  background: c,
-                  border: c.toLowerCase() === value.toLowerCase() ? '2px solid #e2d5bb' : '1px solid rgba(255,255,255,0.1)',
-                  boxShadow: c.toLowerCase() === value.toLowerCase() ? '0 0 6px rgba(200,148,58,0.4)' : 'none',
-                }}
-              />
-            ))}
-          </div>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.55)', marginBottom: 4 }}>HEX</div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <input
-              type="text"
-              value={hexDraft}
-              onChange={(e) => setHexDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { commitHex(); setOpen(false); } }}
-              onBlur={commitHex}
-              style={{
-                flex: 1, minWidth: 0, padding: '5px 8px', borderRadius: 3,
-                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.25)',
-                color: '#e2d5bb', fontFamily: 'monospace', fontSize: 11, outline: 'none',
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => { commitHex(); setOpen(false); }}
-              style={{
-                padding: '4px 7px', borderRadius: 3, cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px',
-                background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.3)', color: '#c8943a',
-              }}
-            >
-              SET
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Brightness slider styled for the graph legend panel.
- * @param {{ value: number, onChange: (n: number) => void, accentColor: string, label: string }} props
- */
-function ChroniclerBrightnessSlider({ value, onChange, accentColor, label }) {
-  const pct = Math.round(value * 100);
-  return (
-    <input
-      type="range"
-      min={5}
-      max={100}
-      value={pct}
-      aria-label={label}
-      onChange={(e) => onChange(Number(e.target.value) / 100)}
-      style={{
-        flex: 1,
-        minWidth: 0,
-        height: 20,
-        margin: 0,
-        cursor: 'pointer',
-        accentColor: accentColor || '#c8943a',
-      }}
-    />
-  );
-}
-
-function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRefs = null, showZoomHud = false, onToggleZoomHud = null, zoomHudLive = null }) {
+function LegendPanel({ selectedNoteId, edgeTheme, textPrimary = '#e2d5bb', tutorialRefs = null, showZoomHud = false, onToggleZoomHud = null, zoomHudLive = null }) {
   const [open, setOpen] = useState(false);
   const panelW = 210;
   return (
@@ -2464,7 +2352,7 @@ function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRef
         flexShrink: 0,
       }}>
         <div style={{ width: `${panelW - 24}px` }}>
-          <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CATEGORIES</div>
+          <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CATEGORIES</div>
           {[
             { cat: 'npc', label: 'NPC' }, { cat: 'location', label: 'Location' },
             { cat: 'faction', label: 'Faction' }, { cat: 'item', label: 'Item' },
@@ -2473,90 +2361,55 @@ function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRef
           ].map(({ cat, label }) => (
             <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: getCategoryColor(cat), flexShrink: 0 }} />
-              <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: 'var(--ch-text-primary-75)', letterSpacing: '0.05em' }}>{label}</span>
             </div>
           ))}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px', opacity: selectedNoteId ? 1 : 0.35, transition: 'opacity 0.2s' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', margin: '8px 0' }}>CONNECTION DEPTH</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', margin: '8px 0' }}>CONNECTION DEPTH</div>
             {[{ label: 'Selected', opacity: 1 }, { label: '1 hop', opacity: 0.75 }, { label: '2 hops', opacity: 0.45 }, { label: '3+ hops', opacity: 0.2 }].map(({ label, opacity }) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: `rgba(200,148,58,${opacity})`, flexShrink: 0 }} />
-                <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: `rgba(226,213,187,${Math.min(1, opacity * 0.8 + 0.4)})`, letterSpacing: '0.05em' }}>{label}</span>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: hexToRgba(textPrimary, Math.min(1, opacity * 0.8 + 0.4)), letterSpacing: '0.05em' }}>{label}</span>
               </div>
             ))}
           </div>
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CONNECTIONS</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>CONNECTIONS</div>
             {EDGE_KIND_META.map(({ key, label }) => {
               const t = edgeTheme?.[key] || DEFAULT_EDGE_THEME[key];
               const dash = key !== 'canon';
               return (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
                   <span style={{ width: '22px', flexShrink: 0, borderTop: `2px ${dash ? 'dashed' : 'solid'} ${t.color}`, opacity: t.brightness }} />
-                  <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
+                  <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: 'var(--ch-text-primary-75)', letterSpacing: '0.05em' }}>{label}</span>
                 </div>
               );
             })}
           </div>
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>DIRECTION</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>DIRECTION</div>
             {[
               { label: 'Both ways', glyph: '—' },
               { label: 'One way', glyph: '→' },
             ].map(({ label, glyph }) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
-                <span style={{ fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(200,148,58,0.55)', width: '22px', flexShrink: 0, textAlign: 'center' }}>{glyph}</span>
-                <span style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', letterSpacing: '0.05em' }}>{label}</span>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: 'rgba(200,148,58,0.55)', width: '22px', flexShrink: 0, textAlign: 'center' }}>{glyph}</span>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: 'var(--ch-text-primary-75)', letterSpacing: '0.05em' }}>{label}</span>
               </div>
             ))}
           </div>
-          {onEdgeThemeChange && edgeTheme && (
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>EDGE APPEARANCE</div>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px', lineHeight: 1.4 }}>
-                Color and brightness per link type (line, label, arrows)
-              </div>
-              {EDGE_KIND_META.map(({ key, label }) => (
-                <div key={key} style={{ marginBottom: '12px' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.75)', marginBottom: '5px', letterSpacing: '0.06em' }}>{label}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <ChroniclerColorPicker
-                      label={label}
-                      value={edgeTheme[key].color}
-                      onChange={(color) => onEdgeThemeChange((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], color },
-                      }))}
-                    />
-                    <ChroniclerBrightnessSlider
-                      label={`${label} edge brightness`}
-                      accentColor={edgeTheme[key].color}
-                      value={edgeTheme[key].brightness}
-                      onChange={(brightness) => onEdgeThemeChange((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], brightness },
-                      }))}
-                    />
-                    <span style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(200,148,58,0.55)', width: 30, textAlign: 'right', flexShrink: 0 }}>
-                      {Math.round(edgeTheme[key].brightness * 100)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
           {onToggleZoomHud && (
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>ZOOM / FPS</div>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>ZOOM / FPS</div>
               {zoomHudLive && (
                 <div style={{ marginBottom: '8px' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '12px', color: '#c8943a' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '12px', color: 'var(--ch-accent)' }}>
                     {zoomHudLive.zoom.toFixed(2)}× ({Math.round(zoomHudLive.zoom * 100)}%)
                   </div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(226,213,187,0.55)', marginTop: '3px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'var(--ch-text-primary-55)', marginTop: '3px' }}>
                     {zoomHudLive.zone}
                   </div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(226,213,187,0.4)', marginTop: '2px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'var(--ch-text-primary-40)', marginTop: '2px' }}>
                     {zoomHudLive.nodes} nodes · {zoomHudLive.edges} edges
                   </div>
                 </div>
@@ -2566,20 +2419,20 @@ function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRef
                 onClick={onToggleZoomHud}
                 style={{
                   width: '100%', padding: '6px 8px', borderRadius: '3px', cursor: 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em',
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.08em',
                   background: showZoomHud ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
                   border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.35)' : 'rgba(255,255,255,0.1)'}`,
-                  color: showZoomHud ? '#c8943a' : 'rgba(226,213,187,0.55)',
+                  color: showZoomHud ? '#c8943a' : 'var(--ch-text-primary-55)',
                 }}
               >
                 {showZoomHud ? 'Hide zoom overlay' : 'Show zoom overlay'}
               </button>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.4)', marginTop: '6px', lineHeight: 1.4 }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.4)', marginTop: '6px', lineHeight: 1.4 }}>
                 Overlay also in toolbar: ⌖ Zoom/FPS
               </div>
             </div>
           )}
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '8px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.55)' }}>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.55)' }}>
             CLICK EDGE TO EDIT LABEL & DIRECTION
           </div>
         </div>
@@ -2601,7 +2454,7 @@ function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRef
         }}
         title={open ? 'Close legend' : 'Open legend'}
       >
-        <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.05em', writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)', color: 'rgba(200,148,58,0.65)' }}>LEGEND</span>
+        <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.05em', writingMode: 'vertical-rl', textOrientation: 'mixed', transform: 'rotate(180deg)', color: 'rgba(200,148,58,0.65)' }}>LEGEND</span>
         <span style={{ fontSize: '10px', marginTop: '4px' }}>{open ? '«' : '»'}</span>
       </button>
     </div>

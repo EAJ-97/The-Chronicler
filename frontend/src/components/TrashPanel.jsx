@@ -46,7 +46,7 @@ export default function TrashPanel({ currentUser, onClose, onRestored }) {
 
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '12px', letterSpacing: '0.15em', color: '#c8943a' }}>🗑 TRASH</span>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '12px', letterSpacing: '0.15em', color: 'var(--ch-accent)' }}>🗑 TRASH</span>
           <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)' }}>Items auto-purge after 48 hours</span>
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.3)', fontSize: '18px', lineHeight: 1 }}>×</button>
         </div>
@@ -54,7 +54,7 @@ export default function TrashPanel({ currentUser, onClose, onRestored }) {
         {/* List */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
           {loading ? (
-            <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em' }}>LOADING...</div>
+            <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em' }}>LOADING...</div>
           ) : items.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.25)' }}>Trash is empty</div>
           ) : (
@@ -65,14 +65,14 @@ export default function TrashPanel({ currentUser, onClose, onRestored }) {
               >
                 <span style={{ fontSize: '14px', flexShrink: 0 }}>{item.is_folder ? '📁' : '📄'}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: '#e2d5bb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</div>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)', marginTop: '2px' }}>
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'var(--ch-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</div>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)', marginTop: '2px' }}>
                     by {item.author} · deleted {timeAgo(item.deleted_at)}
                   </div>
                 </div>
                 <button
                   onClick={() => handleRestore(item.id)}
-                  style={{ background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: 'pointer', padding: isMobile ? '8px 14px' : '3px 10px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: '#c8943a', flexShrink: 0, minHeight: isMobile ? '40px' : 'auto' }}
+                  style={{ background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '3px', cursor: 'pointer', padding: isMobile ? '8px 14px' : '3px 10px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'var(--ch-accent)', flexShrink: 0, minHeight: isMobile ? '40px' : 'auto' }}
                 >
                   Restore
                 </button>

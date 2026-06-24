@@ -62,7 +62,7 @@ function FolderOption({ node, depth, selectedId, onSelect }) {
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          fontFamily: 'Cinzel',
+          fontFamily: 'var(--ch-font-display)',
           fontSize: '11px',
           color: selected ? '#c8943a' : 'rgba(226,213,187,0.7)',
           letterSpacing: '0.05em',
@@ -93,7 +93,7 @@ const overlay = {
 };
 
 const panel = {
-  background: '#0a0c14',
+  background: 'var(--ch-panel-bg)',
   border: '1px solid rgba(200,148,58,0.25)',
   borderRadius: '8px',
   maxWidth: '640px',
@@ -109,7 +109,7 @@ const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(200,148,58,0.2)',
+  border: '1px solid var(--ch-border-strong)',
   borderRadius: '4px',
   color: 'rgba(226,213,187,0.9)',
   fontFamily: 'Crimson Pro, serif',
@@ -285,8 +285,8 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
       <div style={panel} onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '13px', letterSpacing: '0.18em', color: '#c8943a' }}>IMPORT D&amp;D BEYOND</div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginTop: '4px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '13px', letterSpacing: '0.18em', color: 'var(--ch-accent)' }}>IMPORT D&amp;D BEYOND</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginTop: '4px' }}>
               Step {step} of 3 — {stepLabels[step - 1]}
             </div>
           </div>
@@ -302,10 +302,10 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
 
           {step === 1 && (
             <>
-              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.55)', margin: '0 0 12px', lineHeight: 1.5 }}>
+              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary-55)', margin: '0 0 12px', lineHeight: 1.5 }}>
                 Paste a character URL from dndbeyond.com. Public characters work without any setup.
               </p>
-              <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>CHARACTER URL</label>
+              <label style={{ display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>CHARACTER URL</label>
               <input
                 style={inputStyle}
                 placeholder="https://www.dndbeyond.com/characters/123456789"
@@ -318,10 +318,10 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
 
               {connected && (listLoading || characterList.length > 0) && (
                 <div style={{ marginTop: '14px' }}>
-                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.7)', marginBottom: '8px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.7)', marginBottom: '8px' }}>
                     ✓ D&amp;D Beyond connected on this device
                   </div>
-                  <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>MY CHARACTERS (OPTIONAL)</label>
+                  <label style={{ display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.14em', color: 'rgba(200,148,58,0.5)', marginBottom: '6px' }}>MY CHARACTERS (OPTIONAL)</label>
                   <select
                     style={{ ...inputStyle, fontSize: '14px', colorScheme: 'dark' }}
                     value={selectedCharacterId ?? ''}
@@ -332,11 +332,11 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
                       if (id) setCharacterInput(`https://www.dndbeyond.com/characters/${id}`);
                     }}
                   >
-                    <option value="" style={{ background: '#1c1814', color: '#e2d5bb' }}>
+                    <option value="" style={{ background: '#1c1814', color: 'var(--ch-text-primary)' }}>
                       {listLoading ? 'Loading…' : 'Choose a character…'}
                     </option>
                     {characterList.map((c) => (
-                      <option key={c.id} value={c.id} style={{ background: '#1c1814', color: '#e2d5bb' }}>
+                      <option key={c.id} value={c.id} style={{ background: '#1c1814', color: 'var(--ch-text-primary)' }}>
                         {c.name}{c.level != null ? ` — Level ${c.level}` : ''}{c.classSummary ? ` (${c.classSummary})` : ''}
                       </option>
                     ))}
@@ -350,14 +350,14 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
               )}
 
               {connected && !listLoading && characterList.length === 0 && !listWarning && (
-                <div style={{ marginTop: '14px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.7)' }}>
+                <div style={{ marginTop: '14px', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.7)' }}>
                   ✓ D&amp;D Beyond connected — paste a character URL above
                 </div>
               )}
 
               <button
                 type="button"
-                style={{ marginTop: '14px', background: 'none', border: 'none', color: 'rgba(200,148,58,0.65)', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', cursor: 'pointer', padding: 0 }}
+                style={{ marginTop: '14px', background: 'none', border: 'none', color: 'rgba(200,148,58,0.65)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', cursor: 'pointer', padding: 0 }}
                 onClick={() => setShowPrivate((v) => !v)}
               >
                 {showPrivate ? '▾' : '▸'} Private character or browse my list
@@ -366,12 +366,12 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
               {showPrivate && (
                 <div style={{ marginTop: '10px', padding: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px' }}>
                   <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', margin: '0 0 10px', lineHeight: 1.45 }}>
-                    Copy <strong style={{ color: 'rgba(226,213,187,0.65)' }}>CobaltSession</strong> from Firefox Storage → Cookies → dndbeyond.com (filter &quot;cobalt&quot;).
+                    Copy <strong style={{ color: 'var(--ch-text-primary-65)' }}>CobaltSession</strong> from Firefox Storage → Cookies → dndbeyond.com (filter &quot;cobalt&quot;).
                     Do not use <em>cobalt-token</em>.
                     Then paste your private character URL above — you do not need an account ID.
                   </p>
                   {connected ? (
-                    <button type="button" onClick={disconnectCobalt} style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(255,160,160,0.8)', background: 'transparent', border: '1px solid rgba(255,160,160,0.3)', borderRadius: '3px', padding: '6px 12px', cursor: 'pointer' }}>
+                    <button type="button" onClick={disconnectCobalt} style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(255,160,160,0.8)', background: 'transparent', border: '1px solid rgba(255,160,160,0.3)', borderRadius: '3px', padding: '6px 12px', cursor: 'pointer' }}>
                       Disconnect this device
                     </button>
                   ) : (
@@ -383,7 +383,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
                         value={cobaltDraft}
                         onChange={(e) => setCobaltDraft(e.target.value)}
                       />
-                      <button type="button" disabled={busy} onClick={saveCobalt} style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: '#c8943a', background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '3px', padding: '8px 14px', cursor: busy ? 'wait' : 'pointer' }}>
+                      <button type="button" disabled={busy} onClick={saveCobalt} style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'var(--ch-accent)', background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '3px', padding: '8px 14px', cursor: busy ? 'wait' : 'pointer' }}>
                         {busy ? 'Testing…' : 'Save & connect'}
                       </button>
                     </>
@@ -395,7 +395,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
 
           {step === 2 && (
             <>
-              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.55)', margin: '0 0 12px' }}>
+              <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary-55)', margin: '0 0 12px' }}>
                 Choose the folder where the new character note will be created.
               </p>
               <div style={{ border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px', maxHeight: '280px', overflowY: 'auto' }}>
@@ -412,11 +412,11 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
 
           {step === 3 && preview && (
             <>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.1em', color: '#c8943a', marginBottom: '8px' }}>{preview.title}</div>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.1em', color: 'var(--ch-accent)', marginBottom: '8px' }}>{preview.title}</div>
               <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.45)', margin: '0 0 10px' }}>
                 The portrait appears in the note under the name and as the sidebar icon (scaled to fit). Opening the note later can check D&amp;D Beyond for flavor updates.
               </p>
-              <div style={{ maxHeight: '320px', overflowY: 'auto', padding: '12px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px', fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.75)' }}>
+              <div style={{ maxHeight: '320px', overflowY: 'auto', padding: '12px', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px', fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary-75)' }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={chroniclerUrlTransform}>{preview.content}</ReactMarkdown>
               </div>
             </>
@@ -428,7 +428,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
             type="button"
             disabled={step === 1 || busy}
             onClick={() => setStep((s) => Math.max(1, s - 1))}
-            style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.45)', background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', padding: '8px 16px', cursor: step === 1 ? 'default' : 'pointer', opacity: step === 1 ? 0.4 : 1 }}
+            style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.45)', background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '3px', padding: '8px 16px', cursor: step === 1 ? 'default' : 'pointer', opacity: step === 1 ? 0.4 : 1 }}
           >
             Back
           </button>
@@ -440,7 +440,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
                 if (step === 1) onStep1Next();
                 else if (step === 2) setStep(3);
               }}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: '#c8943a', background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', padding: '8px 20px', cursor: busy ? 'wait' : 'pointer' }}
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'var(--ch-accent)', background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', padding: '8px 20px', cursor: busy ? 'wait' : 'pointer' }}
             >
               {busy ? 'Loading…' : 'Next'}
             </button>
@@ -449,7 +449,7 @@ export default function DdbCharacterImportWizard({ onClose, notes, currentUser, 
               type="button"
               disabled={busy || !parentId}
               onClick={runImport}
-              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.95)', background: 'rgba(110,180,140,0.15)', border: '1px solid rgba(110,180,140,0.4)', borderRadius: '3px', padding: '8px 20px', cursor: busy ? 'wait' : 'pointer' }}
+              style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(110,219,176,0.95)', background: 'rgba(110,180,140,0.15)', border: '1px solid rgba(110,180,140,0.4)', borderRadius: '3px', padding: '8px 20px', cursor: busy ? 'wait' : 'pointer' }}
             >
               {busy ? 'Importing…' : 'Import as new note'}
             </button>

@@ -125,10 +125,14 @@ export class SigmaRenderer {
    * @param {object[]} notes
    * @param {object[]} connections
    * @param {Record<string, { x: number, y: number }>|null} positions
-   * @param {typeof DEFAULT_EDGE_THEME} [edgeTheme]
+   * @param {import('../../theme/schema.js').ChroniclerTheme|typeof DEFAULT_EDGE_THEME} [theme]
    */
-  setGraph(notes, connections, positions = {}, edgeTheme = DEFAULT_EDGE_THEME) {
+  setGraph(notes, connections, positions = {}, theme = DEFAULT_EDGE_THEME) {
     if (!this.container) return;
+    const edgeTheme = theme?.edges || theme;
+    const labelColor = theme?.colors?.textPrimary || '#e2d5bb';
+    const graphBg = theme?.colors?.graphBg || theme?.colors?.shellBg || '#07080e';
+    const displayFont = theme?.fonts?.display || 'Cinzel';
     const savedVisual = { ...this.visualState, newHighlightIds: new Set(this.visualState.newHighlightIds) };
     const savedSelected = this.selectedNodeId;
     this.destroy();
@@ -136,6 +140,7 @@ export class SigmaRenderer {
     this.visualState = savedVisual;
     this.selectedNodeId = savedSelected;
     this.edgeTheme = edgeTheme;
+    this.siteTheme = theme;
     this.notes = notes;
     this.connections = connections;
 
@@ -177,11 +182,11 @@ export class SigmaRenderer {
       labelGridCellSize: 80,
       labelRenderedSizeThreshold: 4,
       labelSize: 11,
-      labelFont: 'Cinzel, serif',
-      labelColor: { color: '#e2d5bb' },
+      labelFont: `${displayFont}, serif`,
+      labelColor: { color: labelColor },
       defaultNodeColor: '#c8943a',
       defaultEdgeColor: '#c8943a',
-      backgroundColor: '#07080e',
+      backgroundColor: graphBg,
       itemSizesReference: 'screen',
       minCameraRatio: GRAPH_MIN_ZOOM,
       maxCameraRatio: GRAPH_MAX_ZOOM,

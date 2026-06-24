@@ -21,7 +21,7 @@ function FolderOption({ node, depth, onSelect }) {
         style={{
           padding: `7px 12px 7px ${14 + depth * 16}px`,
           cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
-          fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(226,213,187,0.7)',
+          fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: 'rgba(226,213,187,0.7)',
           letterSpacing: '0.05em',
         }}
         onClick={() => onSelect(node.id)}
@@ -50,18 +50,18 @@ export default function MoveModal({ note, notes, onMove, onClose }) {
       <div style={{
         width: '100%', maxWidth: isMobile ? '100%' : '360px',
         maxHeight: isMobile ? '100%' : '70vh', height: isMobile ? '100%' : 'auto',
-        background: '#0f1219', border: isMobile ? 'none' : '1px solid rgba(200,148,58,0.2)',
+        background: 'var(--ch-card-bg)', border: isMobile ? 'none' : '1px solid rgba(200,148,58,0.2)',
         borderRadius: isMobile ? 0 : '4px', display: 'flex', flexDirection: 'column',
         boxShadow: '0 0 40px rgba(0,0,0,0.8)',
       }}>
         <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: '#c8943a' }}>MOVE NOTE</span>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'var(--ch-accent)' }}>MOVE NOTE</span>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.3)', cursor: 'pointer', fontSize: '18px' }}>×</button>
         </div>
         <div style={{ padding: '8px 0', overflowY: 'auto', flex: 1, WebkitOverflowScrolling: 'touch' }}>
           {/* Option to move to root (no parent) */}
           <div
-            style={{ padding: '7px 14px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(226,213,187,0.4)', letterSpacing: '0.05em' }}
+            style={{ padding: '7px 14px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: 'rgba(226,213,187,0.4)', letterSpacing: '0.05em' }}
             onClick={() => onMove(null)}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,148,58,0.08)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}

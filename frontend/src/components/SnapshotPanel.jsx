@@ -98,17 +98,17 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
       <div style={isMobile ? {
         width: '100%', height: '100%', maxHeight: '100%',
         display: 'flex', flexDirection: 'column',
-        background: '#0f1219', borderRadius: 0, border: 'none',
+        background: 'var(--ch-card-bg)', borderRadius: 0, border: 'none',
         paddingTop: 'env(safe-area-inset-top)',
       } : {
         width: '480px', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
-        background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)',
+        background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)',
         borderRadius: '4px', boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
       }}>
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '12px', letterSpacing: '0.1em', color: '#c8943a', marginBottom: '3px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '12px', letterSpacing: '0.1em', color: 'var(--ch-accent)', marginBottom: '3px' }}>
               CAMPAIGN SNAPSHOTS
             </div>
             <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.6)' }}>
@@ -132,7 +132,7 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
           </div>
 
           {error && (
-            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(224,112,112,0.7)', background: 'rgba(224,112,112,0.08)', border: '1px solid rgba(224,112,112,0.15)', borderRadius: '3px', padding: '8px 12px', marginBottom: '14px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.08em', color: 'rgba(224,112,112,0.7)', background: 'rgba(224,112,112,0.08)', border: '1px solid rgba(224,112,112,0.15)', borderRadius: '3px', padding: '8px 12px', marginBottom: '14px' }}>
               {error}
             </div>
           )}
@@ -154,14 +154,14 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
                       <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.8)' }}>
                         {new Date(s.saved_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
-                      {i === 0 && <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>}
+                      {i === 0 && <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(58,196,139,0.6)', background: 'rgba(58,196,139,0.08)', border: '1px solid rgba(58,196,139,0.15)', borderRadius: '10px', padding: '1px 6px' }}>LATEST</span>}
                     </div>
                     {s.label && (
-                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(200,148,58,0.85)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
+                      <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-accent)', marginBottom: '6px', lineHeight: '1.35', wordBreak: 'break-word' }}>
                         {s.label}
                       </div>
                     )}
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)' }}>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.3)' }}>
                       saved by {s.saved_by}
                     </div>
                     {s.export_meta?.world_title && (
@@ -174,7 +174,7 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
                     <button
                       onClick={() => handleRestore(s.id, s.saved_at, s.label)}
                       disabled={!!restoring}
-                      style={{ padding: isMobile ? '10px 16px' : '6px 14px', minHeight: isMobile ? '44px' : 'auto', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
+                      style={{ padding: isMobile ? '10px 16px' : '6px 14px', minHeight: isMobile ? '44px' : 'auto', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '3px', cursor: restoring ? 'default' : 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: restoring === s.id ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.7)', flexShrink: 0, opacity: restoring && restoring !== s.id ? 0.4 : 1 }}
                     >
                       {restoring === s.id ? 'Restoring...' : 'Restore'}
                     </button>
@@ -189,7 +189,7 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
         {canManage && (
           <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div>
-              <label style={{ display: 'block', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.35)', marginBottom: '6px' }}>
                 SNAPSHOT LABEL (OPTIONAL)
               </label>
               <input
@@ -212,7 +212,7 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
                 onClick={handleSnapshot}
                 disabled={saving || cooldownMs > 0}
                 style={{
-                  flex: 1, padding: '10px', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+                  flex: 1, padding: '10px', fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em',
                   background: cooldownMs > 0 ? 'rgba(255,255,255,0.02)' : 'rgba(200,148,58,0.1)',
                   border: `1px solid ${cooldownMs > 0 ? 'rgba(255,255,255,0.08)' : 'rgba(200,148,58,0.3)'}`,
                   borderRadius: '3px', cursor: cooldownMs > 0 ? 'default' : 'pointer',
@@ -221,7 +221,7 @@ export default function SnapshotPanel({ folder, worldLayerTitle, currentUser, dm
               >
                 {saving ? 'Saving...' : cooldownMs > 0 ? `📷 Cooldown — ${cooldownMins}m remaining` : '📷 Save Snapshot'}
               </button>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.2)', textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.2)', textAlign: 'right', flexShrink: 0 }}>
                 {snapshots.length}/3 slots used
               </div>
             </div>

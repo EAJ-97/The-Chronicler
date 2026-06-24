@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import api from '../api.js';
+import { clientPointToSvgUser, getRootTextScale, svgUserPointToClient } from '../utils/svgClientCoords.js';
 import { getGraphCampaignRoots, isUnderCompletedArchive } from '../utils/campaignTree.js';
 import { getCategoryColor } from './NoteEditor.jsx';
 import TimelineNoteExpand from './TimelineNoteExpand.jsx';
@@ -7,8 +8,6 @@ import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import {
   TIMELINE_BOX_W,
   TIMELINE_BOX_H,
-  TIMELINE_CANVAS_H,
-  TIMELINE_LINE_Y,
   TIMELINE_MIN_BRANCH,
   TIMELINE_AXIS_PAD,
   TIMELINE_EXTEND_STEP,
@@ -28,6 +27,7 @@ import {
   clampAnchorDisplayX,
   clampEntryGeometryToCanvas,
   timelineGeometryChanged,
+  resolveTimelineCanvasMetrics,
 } from '../utils/timelineGeometry.js';
 
 /** Hit area (px) above/below the axis for starting a new branch. */
@@ -117,10 +117,12 @@ function groupNotesByCategory(notes, search) {
  * @param {{
  *   notes: Array<object>,
  *   currentUser?: { id?: number },
+ *   dmCampaignIds?: number[],
+ *   tutorialRefs?: { shell?: import('react').RefObject<HTMLElement|null>, campaignPicker?: import('react').RefObject<HTMLElement|null>, canvas?: import('react').RefObject<HTMLElement|null> },
  *   onSelectNote?: (id: number) => void,
  * }} props
  */
-export default function TimelineView({ notes, currentUser, onSelectNote }) {
+export default function TimelineView({ notes, currentUser, dmCampaignIds = [], tutorialRefs = null, onSelectNote }) {
   const [entries, setEntries] = useState([]);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -132,6 +134,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   const [noteExpand, setNoteExpand] = useState(null);
   const [axisExtend, setAxisExtend] = useState({ left: 0, right: 0 });
   const [scrollViewportW, setScrollViewportW] = useState(720);
+  const [scrollViewportH, setScrollViewportH] = useState(480);
   const [shiftHeld, setShiftHeld] = useState(false);
   /** Axis hover position for the “click and drag to add point” hint (SVG x), or null. */
   const [axisHover, setAxisHover] = useState(null);
@@ -168,11 +171,14 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
     interactionRef.current = interaction;
   }, [interaction]);
 
-  /** Tracks scroll-container width so canvas base size matches the visible area. */
+  /** Tracks scroll-container size so the canvas matches the visible area (stable under text scale). */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
-    const sync = () => setScrollViewportW(el.clientWidth || windowWidth || 720);
+    const sync = () => {
+      setScrollViewportW(el.clientWidth || windowWidth || 720);
+      setScrollViewportH(el.clientHeight || 480);
+    };
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(el);
@@ -247,36 +253,6 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
    */
   const toStoredAnchorX = useCallback((displayX) => displayX - contentOffsetX, [contentOffsetX]);
 
-  /**
-   * Maps a timeline entry's box to viewport coordinates for expand/collapse animations.
-   * @param {object} entry
-   * @returns {{ left: number, top: number, width: number, height: number }|null}
-   */
-  const getBoxScreenRect = useCallback((entry) => {
-    const svg = svgRef.current;
-    if (!svg || !entry) return null;
-    const ax = (entry.anchor_x ?? 0) + contentOffsetX;
-    const cx = ax + (entry.end_x ?? 0);
-    const cy = TIMELINE_LINE_Y + (entry.end_y ?? 0);
-    const x0 = cx - TIMELINE_BOX_W / 2;
-    const y0 = cy - TIMELINE_BOX_H / 2;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = x0;
-    pt.y = y0;
-    const tl = pt.matrixTransform(ctm);
-    pt.x = x0 + TIMELINE_BOX_W;
-    pt.y = y0 + TIMELINE_BOX_H;
-    const br = pt.matrixTransform(ctm);
-    return {
-      left: Math.min(tl.x, br.x),
-      top: Math.min(tl.y, br.y),
-      width: Math.abs(br.x - tl.x),
-      height: Math.abs(br.y - tl.y),
-    };
-  }, [contentOffsetX]);
-
   const loadTimeline = useCallback(async () => {
     if (!activeFolderId) return;
     setLoading(true);
@@ -320,6 +296,51 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   }, [loadTimeline, activeFolderId]);
 
   const viewportW = scrollViewportW || windowWidth || 720;
+  const { canvasHeight, lineY: timelineLineY } = useMemo(
+    () => resolveTimelineCanvasMetrics(scrollViewportH),
+    [scrollViewportH],
+  );
+
+  const canvasWidth = useMemo(
+    () => computeCanvasWidth(viewportW, axisExtend.left, axisExtend.right),
+    [viewportW, axisExtend.left, axisExtend.right]
+  );
+
+  /** Pulls boxes toward the axis when the viewport is shorter than stored offsets allow. */
+  useEffect(() => {
+    if (loading || interaction) return;
+    setEntries((prev) => {
+      if (!prev.length) return prev;
+      const adjusted = prev.map((e) => (
+        clampEntryGeometryToCanvas(e, contentOffsetX, canvasWidth, canvasHeight, timelineLineY)
+      ));
+      return adjusted.some((e, i) => timelineGeometryChanged(e, prev[i])) ? adjusted : prev;
+    });
+  }, [canvasHeight, canvasWidth, contentOffsetX, timelineLineY, loading, interaction]);
+
+  /**
+   * Maps a timeline entry's box to viewport coordinates for expand/collapse animations.
+   * @param {object} entry
+   * @returns {{ left: number, top: number, width: number, height: number }|null}
+   */
+  const getBoxScreenRect = useCallback((entry) => {
+    const svg = svgRef.current;
+    if (!svg || !entry) return null;
+    const ax = (entry.anchor_x ?? 0) + contentOffsetX;
+    const cx = ax + (entry.end_x ?? 0);
+    const cy = timelineLineY + (entry.end_y ?? 0);
+    const x0 = cx - TIMELINE_BOX_W / 2;
+    const y0 = cy - TIMELINE_BOX_H / 2;
+    const tl = svgUserPointToClient(svg, x0, y0);
+    const br = svgUserPointToClient(svg, x0 + TIMELINE_BOX_W, y0 + TIMELINE_BOX_H);
+    if (!tl || !br) return null;
+    return {
+      left: Math.min(tl.x, br.x),
+      top: Math.min(tl.y, br.y),
+      width: Math.abs(br.x - tl.x),
+      height: Math.abs(br.y - tl.y),
+    };
+  }, [contentOffsetX, timelineLineY]);
 
   const displayEntries = useMemo(() => {
     if (!interaction || interaction.mode === 'create') return entries;
@@ -336,11 +357,6 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
         : e
     ));
   }, [entries, interaction]);
-
-  const canvasWidth = useMemo(
-    () => computeCanvasWidth(viewportW, axisExtend.left, axisExtend.right),
-    [viewportW, axisExtend.left, axisExtend.right]
-  );
 
   const timelineLocked = useMemo(
     () => activeFolderId != null && isUnderCompletedArchive(notes, activeFolderId),
@@ -362,13 +378,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
   const eventToSvg = useCallback((e) => {
     const svg = svgRef.current;
     if (!svg) return null;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const svgP = pt.matrixTransform(ctm.inverse());
-    return { x: svgP.x, y: svgP.y };
+    return clientPointToSvgUser(svg, e.clientX, e.clientY);
   }, []);
 
   /**
@@ -430,7 +440,9 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
 
     const trimmed = trimAxisExtend(sourceEntries, viewportW, axisExtend);
     const newCanvasWidth = computeCanvasWidth(viewportW, trimmed.left, trimmed.right);
-    const adjusted = sourceEntries.map((e) => clampEntryGeometryToCanvas(e, trimmed.left, newCanvasWidth));
+    const adjusted = sourceEntries.map((e) => (
+      clampEntryGeometryToCanvas(e, trimmed.left, newCanvasWidth, canvasHeight, timelineLineY)
+    ));
     const toSave = adjusted.filter((e, i) => timelineGeometryChanged(e, sourceEntries[i]));
     const extendChanged = trimmed.left !== axisExtend.left || trimmed.right !== axisExtend.right;
 
@@ -465,7 +477,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
     } finally {
       setBusy(false);
     }
-  }, [entries, viewportW, axisExtend, busy, saveEntryGeometry, loadTimeline]);
+  }, [entries, viewportW, axisExtend, busy, saveEntryGeometry, loadTimeline, canvasHeight, timelineLineY]);
 
   /**
    * Loads full note body via GET /notes/:id when the list row omits content.
@@ -609,10 +621,10 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
    * @returns {boolean}
    */
   const isOnTimelineAxis = useCallback((pt) => (
-    Math.abs(pt.y - TIMELINE_LINE_Y) <= LINE_HIT
+    Math.abs(pt.y - timelineLineY) <= LINE_HIT
     && pt.x >= TIMELINE_AXIS_PAD
     && pt.x <= canvasWidth - TIMELINE_AXIS_PAD
-  ), [canvasWidth]);
+  ), [canvasWidth, timelineLineY]);
 
   /**
    * Starts a new branch drag, pan, or ignores hits on interactive elements.
@@ -640,7 +652,6 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
       startX: e.clientX,
       startY: e.clientY,
       scrollLeft: scrollRef.current?.scrollLeft ?? 0,
-      scrollTop: scrollRef.current?.scrollTop ?? 0,
       armed: false,
     });
   };
@@ -712,8 +723,10 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
       const clamped = clampBoxOffsets(
         displayAx,
         pt.x - displayAx,
-        pt.y - TIMELINE_LINE_Y,
-        canvasWidth
+        pt.y - timelineLineY,
+        canvasWidth,
+        canvasHeight,
+        timelineLineY,
       );
       setInteraction((prev) => ({
         ...prev,
@@ -741,8 +754,8 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
       const armed = dist >= TIMELINE_CLICK_THRESHOLD;
       const displayAx = toDisplayX(interaction.storedAnchorX);
       const rawEndX = pt.x - displayAx;
-      const rawEndY = pt.y - TIMELINE_LINE_Y;
-      const clamped = clampBoxOffsets(displayAx, rawEndX, rawEndY, canvasWidth);
+      const rawEndY = pt.y - timelineLineY;
+      const clamped = clampBoxOffsets(displayAx, rawEndX, rawEndY, canvasWidth, canvasHeight, timelineLineY);
       setInteraction((d) => ({
         ...d,
         armed,
@@ -756,9 +769,9 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
       const dx = e.clientX - interaction.startX;
       const dy = e.clientY - interaction.startY;
       const armed = interaction.armed || Math.hypot(dx, dy) >= TIMELINE_CLICK_THRESHOLD;
+      const scale = getRootTextScale();
       if (scrollRef.current && armed) {
-        scrollRef.current.scrollLeft = interaction.scrollLeft - dx;
-        scrollRef.current.scrollTop = interaction.scrollTop - dy;
+        scrollRef.current.scrollLeft = interaction.scrollLeft - dx / scale;
       }
       if (!interaction.armed && armed) {
         setInteraction((d) => ({ ...d, armed: true }));
@@ -912,17 +925,18 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
 
   if (campaignRoots.length === 0) {
     return (
-      <div style={{ padding: '24px', fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.45)' }}>
+      <div style={{ padding: '24px', fontFamily: 'var(--ch-font-body)', color: 'var(--ch-text-primary-45)' }}>
         No playable campaigns yet. Create a campaign folder to build a timeline.
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#07080e', overflow: 'hidden' }}>
+    <div ref={tutorialRefs?.shell || null} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--ch-shell-bg)', overflow: 'hidden' }}>
       <div style={headerStyle}>
         <span style={headerLabelStyle}>CAMPAIGN</span>
         <select
+          ref={tutorialRefs?.campaignPicker || null}
           value={activeFolderId ?? ''}
           onChange={(e) => setActiveFolderId(e.target.value ? parseInt(e.target.value, 10) : null)}
           style={selectStyle}
@@ -937,7 +951,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
             : 'Drag empty space to pan along the timeline'}
         </span>
         {timelineLocked && (
-          <span style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(200,148,58,0.5)' }}>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'rgba(200,148,58,0.5)' }}>
             Archived — read only
           </span>
         )}
@@ -949,22 +963,23 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
           flex: 1,
           minHeight: 0,
           overflowX: 'auto',
-          overflowY: 'auto',
-          display: 'flex',
-          alignItems: 'center',
+          overflowY: 'hidden',
         }}
       >
         {loading ? (
-          <div style={{ padding: '24px', fontFamily: 'Cinzel', fontSize: '10px', color: 'rgba(200,148,58,0.45)', letterSpacing: '0.12em' }}>
+          <div style={{ padding: '24px', fontFamily: 'var(--ch-font-display)', fontSize: '10px', color: 'rgba(200,148,58,0.45)', letterSpacing: '0.12em' }}>
             Loading…
           </div>
         ) : error ? (
-          <div style={{ padding: '24px', fontFamily: 'Crimson Pro, serif', color: 'rgba(220,100,100,0.85)' }}>{error}</div>
+          <div style={{ padding: '24px', fontFamily: 'var(--ch-font-body)', color: 'rgba(220,100,100,0.85)' }}>{error}</div>
         ) : (
           <svg
-            ref={svgRef}
+            ref={(el) => {
+              svgRef.current = el;
+              if (tutorialRefs?.canvas) tutorialRefs.canvas.current = el;
+            }}
             width={canvasWidth}
-            height={TIMELINE_CANVAS_H}
+            height={canvasHeight}
             style={{
               display: 'block',
               flexShrink: 0,
@@ -981,17 +996,17 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
           >
             <line
               x1={TIMELINE_AXIS_PAD}
-              y1={TIMELINE_LINE_Y}
+              y1={timelineLineY}
               x2={canvasWidth - TIMELINE_AXIS_PAD}
-              y2={TIMELINE_LINE_Y}
+              y2={timelineLineY}
               stroke="transparent"
               strokeWidth={LINE_HIT * 2}
             />
             <line
               x1={TIMELINE_AXIS_PAD}
-              y1={TIMELINE_LINE_Y}
+              y1={timelineLineY}
               x2={canvasWidth - TIMELINE_AXIS_PAD}
-              y2={TIMELINE_LINE_Y}
+              y2={timelineLineY}
               stroke="rgba(200,148,58,0.65)"
               strokeWidth={3}
               strokeLinecap="round"
@@ -1001,10 +1016,10 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
               <g pointerEvents="none">
                 <text
                   x={axisHover.x}
-                  y={TIMELINE_LINE_Y - 22}
+                  y={timelineLineY - 22}
                   textAnchor="middle"
                   fill="rgba(200,148,58,0.8)"
-                  fontFamily="Cinzel, serif"
+                  fontFamily="var(--ch-font-display)"
                   fontSize="9"
                   letterSpacing="0.12em"
                 >
@@ -1015,7 +1030,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
 
             <TimelineAxisLabel
               hitX={TIMELINE_AXIS_PAD}
-              hitY={TIMELINE_LINE_Y + 14}
+              hitY={timelineLineY + 14}
               hitW={AXIS_LABEL_HIT_W}
               hitH={AXIS_LABEL_HIT_H}
               label="< Past"
@@ -1025,7 +1040,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
             />
             <TimelineAxisLabel
               hitX={canvasWidth - TIMELINE_AXIS_PAD - AXIS_LABEL_HIT_W}
-              hitY={TIMELINE_LINE_Y + 14}
+              hitY={timelineLineY + 14}
               hitW={AXIS_LABEL_HIT_W}
               hitH={AXIS_LABEL_HIT_H}
               label="Present >"
@@ -1041,6 +1056,7 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
                 contentOffsetX={contentOffsetX}
                 categoryColor={entryColor(entry)}
                 canEdit={showEditTools}
+                lineY={timelineLineY}
                 onBoxOpen={() => handlePlayerBoxOpen(entry)}
                 onEdit={() => handleEditEntry(entry)}
                 onAnchorMouseDown={(e) => handleAnchorMouseDown(e, entry)}
@@ -1052,16 +1068,16 @@ export default function TimelineView({ notes, currentUser, onSelectNote }) {
             {createInteraction && createPath && (
               <g opacity={0.85}>
                 <polyline
-                  points={pathToSvgPoints(createDisplayAx, TIMELINE_LINE_Y, createPath)}
+                  points={pathToSvgPoints(createDisplayAx, timelineLineY, createPath)}
                   fill="none"
                   stroke="rgba(200,148,58,0.55)"
                   strokeWidth={2}
                   strokeDasharray="6 4"
                 />
-                <circle cx={createDisplayAx} cy={TIMELINE_LINE_Y} r={5} fill="#c8943a" />
+                <circle cx={createDisplayAx} cy={timelineLineY} r={5} fill="#c8943a" />
                 <TimelineBoxGraphic
                   cx={createDisplayAx + createInteraction.endX}
-                  cy={TIMELINE_LINE_Y + createInteraction.endY}
+                  cy={timelineLineY + createInteraction.endY}
                   placeholder
                   categoryColor={getCategoryColor('general')}
                   title="…"
@@ -1159,7 +1175,7 @@ function TimelineAxisLabel({
         fill={interactive
           ? (shiftHeld && hovered ? 'rgba(220,170,90,0.95)' : 'rgba(200,148,58,0.75)')
           : 'rgba(200,148,58,0.4)'}
-        fontFamily="Cinzel, serif"
+        fontFamily="var(--ch-font-display)"
         fontSize="10"
         letterSpacing="0.14em"
         style={{ pointerEvents: 'none' }}
@@ -1177,6 +1193,7 @@ function TimelineAxisLabel({
  *   contentOffsetX: number,
  *   categoryColor: string,
  *   canEdit: boolean,
+ *   lineY: number,
  *   onBoxOpen: () => void,
  *   onEdit: () => void,
  *   onAnchorMouseDown: (e: MouseEvent) => void,
@@ -1188,6 +1205,7 @@ function TimelineEntryGraphic({
   entry,
   contentOffsetX,
   categoryColor,
+  lineY,
   canEdit,
   onBoxOpen,
   onEdit,
@@ -1200,20 +1218,20 @@ function TimelineEntryGraphic({
   const ey = entry.end_y ?? -100;
   const path = parseBranchPath(entry.path_json, ex, ey);
   const cx = ax + ex;
-  const cy = TIMELINE_LINE_Y + ey;
+  const cy = lineY + ey;
   const stroke = hexToRgba(categoryColor, 0.85);
 
   return (
     <g>
       <polyline
-        points={pathToSvgPoints(ax, TIMELINE_LINE_Y, path)}
+        points={pathToSvgPoints(ax, lineY, path)}
         fill="none"
         stroke={stroke}
         strokeWidth={2}
       />
       <circle
         cx={ax}
-        cy={TIMELINE_LINE_Y}
+        cy={lineY}
         r={ANCHOR_HIT_R}
         fill="transparent"
         style={{ cursor: canEdit ? 'grab' : 'default' }}
@@ -1221,7 +1239,7 @@ function TimelineEntryGraphic({
       />
       <circle
         cx={ax}
-        cy={TIMELINE_LINE_Y}
+        cy={lineY}
         r={5}
         fill={categoryColor}
         stroke="#07080e"
@@ -1245,12 +1263,12 @@ function TimelineEntryGraphic({
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onEdit(); }}
         >
-          <circle cx={cx - TIMELINE_BOX_W / 2 + 6} cy={cy - TIMELINE_BOX_H / 2 + 6} r={9} fill="#0e1018" stroke={hexToRgba(categoryColor, 0.5)} />
+          <circle cx={cx - TIMELINE_BOX_W / 2 + 6} cy={cy - TIMELINE_BOX_H / 2 + 6} r={9} fill="var(--ch-card-bg)" stroke={hexToRgba(categoryColor, 0.5)} />
           <text
             x={cx - TIMELINE_BOX_W / 2 + 6}
             y={cy - TIMELINE_BOX_H / 2 + 10}
             textAnchor="middle"
-            fill="rgba(226,213,187,0.65)"
+            fill="var(--ch-text-primary-65)"
             fontSize="10"
             style={{ pointerEvents: 'none' }}
           >
@@ -1264,12 +1282,12 @@ function TimelineEntryGraphic({
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
         >
-          <circle cx={cx + TIMELINE_BOX_W / 2 - 6} cy={cy - TIMELINE_BOX_H / 2 + 6} r={9} fill="#0e1018" stroke={hexToRgba(categoryColor, 0.5)} />
+          <circle cx={cx + TIMELINE_BOX_W / 2 - 6} cy={cy - TIMELINE_BOX_H / 2 + 6} r={9} fill="var(--ch-card-bg)" stroke={hexToRgba(categoryColor, 0.5)} />
           <text
             x={cx + TIMELINE_BOX_W / 2 - 6}
             y={cy - TIMELINE_BOX_H / 2 + 10}
             textAnchor="middle"
-            fill="rgba(226,213,187,0.55)"
+            fill="var(--ch-text-primary-55)"
             fontSize="12"
             style={{ pointerEvents: 'none' }}
           >
@@ -1353,10 +1371,10 @@ function TimelineBoxGraphic({
         >
           <div
             style={{
-              fontFamily: 'Crimson Pro, serif',
+              fontFamily: 'var(--ch-font-body)',
               fontSize: '13px',
               lineHeight: 1.3,
-              color: placeholder ? 'rgba(226,213,187,0.45)' : '#e2d5bb',
+              color: placeholder ? 'var(--ch-text-primary-45)' : 'var(--ch-text-primary)',
               wordBreak: 'break-word',
               overflowWrap: 'anywhere',
               width: '100%',
@@ -1369,7 +1387,7 @@ function TimelineBoxGraphic({
           {time ? (
             <div
               style={{
-                fontFamily: 'Cinzel, serif',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.06em',
                 color: hexToRgba(categoryColor, 0.95),
@@ -1462,7 +1480,7 @@ function TimelineEventEditor({ entry, campaignNotes, busy, onSave, onDelete, onC
 
           <div style={{ marginTop: '12px', maxHeight: '36vh', overflow: 'auto' }}>
             {grouped.length === 0 ? (
-              <p style={{ fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.45)', margin: 0, fontSize: '14px' }}>
+              <p style={{ fontFamily: 'var(--ch-font-body)', color: 'var(--ch-text-primary-45)', margin: 0, fontSize: '14px' }}>
                 {campaignNotes.length === 0 ? 'No notes in this campaign.' : 'No notes match your search.'}
               </p>
             ) : (
@@ -1470,7 +1488,7 @@ function TimelineEventEditor({ entry, campaignNotes, busy, onSave, onDelete, onC
                 <div key={group.value} style={{ marginBottom: '14px' }}>
                   <div
                     style={{
-                      fontFamily: 'Cinzel',
+                      fontFamily: 'var(--ch-font-display)',
                       fontSize: '8px',
                       letterSpacing: '0.14em',
                       color: getCategoryColor(group.value),
@@ -1533,7 +1551,7 @@ function TimelineEventEditor({ entry, campaignNotes, busy, onSave, onDelete, onC
 const headerStyle = {
   flexShrink: 0,
   padding: '12px 20px',
-  borderBottom: '1px solid rgba(200,148,58,0.12)',
+  borderBottom: '1px solid var(--ch-border)',
   display: 'flex',
   alignItems: 'center',
   gap: '12px',
@@ -1541,7 +1559,7 @@ const headerStyle = {
 };
 
 const headerLabelStyle = {
-  fontFamily: 'Cinzel',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '9px',
   letterSpacing: '0.18em',
   color: 'rgba(200,148,58,0.55)',
@@ -1551,8 +1569,8 @@ const selectStyle = {
   background: 'rgba(255,255,255,0.04)',
   border: '1px solid rgba(200,148,58,0.25)',
   borderRadius: '4px',
-  color: '#e2d5bb',
-  fontFamily: 'Cinzel',
+  color: 'var(--ch-text-primary)',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '11px',
   padding: '8px 12px',
   minWidth: '200px',
@@ -1560,18 +1578,18 @@ const selectStyle = {
 };
 
 const hintStyle = {
-  fontFamily: 'Cinzel',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '8px',
   letterSpacing: '0.12em',
-  color: 'rgba(226,213,187,0.35)',
+  color: 'var(--ch-text-primary-35)',
 };
 
 const toolbarBtnStyle = {
   background: 'rgba(200,148,58,0.12)',
   border: '1px solid rgba(200,148,58,0.35)',
   borderRadius: '4px',
-  color: '#e2d5bb',
-  fontFamily: 'Cinzel',
+  color: 'var(--ch-text-primary)',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '10px',
   letterSpacing: '0.1em',
   padding: '8px 12px',
@@ -1590,7 +1608,7 @@ const modalBackdropStyle = {
 };
 
 const modalPanelStyle = {
-  background: '#0e1018',
+  background: 'var(--ch-card-bg)',
   border: '1px solid rgba(200,148,58,0.25)',
   borderRadius: '6px',
   padding: '20px',
@@ -1600,16 +1618,16 @@ const modalPanelStyle = {
 };
 
 const modalTitleStyle = {
-  fontFamily: 'Cinzel',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '11px',
-  color: '#c8943a',
+  color: 'var(--ch-accent)',
   marginBottom: '16px',
   letterSpacing: '0.12em',
 };
 
 const fieldLabelStyle = {
   display: 'block',
-  fontFamily: 'Cinzel',
+  fontFamily: 'var(--ch-font-display)',
   fontSize: '9px',
   letterSpacing: '0.12em',
   color: 'rgba(200,148,58,0.55)',
@@ -1623,8 +1641,8 @@ const inputStyle = {
   background: 'rgba(255,255,255,0.04)',
   border: '1px solid rgba(200,148,58,0.25)',
   borderRadius: '4px',
-  color: '#e2d5bb',
-  fontFamily: 'Crimson Pro, serif',
+  color: 'var(--ch-text-primary)',
+  fontFamily: 'var(--ch-font-body)',
   fontSize: '15px',
   padding: '10px 12px',
 };
@@ -1635,8 +1653,8 @@ const notePickRowStyle = {
   background: 'transparent',
   border: 'none',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
-  color: '#e2d5bb',
-  fontFamily: 'Crimson Pro, serif',
+  color: 'var(--ch-text-primary)',
+  fontFamily: 'var(--ch-font-body)',
   fontSize: '15px',
   padding: '8px 4px',
   cursor: 'pointer',

@@ -32,6 +32,14 @@ const purgeTrash = () => {
 purgeTrash();
 setInterval(purgeTrash, 6 * 60 * 60 * 1000);
 
+/** Idempotent demo cross-links for tutorials (Veldrath → Gilded Anchor, etc.). */
+try {
+  const { patchDemoNoteLinks } = require('./db/demoSeeder');
+  patchDemoNoteLinks();
+} catch (e) {
+  console.warn('Demo note-link patch skipped:', e.message);
+}
+
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173',
   credentials: true,

@@ -1,8 +1,10 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
-import { buildMarkdownComponents, MARKDOWN_BASE_CSS } from '../utils/markdownComponents.jsx';
-import { getCategoryColor } from './NoteEditor.jsx';
+import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
+import { buildMarkdownCss } from '../theme/markdownCss.js';
+import { useTheme } from '../theme/useTheme.js';
+import { getCategoryColor } from '../theme/categoryColors.js';
 
 /**
  * Renders a read-only markdown preview of stacked referenced notes (opened from `note:` links).
@@ -25,6 +27,7 @@ export default function ReferencePeekPanel({
   onOpenReference,
   isMobile,
 }) {
+  const { theme } = useTheme();
   const topId = stack.length ? stack[stack.length - 1] : null;
   const prevId = stack.length >= 2 ? stack[stack.length - 2] : null;
   const note = topId != null ? notes.find((n) => n.id === topId) : null;
@@ -46,7 +49,7 @@ export default function ReferencePeekPanel({
         zIndex: 350,
         display: 'flex',
         flexDirection: 'column',
-        background: '#0a0c14',
+        background: 'var(--ch-panel-bg)',
         borderTop: '1px solid rgba(200,148,58,0.2)',
         overflow: 'hidden',
       }
@@ -56,7 +59,7 @@ export default function ReferencePeekPanel({
         maxWidth: '50%',
         display: 'flex',
         flexDirection: 'column',
-        background: '#0a0c14',
+        background: 'var(--ch-panel-bg)',
         borderLeft: '1px solid rgba(200,148,58,0.15)',
         overflow: 'hidden',
       };
@@ -82,15 +85,15 @@ export default function ReferencePeekPanel({
           disabled={stack.length <= 1}
           style={{
             background: 'rgba(200,148,58,0.08)',
-            border: '1px solid rgba(200,148,58,0.2)',
+            border: '1px solid var(--ch-border-strong)',
             borderRadius: '3px',
             cursor: stack.length <= 1 ? 'not-allowed' : 'pointer',
             opacity: stack.length <= 1 ? 0.35 : 1,
             padding: '4px 10px',
-            fontFamily: 'Cinzel',
+            fontFamily: 'var(--ch-font-display)',
             fontSize: '9px',
             letterSpacing: '0.12em',
-            color: '#c8943a',
+            color: 'var(--ch-accent)',
           }}
         >
           ← BACK
@@ -104,17 +107,17 @@ export default function ReferencePeekPanel({
             borderRadius: '3px',
             cursor: 'pointer',
             padding: '4px 10px',
-            fontFamily: 'Cinzel',
+            fontFamily: 'var(--ch-font-display)',
             fontSize: '9px',
             letterSpacing: '0.12em',
-            color: 'rgba(226,213,187,0.65)',
+            color: 'var(--ch-text-primary-65)',
           }}
         >
           CLOSE
         </button>
         <span
           style={{
-            fontFamily: 'Cinzel',
+            fontFamily: 'var(--ch-font-display)',
             fontSize: '8px',
             letterSpacing: '0.12em',
             color: 'rgba(200,148,58,0.35)',
@@ -141,7 +144,7 @@ export default function ReferencePeekPanel({
           >
             <div
               style={{
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '11px',
                 color: 'rgba(200,148,58,0.5)',
                 marginBottom: '6px',
@@ -189,10 +192,10 @@ export default function ReferencePeekPanel({
           >
             <div
               style={{
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '14px',
                 fontWeight: 500,
-                color: '#e2d5bb',
+                color: 'var(--ch-text-primary)',
                 letterSpacing: '0.03em',
                 marginBottom: '6px',
                 lineHeight: 1.3,
@@ -204,7 +207,7 @@ export default function ReferencePeekPanel({
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, flexShrink: 0 }} />
               <span
                 style={{
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'var(--ch-font-display)',
                   fontSize: '8px',
                   letterSpacing: '0.15em',
                   color: `${color}aa`,
@@ -224,7 +227,7 @@ export default function ReferencePeekPanel({
               fontFamily: 'Crimson Pro, serif',
               fontSize: '15px',
               lineHeight: 1.75,
-              color: '#e2d5bb',
+              color: 'var(--ch-text-primary)',
             }}
           >
             {note?.content != null && note.content !== '' ? (
@@ -264,7 +267,7 @@ export default function ReferencePeekPanel({
         .md-ref-peek h2 { font-size: 15px; }
         .md-ref-peek h3 { font-size: 14px; }
         .md-ref-peek li { margin-bottom: 3px; }
-        ${MARKDOWN_BASE_CSS}
+        ${buildMarkdownCss(theme)}
       `}</style>
     </div>
   );

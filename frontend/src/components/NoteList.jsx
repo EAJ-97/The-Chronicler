@@ -238,7 +238,7 @@ function TreeNode({
             ref={renameRef}
             style={{
               flex: 1, background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.3)',
-              borderRadius: '2px', outline: 'none', color: '#e2d5bb', padding: '1px 6px',
+              borderRadius: '2px', outline: 'none', color: 'var(--ch-text-primary)', padding: '1px 6px',
               fontFamily: isFolder ? 'Cinzel' : 'Crimson Pro, serif',
               fontSize: isFolder ? '11px' : '14px', letterSpacing: isFolder ? '0.05em' : '0',
             }}
@@ -284,20 +284,20 @@ function TreeNode({
               }}>
                 <div style={{ fontWeight: 600, marginBottom: node.display_summary ? '4px' : 0 }}>{node.title}</div>
                 {node.display_summary ? (
-                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.55)', whiteSpace: 'normal', lineHeight: 1.35 }}>
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'var(--ch-text-primary-55)', whiteSpace: 'normal', lineHeight: 1.35 }}>
                     {node.display_summary}
                   </div>
                 ) : null}
               </div>
             )}
             {!!node.is_shared && !isFolder && (
-              <span style={{ marginLeft: '5px', fontSize: '9px', color: 'rgba(200,148,58,0.4)', fontFamily: 'Cinzel' }}>⚔</span>
+              <span style={{ marginLeft: '5px', fontSize: '9px', color: 'rgba(200,148,58,0.4)', fontFamily: 'var(--ch-font-display)' }}>⚔</span>
             )}
             {node.visibility === 'hidden' && !isOwner && !isDM && (
               <span style={{ marginLeft: '5px', fontSize: '9px', color: 'rgba(226,213,187,0.25)' }} title="You have granted access">👁</span>
             )}
             {!!node.recovered && (
-              <span style={{ marginLeft: '5px', fontSize: '8px', color: 'rgba(139,196,226,0.5)', fontFamily: 'Cinzel', letterSpacing: '0.05em' }} title="Restored from trash">↩ recovered</span>
+              <span style={{ marginLeft: '5px', fontSize: '8px', color: 'rgba(139,196,226,0.5)', fontFamily: 'var(--ch-font-display)', letterSpacing: '0.05em' }} title="Restored from trash">↩ recovered</span>
             )}
           </span>
         )}
@@ -307,7 +307,7 @@ function TreeNode({
         )}
 
         {isFolder && node._noteCount > 0 && !hovered && !renaming && (
-          <span style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(200,148,58,0.3)', background: 'rgba(200,148,58,0.06)', border: '1px solid rgba(200,148,58,0.12)', borderRadius: '10px', padding: '1px 6px', flexShrink: 0 }}>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'rgba(200,148,58,0.3)', background: 'rgba(200,148,58,0.06)', border: '1px solid var(--ch-border)', borderRadius: '10px', padding: '1px 6px', flexShrink: 0 }}>
             {node._noteCount}
           </span>
         )}
@@ -501,7 +501,7 @@ export default function NoteList({
 
   return (
     <div
-      style={{ width: isMobile ? '100%' : (collapsed ? '0px' : '260px'), flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#0a0c14', borderRight: '1px solid rgba(255,255,255,0.05)', height: '100%', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)', overflow: 'visible', position: 'relative' }}
+      style={{ width: isMobile ? '100%' : (collapsed ? '0px' : '260px'), flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--ch-panel-bg)', borderRight: '1px solid rgba(255,255,255,0.05)', height: '100%', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)', overflow: 'visible', position: 'relative' }}
       onDragOver={e => e.preventDefault()}
       onDrop={handleRootDrop}
     >
@@ -536,13 +536,13 @@ export default function NoteList({
       <div style={{ padding: '12px 10px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
         <div style={{ position: 'relative', marginBottom: '8px' }}>
           <input
-            style={{ width: '100%', background: activeTag.size > 0 ? 'rgba(200,148,58,0.06)' : 'rgba(255,255,255,0.04)', border: `1px solid ${activeTag.size > 0 ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '3px', color: '#e2d5bb', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '7px 10px', outline: 'none', boxSizing: 'border-box', paddingRight: activeTag.size > 0 ? '80px' : '10px' }}
+            style={{ width: '100%', background: activeTag.size > 0 ? 'rgba(200,148,58,0.06)' : 'rgba(255,255,255,0.04)', border: `1px solid ${activeTag.size > 0 ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '3px', color: 'var(--ch-text-primary)', fontSize: '13px', fontFamily: 'Crimson Pro, serif', padding: '7px 10px', outline: 'none', boxSizing: 'border-box', paddingRight: activeTag.size > 0 ? '80px' : '10px' }}
             placeholder={activeTag.size > 0 ? `Search within ${activeTag.size} tag${activeTag.size > 1 ? 's' : ''}...` : 'Search notes... or #tag'}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
           {activeTag.size > 0 && !search && (
-            <span style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.5)', pointerEvents: 'none' }}>
+            <span style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.5)', pointerEvents: 'none' }}>
               SCOPED
             </span>
           )}
@@ -569,10 +569,10 @@ export default function NoteList({
         return (
           <div style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', flexShrink: 0 }}>
             <div style={{ padding: '3px 8px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '18px' }}>
-              <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: activeTag.size > 0 ? 'rgba(200,148,58,0.5)' : 'transparent' }}>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: activeTag.size > 0 ? 'rgba(200,148,58,0.5)' : 'transparent' }}>
                 {activeTag.size > 0 ? `${activeTag.size} TAG${activeTag.size > 1 ? 'S' : ''} ACTIVE` : ' '}
               </span>
-              <button onClick={() => setActiveTag(new Set())} style={{ background: 'none', border: 'none', cursor: activeTag.size > 0 ? 'pointer' : 'default', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: activeTag.size > 0 ? 'rgba(200,148,58,0.5)' : 'transparent', padding: '2px 4px', pointerEvents: activeTag.size > 0 ? 'auto' : 'none' }}>
+              <button onClick={() => setActiveTag(new Set())} style={{ background: 'none', border: 'none', cursor: activeTag.size > 0 ? 'pointer' : 'default', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: activeTag.size > 0 ? 'rgba(200,148,58,0.5)' : 'transparent', padding: '2px 4px', pointerEvents: activeTag.size > 0 ? 'auto' : 'none' }}>
                 CLEAR ×
               </button>
             </div>
@@ -592,7 +592,7 @@ export default function NoteList({
                   return next;
                 })} style={{
                   padding: '2px 8px', borderRadius: '10px', cursor: 'pointer', border: '1px solid',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.05em',
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.05em',
                   background: activeTag.has(tag) ? 'rgba(200,148,58,0.15)' : 'transparent',
                   borderColor: activeTag.has(tag) ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)',
                   color: activeTag.has(tag) ? '#c8943a' : 'rgba(226,213,187,0.35)',
@@ -629,7 +629,7 @@ export default function NoteList({
               }} onClick={() => onSelect(n.id)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: n.snippet ? '4px' : 0 }}>
                   <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: getCategoryColor(n.category), flexShrink: 0 }} />
-                  <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: '#e2d5bb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</span>
+                  <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'var(--ch-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</span>
                 </div>
                 {n.snippet && (
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.4)', lineHeight: '1.4', paddingLeft: '14px' }}
@@ -674,9 +674,9 @@ export default function NoteList({
 
 const newBtn = {
   flex: 1, padding: '7px 0',
-  background: 'rgba(200,148,58,0.1)', border: '1px solid rgba(200,148,58,0.2)',
+  background: 'rgba(200,148,58,0.1)', border: '1px solid var(--ch-border-strong)',
   borderRadius: '3px', cursor: 'pointer',
-  fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: '#c8943a',
+  fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'var(--ch-accent)',
 };
 
 const emptyStyle = {

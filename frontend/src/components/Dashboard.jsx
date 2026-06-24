@@ -13,12 +13,14 @@ import TrashPanel from './TrashPanel.jsx';
 import CampaignModal from './CampaignModal.jsx';
 import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
+import ThemeSettingsPanel from './ThemeSettingsPanel.jsx';
 import api from '../api.js';
 import { ddbPost, isDdbLinkedNote } from '../utils/ddbCobalt.js';
 import { planSiblingReorder, sortOrderForFolderEnd } from '../utils/noteSortOrder.js';
 import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
+import { findDemoNoteByTitle, buildNoteLinkTutorialExample } from '../tutorial/tutorialExample.js';
 
 /** Campaign timeline tab — horizontal note pins curated by the DM. */
 const SHOW_TIMELINE_TAB = true;
@@ -52,29 +54,29 @@ function findSunkenValeRootId(allNotes) {
 }
 
 const S = {
-  shell: { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, overflow: 'hidden', background: '#07080e' },
+  shell: { display: 'flex', flexDirection: 'column', position: 'fixed', inset: 0, overflow: 'hidden', background: 'var(--ch-shell-bg)' },
   topbar: {
     display: 'flex', alignItems: 'center', padding: '0 20px',
     height: '52px', flexShrink: 0,
-    background: '#0a0c14', borderBottom: '1px solid rgba(200,148,58,0.12)',
+    background: 'var(--ch-panel-bg)', borderBottom: '1px solid var(--ch-border)',
   },
-  brand: { fontFamily: 'Cinzel Decorative', fontSize: '15px', fontWeight: '700', color: '#c8943a', letterSpacing: '0.03em', marginRight: '24px' },
+  brand: { fontFamily: 'var(--ch-font-brand)', fontSize: '15px', fontWeight: '700', color: 'var(--ch-accent)', letterSpacing: '0.03em', marginRight: '24px' },
   viewToggle: { display: 'flex', gap: '2px', background: 'rgba(255,255,255,0.03)', padding: '3px', borderRadius: '5px', border: '1px solid rgba(255,255,255,0.06)' },
   viewBtn: (active) => ({
     padding: '5px 14px', borderRadius: '3px', border: 'none', cursor: 'pointer',
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em',
-    background: active ? 'rgba(200,148,58,0.18)' : 'transparent',
-    color: active ? '#c8943a' : 'rgba(226,213,187,0.55)',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em',
+    background: active ? 'var(--ch-accent-18)' : 'transparent',
+    color: active ? 'var(--ch-accent)' : 'var(--ch-text-primary-55)',
     transition: 'all 0.2s',
   }),
   spacer: { flex: 1 },
   userInfo: { display: 'flex', alignItems: 'center', gap: '12px' },
-  username: { fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.85)' },
+  username: { fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.15em', color: 'var(--ch-text-accent)' },
   topBtn: {
     background: 'transparent', border: '1px solid rgba(226,213,187,0.2)',
     borderRadius: '3px', cursor: 'pointer', padding: '4px 10px',
-    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em',
-    color: 'rgba(226,213,187,0.65)', transition: 'all 0.2s',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em',
+    color: 'var(--ch-text-primary-65)', transition: 'all 0.2s',
   },
   body: { flex: 1, display: 'flex', overflow: 'hidden' },
   main: { flex: 1, overflow: 'hidden', position: 'relative' },
@@ -94,14 +96,14 @@ const S = {
   },
   mobileDrawer: {
     width: '85vw', maxWidth: '320px',
-    background: '#0a0c14', borderRight: '1px solid rgba(200,148,58,0.15)',
+    background: 'var(--ch-panel-bg)', borderRight: '1px solid rgba(200,148,58,0.15)',
     display: 'flex', flexDirection: 'column', overflow: 'hidden',
     paddingTop: 'env(safe-area-inset-top)',
     height: '100%',
   },
   bottomNav: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 400,
-    height: 'calc(44px + env(safe-area-inset-bottom))', background: '#0a0c14',
+    height: 'calc(44px + env(safe-area-inset-bottom))', background: 'var(--ch-panel-bg)',
     borderTop: '1px solid rgba(200,148,58,0.15)',
     display: 'flex', flexDirection: 'column',
   },
@@ -112,7 +114,7 @@ const S = {
   },
   bottomNavSafeFill: {
     height: 'env(safe-area-inset-bottom)',
-    background: '#0a0c14',
+    background: 'var(--ch-panel-bg)',
     flexShrink: 0,
   },
   bottomNavBtn: (active) => ({
@@ -126,10 +128,10 @@ const S = {
     WebkitUserSelect: 'none', userSelect: 'none',
   }),
   bottomNavIcon: { fontSize: '22px', lineHeight: 1 },
-  bottomNavLabel: { fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em' },
+  bottomNavLabel: { fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em' },
   mobileMenuSheet: {
     position: 'fixed', top: 'calc(52px + env(safe-area-inset-top))', left: 0, right: 0, zIndex: 450,
-    background: '#0f1219', borderBottom: '1px solid rgba(200,148,58,0.2)',
+    background: 'var(--ch-card-bg)', borderBottom: '1px solid rgba(200,148,58,0.2)',
     borderRadius: '0 0 12px 12px', padding: '16px 16px 8px',
     boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
   },
@@ -138,7 +140,7 @@ const S = {
     width: '100%', background: 'transparent', border: 'none',
     borderBottom: '1px solid rgba(255,255,255,0.04)',
     cursor: 'pointer', padding: '12px 4px',
-    fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em',
+    fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em',
     color: 'rgba(226,213,187,0.7)', textAlign: 'left',
     minHeight: '48px',
   },
@@ -189,9 +191,12 @@ export default function Dashboard({ user, onLogout }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);
   const userMenuTutorialRef = useRef(null);
+  const userMenuAppearanceRef = useRef(null);
   const userMenuHideDemoRef = useRef(null);
   const userMenuTrashRef = useRef(null);
+  const userMenuDdbRef = useRef(null);
   const userMenuLeaveRef = useRef(null);
+  const integrityBtnRef = useRef(null);
   const topbarRef = useRef(null);
   const viewToggleRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -212,6 +217,9 @@ export default function Dashboard({ user, onLogout }) {
   const noteEditorRootToolsTabsRef = useRef(null);
   const noteEditorSidebarDescriptionRef = useRef(null);
   const noteEditorCampaignSplitRef = useRef(null);
+  const noteEditorPartyPaneRef = useRef(null);
+  const noteEditorCompletionToggleRef = useRef(null);
+  const adminVaultTreeRef = useRef(null);
   const noteEditorDrawerBarRef = useRef(null);
   const noteEditorDrawerExpandRef = useRef(null);
 
@@ -241,6 +249,10 @@ export default function Dashboard({ user, onLogout }) {
   const journalPrepBtnRef = useRef(null);
   const journalRollBtnRef = useRef(null);
   const journalRecapBtnRef = useRef(null);
+
+  const timelineShellRef = useRef(null);
+  const timelineCampaignPickerRef = useRef(null);
+  const timelineCanvasRef = useRef(null);
 
   const backupBtnSnapshotRef = useRef(null);
   const backupBtnExportRef = useRef(null);
@@ -278,6 +290,7 @@ export default function Dashboard({ user, onLogout }) {
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [showIntegrity, setShowIntegrity] = useState(false);
   const [showDdbImport, setShowDdbImport] = useState(false);
+  const [showThemeSettings, setShowThemeSettings] = useState(false);
   /** Result of background D&D Beyond flavor check for the open linked note. */
   const [ddbFlavorUpdate, setDdbFlavorUpdate] = useState(null);
   const [ddbFlavorDismissed, setDdbFlavorDismissed] = useState(false);
@@ -290,6 +303,9 @@ export default function Dashboard({ user, onLogout }) {
   const [tutorialForceDrawerClosed, setTutorialForceDrawerClosed] = useState(false);
   const [tutorialGraphForce3D, setTutorialGraphForce3D] = useState(false);
   const [tutorialGraphForce2D, setTutorialGraphForce2D] = useState(false);
+  const [tutorialGraphForceToolMenu, setTutorialGraphForceToolMenu] = useState(false);
+  const [tutorialForceNoteEditMode, setTutorialForceNoteEditMode] = useState(false);
+  const [tutorialExpandAdminVault, setTutorialExpandAdminVault] = useState(false);
   const hideDemoRestoreRef = useRef(null);
   const [campaignModalOpts, setCampaignModalOpts] = useState({});
   const simulatedRoleRef = useRef(null);
@@ -329,15 +345,30 @@ export default function Dashboard({ user, onLogout }) {
   const tutorialSteps = tutorialModel.steps || [];
   const tutorialChapters = tutorialModel.chapters || [];
 
+  /** Live markdown snippet for tutorial card examples (e.g. demo note links). */
+  const tutorialCardExampleMarkdown = useMemo(() => {
+    if (!tutorialOpen) return null;
+    const step = tutorialSteps[tutorialStep];
+    if (step?.ui?.cardExample === 'demoNoteLink') {
+      return buildNoteLinkTutorialExample(notes);
+    }
+    return null;
+  }, [tutorialOpen, tutorialStep, tutorialSteps, notes]);
+
   const tutorialTargetRefs = useMemo(() => ({
     tutorialCard: tutorialCardRef,
     sidebar: sidebarRef,
     noteListCreateBar: noteListCreateBarRef,
     userMenu: userMenuRef,
     userMenuTutorial: userMenuTutorialRef,
+    userMenuAppearance: userMenuAppearanceRef,
     userMenuHideDemo: userMenuHideDemoRef,
     userMenuTrash: userMenuTrashRef,
+    userMenuDdb: userMenuDdbRef,
     userMenuLeave: userMenuLeaveRef,
+    viewToggle: viewToggleRef,
+    viewAsControls: viewAsRef,
+    integrityBtn: integrityBtnRef,
     adminPanelShell: adminPanelShellRef,
     adminTab_users: adminTabUsersRef,
     adminTab_vault: adminTabVaultRef,
@@ -345,9 +376,12 @@ export default function Dashboard({ user, onLogout }) {
     adminTab_ai: adminTabAiRef,
     adminTab_backup: adminTabBackupRef,
     adminTab_password: adminTabPasswordRef,
+    adminVaultTree: adminVaultTreeRef,
     noteEditorRootToolsTabs: noteEditorRootToolsTabsRef,
     noteEditorSidebarDescription: noteEditorSidebarDescriptionRef,
     noteEditorCampaignSplit: noteEditorCampaignSplitRef,
+    noteEditorPartyPane: noteEditorPartyPaneRef,
+    noteEditorCompletionToggle: noteEditorCompletionToggleRef,
     noteEditorDrawerBar: noteEditorDrawerBarRef,
     noteEditorDrawerExpand: noteEditorDrawerExpandRef,
     graphCanvas: graphCanvasRef,
@@ -375,6 +409,9 @@ export default function Dashboard({ user, onLogout }) {
     journalPrepBtn: journalPrepBtnRef,
     journalRollBtn: journalRollBtnRef,
     journalRecapBtn: journalRecapBtnRef,
+    timelineShell: timelineShellRef,
+    timelineCampaignPicker: timelineCampaignPickerRef,
+    timelineCanvas: timelineCanvasRef,
     backupBtn_snapshot: backupBtnSnapshotRef,
     backupBtn_export: backupBtnExportRef,
     backupBtn_sync: backupBtnSyncRef,
@@ -403,6 +440,9 @@ export default function Dashboard({ user, onLogout }) {
       setTutorialForceDrawerClosed(false);
       setTutorialGraphForce3D(false);
       setTutorialGraphForce2D(false);
+      setTutorialGraphForceToolMenu(false);
+      setTutorialForceNoteEditMode(false);
+      setTutorialExpandAdminVault(false);
       if (hideDemoRestoreRef.current != null) {
         setHideDemoFoldersPersist(!!hideDemoRestoreRef.current);
         hideDemoRestoreRef.current = null;
@@ -428,7 +468,7 @@ export default function Dashboard({ user, onLogout }) {
     }
 
     // Main view selection (Admin chapter still uses the Notes shell behind the overlay).
-    if (ui.view === 'graph' || ui.view === 'journal' || ui.view === 'notes') setView(ui.view);
+    if (ui.view === 'graph' || ui.view === 'journal' || ui.view === 'notes' || ui.view === 'timeline') setView(ui.view);
     else if (ui.view === 'admin') setView('notes');
 
     // User menu visibility for the Users chapter.
@@ -444,6 +484,10 @@ export default function Dashboard({ user, onLogout }) {
     if (ui.selectSunkenVale) {
       const rootId = findSunkenValeRootId(notes);
       if (rootId != null) setSelectedNoteId(rootId);
+    }
+    if (ui.selectDemoNoteTitle) {
+      const demoNote = findDemoNoteByTitle(notes, ui.selectDemoNoteTitle);
+      if (demoNote?.id != null) setSelectedNoteId(demoNote.id);
     }
     if (ui.clearSelection) {
       setSelectedNoteId(null);
@@ -467,6 +511,9 @@ export default function Dashboard({ user, onLogout }) {
     // Graph hints.
     setTutorialGraphForce3D(!!ui.graphForce3D);
     setTutorialGraphForce2D(!!ui.graphForce2D);
+    setTutorialGraphForceToolMenu(!!ui.graphForceToolMenu);
+    setTutorialForceNoteEditMode(!!ui.forceNoteEditMode);
+    setTutorialExpandAdminVault(!!ui.expandAdminVault);
   }, [tutorialOpen, tutorialStep, tutorialSteps, notes, user?.demo_seeded, hideDemoFolders, setHideDemoFoldersPersist]);
   const allRootFolderIds = notes.filter(n => n.is_folder && !n.parent_id).map(n => n.id);
   const effectiveDmCampaignIds = simulatedRole === 'dm' ? allRootFolderIds
@@ -969,7 +1016,7 @@ export default function Dashboard({ user, onLogout }) {
   if (loading) {
     return (
       <div style={{ ...S.shell, alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontFamily: 'Cinzel', color: '#c8943a', letterSpacing: '0.2em', fontSize: '13px' }}>LOADING CHRONICLES...</div>
+        <div style={{ fontFamily: 'var(--ch-font-display)', color: 'var(--ch-accent)', letterSpacing: '0.2em', fontSize: '13px' }}>LOADING CHRONICLES...</div>
       </div>
     );
   }
@@ -981,6 +1028,7 @@ export default function Dashboard({ user, onLogout }) {
           ref={adminPanelRef}
           currentUser={user}
           initialTab={tutorialOpen ? (tutorialSteps[tutorialStep]?.ui?.adminTab || 'users') : 'users'}
+          tutorialExpandVault={tutorialExpandAdminVault}
           tutorialRefs={{
             shell: adminPanelShellRef,
             tab_users: adminTabUsersRef,
@@ -989,12 +1037,14 @@ export default function Dashboard({ user, onLogout }) {
             tab_ai: adminTabAiRef,
             tab_backup: adminTabBackupRef,
             tab_password: adminTabPasswordRef,
+            vaultTree: adminVaultTreeRef,
           }}
           onClose={() => setShowAdmin(false)}
           onChroniclerImportDone={loadData}
         />
       )}
       {showTrash && <TrashPanel currentUser={user} onClose={() => setShowTrash(false)} onRestored={() => loadData()} />}
+      {showThemeSettings && <ThemeSettingsPanel onClose={() => setShowThemeSettings(false)} />}
       {showDdbImport && (
         <DdbCharacterImportWizard
           notes={notesForList}
@@ -1011,9 +1061,9 @@ export default function Dashboard({ user, onLogout }) {
 
       {/* Undo toast */}
       {undoToast && (
-        <div style={{ position: 'fixed', bottom: isMobile ? '66px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '5px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+        <div style={{ position: 'fixed', bottom: isMobile ? '66px' : '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: '#1a1c26', border: '1px solid rgba(200,148,58,0.3)', borderRadius: '5px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
           <span style={{ color: 'rgba(226,213,187,0.6)' }}>"{undoToast.title}" moved to trash</span>
-          <button onClick={handleUndoDelete} style={{ background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', padding: '3px 10px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em' }}>
+          <button onClick={handleUndoDelete} style={{ background: 'rgba(200,148,58,0.15)', border: '1px solid rgba(200,148,58,0.4)', borderRadius: '3px', cursor: 'pointer', padding: '3px 10px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em' }}>
             UNDO
           </button>
           <button onClick={() => { clearTimeout(undoToast.timer); setUndoToast(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.3)', fontSize: '14px', padding: 0 }}>×</button>
@@ -1024,12 +1074,12 @@ export default function Dashboard({ user, onLogout }) {
       {user.force_password_change ? (
         <div style={{ background: 'rgba(196,80,58,0.18)', borderBottom: '1px solid rgba(196,80,58,0.4)', padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0, zIndex: 20 }}>
           <span style={{ fontSize: '14px' }}>⚠</span>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,160,100,0.9)', flex: 1 }}>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(226,160,100,0.9)', flex: 1 }}>
             DEFAULT PASSWORD IN USE — Change your password in Admin → Password before sharing this server
           </span>
           <button
             onClick={() => setShowAdmin(true)}
-            style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', padding: '4px 12px', background: 'rgba(196,80,58,0.25)', border: '1px solid rgba(196,80,58,0.5)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,160,100,0.9)' }}
+            style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', padding: '4px 12px', background: 'rgba(196,80,58,0.25)', border: '1px solid rgba(196,80,58,0.5)', borderRadius: '3px', cursor: 'pointer', color: 'rgba(226,160,100,0.9)' }}
           >
             CHANGE NOW
           </button>
@@ -1065,6 +1115,7 @@ export default function Dashboard({ user, onLogout }) {
           {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
             <button
               type="button"
+              ref={integrityBtnRef}
               style={{ ...S.topBtn, marginLeft: '10px' }}
               onClick={() => setShowIntegrity(true)}
               title="Scan campaign folder for data issues"
@@ -1087,8 +1138,8 @@ export default function Dashboard({ user, onLogout }) {
                   ? (viewAsUserList.find((u) => u.id === viewAsUserId)?.username || 'user').toUpperCase().slice(0, 10)
                   : simulatedRole ? simulatedRole.toUpperCase() : 'VIEW'}</button>
                 {showViewAs && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '160px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '2px 6px 4px' }}>VIEW AS ROLE</div>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 100, background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '160px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '2px 6px 4px' }}>VIEW AS ROLE</div>
                     {[
                       { role: null,      label: 'ADMIN' },
                       { role: 'dm',      label: 'DM' },
@@ -1096,11 +1147,11 @@ export default function Dashboard({ user, onLogout }) {
                       { role: 'granted', label: 'GRANTED' },
                       { role: 'hidden',  label: 'HIDDEN' },
                     ].map(({ role, label }) => (
-                      <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setShowViewAs(false); }} style={{ padding: '5px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)', transition: 'all 0.15s', textAlign: 'left' }}>{label}</button>
+                      <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setShowViewAs(false); }} style={{ padding: '5px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)', transition: 'all 0.15s', textAlign: 'left' }}>{label}</button>
                     ))}
                     {viewAsUserList.length > 0 && (
                       <>
-                        <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '6px 6px 2px' }}>AS USER</div>
+                        <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', padding: '6px 6px 2px' }}>AS USER</div>
                         <select
                           value={viewAsUserId ?? ''}
                           onChange={(e) => {
@@ -1109,7 +1160,7 @@ export default function Dashboard({ user, onLogout }) {
                             setViewAsUserId(v ? parseInt(v, 10) : null);
                             setShowViewAs(false);
                           }}
-                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '8px', padding: '5px 6px', cursor: 'pointer' }}
+                          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '8px', padding: '5px 6px', cursor: 'pointer' }}
                         >
                           <option value="">— Off —</option>
                           {viewAsUserList.map((u) => (
@@ -1122,8 +1173,8 @@ export default function Dashboard({ user, onLogout }) {
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginLeft: '16px', maxWidth: '42vw' }}>
-                <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginRight: '2px' }}>VIEW AS</span>
+              <div ref={viewAsRef} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', marginLeft: '16px', maxWidth: '42vw' }}>
+                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginRight: '2px' }}>VIEW AS</span>
                 {[
                   { role: null,      label: 'ADMIN' },
                   { role: 'dm',      label: 'DM' },
@@ -1131,7 +1182,7 @@ export default function Dashboard({ user, onLogout }) {
                   { role: 'granted', label: 'GRANTED' },
                   { role: 'hidden',  label: 'HIDDEN' },
                 ].map(({ role, label }) => (
-                  <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); }} style={{ padding: '3px 8px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.3)', transition: 'all 0.15s' }}>{label}</button>
+                  <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); }} style={{ padding: '3px 8px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.3)', transition: 'all 0.15s' }}>{label}</button>
                 ))}
                 {viewAsUserList.length > 0 && (
                   <select
@@ -1142,7 +1193,7 @@ export default function Dashboard({ user, onLogout }) {
                       setViewAsUserId(v ? parseInt(v, 10) : null);
                     }}
                     title="View dashboard as this user"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '8px', padding: '3px 6px', cursor: 'pointer', maxWidth: '120px' }}
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '8px', padding: '3px 6px', cursor: 'pointer', maxWidth: '120px' }}
                   >
                     <option value="">User: off</option>
                     {viewAsUserList.map((u) => (
@@ -1169,15 +1220,16 @@ export default function Dashboard({ user, onLogout }) {
                   title="Account menu"
                 >{windowWidth <= 720 ? '···' : user.username.toUpperCase()}</button>
                 {showUserMenu && (
-                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
+                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 100, background: 'var(--ch-card-bg)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.4)', padding: '2px 6px 4px' }}>{user.username.toUpperCase()}</div>
                     <button ref={userMenuTutorialRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setShowUserMenu(false); }}>Tutorial</button>
+                    <button ref={userMenuAppearanceRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowThemeSettings(true); setShowUserMenu(false); }}>Appearance</button>
                     <button ref={userMenuHideDemoRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setShowUserMenu(false); }}>
                       {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
                     </button>
                     <button ref={userMenuTrashRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowTrash(true); setShowUserMenu(false); }}>🗑 Trash</button>
-                    <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowDdbImport(true); setShowUserMenu(false); }}>Import D&amp;D Beyond</button>
-                    {!!user.is_admin && <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'rgba(200,148,58,0.85)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
+                    <button ref={userMenuDdbRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={() => { setShowDdbImport(true); setShowUserMenu(false); }}>Import D&amp;D Beyond</button>
+                    {!!user.is_admin && <button type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%', color: 'var(--ch-text-accent)', borderColor: 'rgba(200,148,58,0.4)' }} onClick={() => { setShowAdmin(true); setShowUserMenu(false); }}>Admin</button>}
                     <button ref={userMenuLeaveRef} type="button" style={{ ...S.topBtn, textAlign: 'left', width: '100%' }} onClick={onLogout}>Leave</button>
                   </div>
                 )}
@@ -1216,20 +1268,23 @@ export default function Dashboard({ user, onLogout }) {
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 440, opacity: mobileMenuOpen ? 1 : 0, pointerEvents: mobileMenuOpen ? 'auto' : 'none', transition: 'opacity 0.2s ease' }} onClick={() => setMobileMenuOpen(false)} />
           <div style={{ ...S.mobileMenuSheet, opacity: mobileMenuOpen ? 1 : 0, transform: mobileMenuOpen ? 'translateY(0)' : 'translateY(-8px)', transition: 'opacity 0.2s ease, transform 0.2s ease', pointerEvents: mobileMenuOpen ? 'auto' : 'none' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>
               {user.username.toUpperCase()}
             </div>
-            <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
+            <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--ch-border)' }}>
               <button ref={userMenuTutorialRef} type="button" style={S.mobileMenuBtn} onClick={() => { setTutorialOpen(true); setTutorialStep(0); setMobileMenuOpen(false); }}>
                 <span>✦</span> Tutorial
+              </button>
+              <button ref={userMenuAppearanceRef} type="button" style={S.mobileMenuBtn} onClick={() => { setShowThemeSettings(true); setMobileMenuOpen(false); }}>
+                <span>🎨</span> Appearance
               </button>
               <button ref={userMenuHideDemoRef} type="button" style={{ ...S.mobileMenuBtn, borderBottom: 'none' }} onClick={() => { setHideDemoFoldersPersist(!hideDemoFolders); setMobileMenuOpen(false); }}>
                 <span>{hideDemoFolders ? '👁' : '🙈'}</span> {hideDemoFolders ? 'Show demo folders' : 'Hide demo folders'}
               </button>
             </div>
             {!!user.is_admin && (
-              <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(200,148,58,0.12)' }}>
-                <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
+              <div style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid var(--ch-border)' }}>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>VIEW AS</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {[
                     { role: null, label: 'ADMIN' },
@@ -1238,12 +1293,12 @@ export default function Dashboard({ user, onLogout }) {
                     { role: 'granted', label: 'GRANTED' },
                     { role: 'hidden', label: 'HIDDEN' },
                   ].map(({ role, label }) => (
-                    <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setMobileMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>{label}</button>
+                    <button key={label} onClick={() => { setViewAsUserId(null); setSimulatedRole(role); setMobileMenuOpen(false); }} style={{ padding: '6px 10px', borderRadius: '3px', border: '1px solid', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', background: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.2)' : 'transparent', borderColor: !viewAsUserId && simulatedRole === role ? 'rgba(200,148,58,0.5)' : 'rgba(255,255,255,0.08)', color: !viewAsUserId && simulatedRole === role ? '#c8943a' : 'rgba(226,213,187,0.5)' }}>{label}</button>
                   ))}
                 </div>
                 {viewAsUserList.length > 0 && (
                   <div style={{ marginTop: '8px' }}>
-                    <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>AS USER</div>
+                    <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.35)', marginBottom: '4px' }}>AS USER</div>
                     <select
                       value={viewAsUserId ?? ''}
                       onChange={(e) => {
@@ -1252,7 +1307,7 @@ export default function Dashboard({ user, onLogout }) {
                         setViewAsUserId(v ? parseInt(v, 10) : null);
                         setMobileMenuOpen(false);
                       }}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '9px', padding: '8px 6px' }}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', color: 'var(--ch-accent)', fontFamily: 'var(--ch-font-display)', fontSize: '9px', padding: '8px 6px' }}
                     >
                       <option value="">— Off —</option>
                       {viewAsUserList.map((u) => (
@@ -1266,16 +1321,16 @@ export default function Dashboard({ user, onLogout }) {
             <button ref={userMenuTrashRef} style={S.mobileMenuBtn} onClick={() => { setShowTrash(true); setMobileMenuOpen(false); }}>
               <span>🗑</span> Trash
             </button>
-            <button style={S.mobileMenuBtn} onClick={() => { setShowDdbImport(true); setMobileMenuOpen(false); }}>
+            <button ref={userMenuDdbRef} style={S.mobileMenuBtn} onClick={() => { setShowDdbImport(true); setMobileMenuOpen(false); }}>
               <span>⚔</span> Import D&amp;D Beyond
             </button>
             {(effectiveDmCampaignIds.length > 0 || !!user.is_admin) && (
-              <button style={S.mobileMenuBtn} onClick={() => { setShowIntegrity(true); setMobileMenuOpen(false); }}>
+              <button ref={integrityBtnRef} style={S.mobileMenuBtn} onClick={() => { setShowIntegrity(true); setMobileMenuOpen(false); }}>
                 <span>⚙</span> Integrity scan
               </button>
             )}
             {!!user.is_admin && (
-              <button style={{ ...S.mobileMenuBtn, color: 'rgba(200,148,58,0.85)' }} onClick={() => { setShowAdmin(true); setMobileMenuOpen(false); }}>
+              <button style={{ ...S.mobileMenuBtn, color: 'var(--ch-text-accent)' }} onClick={() => { setShowAdmin(true); setMobileMenuOpen(false); }}>
                 <span>⚙</span> Admin
               </button>
             )}
@@ -1288,9 +1343,9 @@ export default function Dashboard({ user, onLogout }) {
 
       {/* ── PWA INSTALL HINT ── */}
       {isMobile && showInstallHint && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 14px', background: 'rgba(200,148,58,0.06)', borderBottom: '1px solid rgba(200,148,58,0.12)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 14px', background: 'rgba(200,148,58,0.06)', borderBottom: '1px solid var(--ch-border)', flexShrink: 0 }}>
           <span style={{ fontSize: '14px', flexShrink: 0 }}>📲</span>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '7.5px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.65)', flex: 1, lineHeight: '1.5' }}>
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7.5px', letterSpacing: '0.08em', color: 'rgba(200,148,58,0.65)', flex: 1, lineHeight: '1.5' }}>
             {/iphone|ipad|ipod/i.test(navigator.userAgent)
               ? 'INSTALL AS APP — tap Share ⬆ then "Add to Home Screen"'
               : 'INSTALL AS APP — tap ⋮ then "Add to Home Screen"'}
@@ -1402,10 +1457,13 @@ export default function Dashboard({ user, onLogout }) {
                   tutorialRequestedDrawerTab={tutorialRequestedDrawerTab}
                   tutorialEnsureDrawerOpen={tutorialEnsureDrawerOpen}
                   tutorialForceDrawerClosed={tutorialForceDrawerClosed}
+                  tutorialForceEditMode={tutorialForceNoteEditMode}
                   tutorialRefs={{
                     rootToolsTabs: noteEditorRootToolsTabsRef,
                     sidebarDescription: noteEditorSidebarDescriptionRef,
                     campaignSplit: noteEditorCampaignSplitRef,
+                    partyPane: noteEditorPartyPaneRef,
+                    completionToggle: noteEditorCompletionToggleRef,
                     drawerBar: noteEditorDrawerBarRef,
                     drawerExpand: noteEditorDrawerExpandRef,
                   }}
@@ -1461,6 +1519,7 @@ export default function Dashboard({ user, onLogout }) {
                   isMobile={isMobile}
                   tutorialForce3D={tutorialGraphForce3D}
                   tutorialForce2D={tutorialGraphForce2D}
+                  tutorialForceToolMenu={tutorialGraphForceToolMenu}
                   tutorialRefs={{
                     canvas: graphCanvasRef,
                     campaignSelect: graphCampaignSelectRef,
@@ -1484,7 +1543,7 @@ export default function Dashboard({ user, onLogout }) {
                 <div style={{
                   position: 'fixed', bottom: 'calc(44px + env(safe-area-inset-bottom))', left: 0, right: 0,
                   height: '45vh', zIndex: 300,
-                  background: '#0a0c14',
+                  background: 'var(--ch-panel-bg)',
                   borderTop: '1px solid rgba(200,148,58,0.2)',
                   overflow: 'hidden',
                 }}>
@@ -1527,6 +1586,11 @@ export default function Dashboard({ user, onLogout }) {
               notes={notesForList}
               currentUser={user}
               dmCampaignIds={effectiveDmCampaignIds}
+              tutorialRefs={{
+                shell: timelineShellRef,
+                campaignPicker: timelineCampaignPickerRef,
+                canvas: timelineCanvasRef,
+              }}
               onSelectNote={(id) => {
                 setSelectedNoteId(id);
                 setView('notes');
@@ -1576,6 +1640,8 @@ export default function Dashboard({ user, onLogout }) {
         targetRefs={tutorialTargetRefs}
         chapters={tutorialChapters}
         cardRef={tutorialCardRef}
+        cardExampleMarkdown={tutorialCardExampleMarkdown}
+        onOpenReferenceNote={openReferenceNote}
       />
     </div>
   );

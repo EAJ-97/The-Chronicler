@@ -7,8 +7,21 @@ export const TIMELINE_BOX_H = 88;
 /** Vertical canvas size for the timeline SVG (more room above/below the axis). */
 export const TIMELINE_CANVAS_H = 720;
 
+/** Minimum timeline canvas height when the viewport is very short. */
+export const TIMELINE_CANVAS_MIN_H = 320;
+
 /** Y coordinate of the main horizontal axis within the SVG. */
 export const TIMELINE_LINE_Y = TIMELINE_CANVAS_H / 2;
+
+/**
+ * Resolves SVG height and axis Y from the scroll viewport (axis stays vertically centered).
+ * @param {number} viewportHeight - Scroll container clientHeight in layout px.
+ * @returns {{ canvasHeight: number, lineY: number }}
+ */
+export function resolveTimelineCanvasMetrics(viewportHeight) {
+  const canvasHeight = Math.max(TIMELINE_CANVAS_MIN_H, viewportHeight || TIMELINE_CANVAS_MIN_H);
+  return { canvasHeight, lineY: canvasHeight / 2 };
+}
 
 /** Minimum branch length (px) before a release creates a box. */
 export const TIMELINE_MIN_BRANCH = 32;
@@ -150,15 +163,17 @@ export function buildBranchPath(endX, endY) {
  * @param {number} endX - Box center x offset from anchor.
  * @param {number} endY - Box center y offset from axis.
  * @param {number} canvasWidth
+ * @param {number} [canvasHeight=TIMELINE_CANVAS_H]
+ * @param {number} [lineY=TIMELINE_LINE_Y]
  * @returns {{ endX: number, endY: number }}
  */
-export function clampBoxOffsets(anchorDisplayX, endX, endY, canvasWidth) {
+export function clampBoxOffsets(anchorDisplayX, endX, endY, canvasWidth, canvasHeight = TIMELINE_CANVAS_H, lineY = TIMELINE_LINE_Y) {
   const hw = TIMELINE_BOX_W / 2;
   const hh = TIMELINE_BOX_H / 2;
   const pad = TIMELINE_BOUND_PAD;
 
-  const minEndY = pad + hh - TIMELINE_LINE_Y;
-  const maxEndY = TIMELINE_CANVAS_H - pad - hh - TIMELINE_LINE_Y;
+  const minEndY = pad + hh - lineY;
+  const maxEndY = canvasHeight - pad - hh - lineY;
   const minEndX = TIMELINE_AXIS_PAD + hw - anchorDisplayX;
   const maxEndX = canvasWidth - TIMELINE_AXIS_PAD - hw - anchorDisplayX;
 
@@ -191,9 +206,11 @@ export function clampAnchorDisplayX(anchorDisplayX, endX, canvasWidth) {
  * @param {object} entry
  * @param {number} extendLeft - Past extension offset applied to display x.
  * @param {number} canvasWidth
+ * @param {number} [canvasHeight=TIMELINE_CANVAS_H]
+ * @param {number} [lineY=TIMELINE_LINE_Y]
  * @returns {object}
  */
-export function clampEntryGeometryToCanvas(entry, extendLeft, canvasWidth) {
+export function clampEntryGeometryToCanvas(entry, extendLeft, canvasWidth, canvasHeight = TIMELINE_CANVAS_H, lineY = TIMELINE_LINE_Y) {
   let storedAnchor = entry.anchor_x ?? 0;
   let endX = entry.end_x ?? 0;
   let endY = entry.end_y ?? 0;
@@ -203,7 +220,7 @@ export function clampEntryGeometryToCanvas(entry, extendLeft, canvasWidth) {
   displayAx = clampAnchorDisplayX(displayAx, endX, canvasWidth);
   storedAnchor = displayAx - extendLeft;
 
-  const box = clampBoxOffsets(displayAx, endX, endY, canvasWidth);
+  const box = clampBoxOffsets(displayAx, endX, endY, canvasWidth, canvasHeight, lineY);
   endX = box.endX;
   endY = box.endY;
 

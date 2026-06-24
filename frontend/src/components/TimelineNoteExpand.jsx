@@ -4,7 +4,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chroniclerUrlTransform } from '../utils/chroniclerUrlTransform.js';
 import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
-import { getCategoryColor } from './NoteEditor.jsx';
+import { getCategoryColor } from '../theme/categoryColors.js';
+import { buildMarkdownCss } from '../theme/markdownCss.js';
+import { useTheme } from '../theme/useTheme.js';
 import { timelineBoxTitle } from '../utils/timelineGeometry.js';
 
 const EXPAND_MS = 300;
@@ -68,6 +70,7 @@ export default function TimelineNoteExpand({
   onClose,
   onOpenReferenceNote,
 }) {
+  const { theme } = useTheme();
   const [overlayOpacity, setOverlayOpacity] = useState(0);
   const [flyRect, setFlyRect] = useState(() => normalizeRect(sourceRect));
   const [flyRadius, setFlyRadius] = useState(4);
@@ -207,7 +210,7 @@ export default function TimelineNoteExpand({
             style={{
               flexShrink: 0,
               background: 'rgba(200,148,58,0.08)',
-              border: '1px solid rgba(200,148,58,0.2)',
+              border: '1px solid var(--ch-border-strong)',
               borderRadius: '3px',
               cursor: canGoBack ? 'pointer' : 'not-allowed',
               opacity: canGoBack ? 1 : 0.35,
@@ -215,7 +218,7 @@ export default function TimelineNoteExpand({
               fontFamily: 'Cinzel, serif',
               fontSize: '9px',
               letterSpacing: '0.12em',
-              color: '#c8943a',
+              color: 'var(--ch-accent)',
               marginTop: '2px',
             }}
           >
@@ -227,7 +230,7 @@ export default function TimelineNoteExpand({
                 fontFamily: 'Cinzel, serif',
                 fontSize: '13px',
                 letterSpacing: '0.06em',
-                color: '#e2d5bb',
+                color: 'var(--ch-text-primary)',
                 lineHeight: 1.3,
               }}
             >
@@ -284,7 +287,7 @@ export default function TimelineNoteExpand({
               border: 'none',
               borderRadius: '3px',
               background: 'rgba(255,255,255,0.06)',
-              color: 'rgba(226,213,187,0.55)',
+              color: 'var(--ch-text-primary-55)',
               fontSize: '18px',
               lineHeight: 1,
               cursor: 'pointer',
@@ -303,7 +306,7 @@ export default function TimelineNoteExpand({
             fontFamily: 'Crimson Pro, serif',
             fontSize: '15px',
             lineHeight: 1.75,
-            color: '#e2d5bb',
+            color: 'var(--ch-text-primary)',
           }}
         >
           {loading ? (
@@ -340,31 +343,10 @@ export default function TimelineNoteExpand({
       </div>
 
       <style>{`
-        .md-timeline-expand h1, .md-timeline-expand h2, .md-timeline-expand h3 {
-          font-family: 'Cinzel', serif;
-          color: #c8943a;
-          margin: 16px 0 6px;
-          letter-spacing: 0.04em;
-        }
+        ${buildMarkdownCss(theme).replace(/\.md-content/g, '.md-timeline-expand').replace(/\.md-preview/g, '.md-timeline-expand').replace(/\.md-ref-peek/g, '.md-timeline-expand')}
         .md-timeline-expand h1 { font-size: 18px; }
         .md-timeline-expand h2 { font-size: 16px; }
         .md-timeline-expand h3 { font-size: 14px; }
-        .md-timeline-expand p { margin: 0 0 10px; }
-        .md-timeline-expand ul, .md-timeline-expand ol { padding-left: 20px; margin: 0 0 10px; }
-        .md-timeline-expand blockquote {
-          border-left: 2px solid rgba(200,148,58,0.3);
-          margin: 0 0 10px;
-          padding: 4px 12px;
-          color: rgba(226,213,187,0.6);
-          font-style: italic;
-        }
-        .md-timeline-expand code {
-          background: rgba(255,255,255,0.06);
-          border-radius: 2px;
-          padding: 1px 5px;
-          font-size: 14px;
-          font-family: monospace;
-        }
         .md-timeline-expand a { cursor: pointer; }
       `}</style>
     </div>,

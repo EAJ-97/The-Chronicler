@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
-import { getCategoryColor } from './NoteEditor.jsx';
+import { getCategoryColor } from '../theme/categoryColors.js';
+import { useTheme } from '../theme/useTheme.js';
 import {
   buildCanonAdjacency,
   getTiersFromAdj,
@@ -198,6 +199,7 @@ const TIER_PARAMS = HOP_OPACITY.map((nodeOp, i) => ({
 }));
 
 export default function GraphView3D({ notes, connections, onSelectNote, onOpenNote, connectMode, onExitConnectMode, onCreateConnection, activeCampaignId, pathMode: pathModeProp = false, pathSource: pathSourceProp = null, onPathSourceSet, onPathResult, onExitPathMode, isMobile = false, tutorialRefs = null }) {
+  const { theme } = useTheme();
   const mountRef         = useRef(null);
   const graphRef         = useRef(null);
   const lastClickRef     = useRef({ id: null, time: 0 });
@@ -282,7 +284,7 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
       .nodeLabel(() => '') // suppress built-in tooltip — we use sprite labels
 
       .nodeThreeObject(node => {
-        const color  = node.isFolder ? '#c8943a' : getCategoryColor(node.category);
+        const color  = node.isFolder ? theme.colors.accent : getCategoryColor(node.category);
         const baseR  = node.isFolder ? 14 : (node.significance === 'major' ? 18 : node.significance === 'minor' ? 7 : 12);
         const nw     = node.narrativeWeight || 'node';
         const group  = makeD20(baseR, color, nw);

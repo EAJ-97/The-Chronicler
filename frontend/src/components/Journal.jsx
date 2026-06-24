@@ -535,7 +535,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
   return (
-    <div ref={tutorialRefs?.shell || null} style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: '#0a0c14' }}>
+    <div ref={tutorialRefs?.shell || null} style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--ch-panel-bg)' }}>
       {journalLocked && (
         <div
           style={{
@@ -543,13 +543,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             padding: '8px 16px',
             borderBottom: '1px solid rgba(200,148,58,0.2)',
             background: 'rgba(200,148,58,0.07)',
-            fontFamily: 'Crimson Pro, serif',
+            fontFamily: 'var(--ch-font-body)',
             fontSize: '13px',
-            color: 'rgba(226,213,187,0.85)',
+            color: 'var(--ch-text-primary-85)',
             lineHeight: 1.45,
           }}
         >
-          This campaign is marked <strong style={{ color: '#c8943a' }}>completed</strong>. The journal is read-only. A DM can clear completion on the campaign or world root folder.
+          This campaign is marked <strong style={{ color: 'var(--ch-accent)' }}>completed</strong>. The journal is read-only. A DM can clear completion on the campaign or world root folder.
         </div>
       )}
       {recapSession && (
@@ -576,24 +576,24 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       {/* Move session modal */}
       {movingSession && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '24px 28px', minWidth: '320px', maxWidth: '420px' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '6px' }}>MOVE SESSION</div>
-            <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.6)', marginBottom: '18px' }}>
+          <div style={{ background: 'var(--ch-card-bg)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '24px 28px', minWidth: '320px', maxWidth: '420px' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '6px' }}>MOVE SESSION</div>
+            <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-60)', marginBottom: '18px' }}>
               Move <em>Session {movingSession.sessionNum}</em> to:
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px' }}>
               {journalCampaignRoots.filter(f => f.id !== activeFolderId).map(f => (
                 <button key={f.id} onClick={() => handleMoveSession(f.id)}
-                  style={{ padding: '10px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.8)', textAlign: 'left' }}>
+                  style={{ padding: '10px 14px', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.8)', textAlign: 'left' }}>
                   {f.title}
                 </button>
               ))}
               {journalCampaignRoots.filter(f => f.id !== activeFolderId).length === 0 && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.3)' }}>No other campaigns to move to.</div>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-30)' }}>No other campaigns to move to.</div>
               )}
             </div>
             <button onClick={() => setMovingSession(null)}
-              style={{ padding: '6px 14px', background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '9px', color: 'rgba(226,213,187,0.4)' }}>
+              style={{ padding: '6px 14px', background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: 'var(--ch-text-primary-40)' }}>
               Cancel
             </button>
           </div>
@@ -608,18 +608,18 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setPrepSession(null); }}
         >
-          <div style={{ background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(440px, calc(100vw - 32px))', maxHeight: 'min(70vh, 520px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+          <div style={{ background: 'var(--ch-card-bg)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(440px, calc(100vw - 32px))', maxHeight: 'min(70vh, 520px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
               <div>
-                <div id="prep-checklist-title" style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>PREP CHECKLIST</div>
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)' }}>
+                <div id="prep-checklist-title" style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>PREP CHECKLIST</div>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-50)' }}>
                   Session {prepSession.num}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setPrepSession(null)}
-                style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
+                style={{ background: 'none', border: 'none', color: 'var(--ch-text-primary-35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
                 aria-label="Close prep checklist"
               >
                 ×
@@ -643,8 +643,8 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                   />
                   <span
                     style={{
-                      flex: 1, fontFamily: 'Crimson Pro, serif', fontSize: '14px', lineHeight: 1.45,
-                      color: item.is_checked ? 'rgba(226,213,187,0.35)' : 'rgba(226,213,187,0.88)',
+                      flex: 1, fontFamily: 'var(--ch-font-body)', fontSize: '14px', lineHeight: 1.45,
+                      color: item.is_checked ? 'var(--ch-text-primary-35)' : 'var(--ch-text-primary-88)',
                       textDecoration: item.is_checked ? 'line-through' : 'none', wordBreak: 'break-word',
                     }}
                   >
@@ -664,7 +664,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 </div>
               ))}
               {(sessionChecklists[String(prepSession.id)] || []).length === 0 && (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.25)', padding: '8px 0' }}>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-25)', padding: '8px 0' }}>
                   No items yet — add tasks below.
                 </div>
               )}
@@ -678,18 +678,18 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 placeholder="Add prep item…"
                 maxLength={500}
                 style={{
-                  flex: '1 1 160px', minWidth: 0, padding: '10px 12px', fontFamily: 'Crimson Pro, serif', fontSize: '14px',
+                  flex: '1 1 160px', minWidth: 0, padding: '10px 12px', fontFamily: 'var(--ch-font-body)', fontSize: '14px',
                   background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px',
-                  color: 'rgba(226,213,187,0.9)', outline: 'none', boxSizing: 'border-box',
+                  color: 'var(--ch-text-primary-90)', outline: 'none', boxSizing: 'border-box',
                 }}
               />
               <button
                 type="button"
                 onClick={() => handlePrepAdd(prepSession.id)}
                 style={{
-                  padding: '10px 16px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  padding: '10px 16px', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
                   background: 'rgba(200,148,58,0.12)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px',
-                  cursor: 'pointer', color: '#c8943a',
+                  cursor: 'pointer', color: 'var(--ch-accent)',
                 }}
               >
                 ADD
@@ -699,9 +699,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                   type="button"
                   onClick={() => handlePrepResetChecks(prepSession.id)}
                   style={{
-                    padding: '10px 14px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                    padding: '10px 14px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em',
                     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
-                    cursor: 'pointer', color: 'rgba(226,213,187,0.5)',
+                    cursor: 'pointer', color: 'var(--ch-text-primary-50)',
                   }}
                 >
                   UNCHECK ALL
@@ -720,18 +720,18 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setAttendanceSession(null); }}
         >
-          <div style={{ background: '#0f1219', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(400px, calc(100vw - 32px))', maxHeight: 'min(70vh, 480px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+          <div style={{ background: 'var(--ch-card-bg)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '6px', padding: '22px 26px', width: 'min(400px, calc(100vw - 32px))', maxHeight: 'min(70vh, 480px)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
               <div>
-                <div id="session-attendance-title" style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>SESSION ATTENDANCE</div>
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)' }}>
+                <div id="session-attendance-title" style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.8)', marginBottom: '4px' }}>SESSION ATTENDANCE</div>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-50)' }}>
                   Session {attendanceSession.num}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setAttendanceSession(null)}
-                style={{ background: 'none', border: 'none', color: 'rgba(226,213,187,0.35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
+                style={{ background: 'none', border: 'none', color: 'var(--ch-text-primary-35)', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '0 4px' }}
                 aria-label="Close attendance"
               >
                 ×
@@ -739,7 +739,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             </div>
             <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {(sessionAttendance[String(attendanceSession.id)] || []).length === 0 ? (
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.28)', padding: '8px 0' }}>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'var(--ch-text-primary-28)', padding: '8px 0' }}>
                   No party members on this campaign yet (add members via note permissions or DM roles).
                 </div>
               ) : (
@@ -752,9 +752,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                     }}
                   >
                     <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.9)' }}>{row.username}</span>
+                      <span style={{ fontFamily: 'var(--ch-font-body)', fontSize: '15px', color: 'var(--ch-text-primary-90)' }}>{row.username}</span>
                       {!!row.is_dm && (
-                        <span style={{ marginLeft: '8px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)' }}>DM</span>
+                        <span style={{ marginLeft: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.45)' }}>DM</span>
                       )}
                     </div>
                     {canPrepForJournal ? (
@@ -763,10 +763,10 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           type="button"
                           onClick={() => handleAttendanceSet(attendanceSession.id, row.user_id, true)}
                           style={{
-                            padding: '4px 10px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                            padding: '4px 10px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em',
                             background: row.attended === true ? 'rgba(58,196,139,0.15)' : 'rgba(255,255,255,0.04)',
                             border: `1px solid ${row.attended === true ? 'rgba(58,196,139,0.35)' : 'rgba(255,255,255,0.1)'}`,
-                            borderRadius: '3px', cursor: 'pointer', color: row.attended === true ? 'rgba(58,196,139,0.85)' : 'rgba(226,213,187,0.35)',
+                            borderRadius: '3px', cursor: 'pointer', color: row.attended === true ? 'rgba(58,196,139,0.85)' : 'var(--ch-text-primary-35)',
                           }}
                         >
                           Present
@@ -775,17 +775,17 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           type="button"
                           onClick={() => handleAttendanceSet(attendanceSession.id, row.user_id, false)}
                           style={{
-                            padding: '4px 10px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em',
+                            padding: '4px 10px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em',
                             background: row.attended === false ? 'rgba(224,112,112,0.12)' : 'rgba(255,255,255,0.04)',
                             border: `1px solid ${row.attended === false ? 'rgba(224,112,112,0.35)' : 'rgba(255,255,255,0.1)'}`,
-                            borderRadius: '3px', cursor: 'pointer', color: row.attended === false ? 'rgba(224,112,112,0.8)' : 'rgba(226,213,187,0.35)',
+                            borderRadius: '3px', cursor: 'pointer', color: row.attended === false ? 'rgba(224,112,112,0.8)' : 'var(--ch-text-primary-35)',
                           }}
                         >
                           Absent
                         </button>
                       </div>
                     ) : (
-                      <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.4)' }}>
+                      <span style={{ fontFamily: 'var(--ch-font-body)', fontSize: '13px', color: 'var(--ch-text-primary-40)' }}>
                         {row.attended === true ? 'Present' : row.attended === false ? 'Absent' : '—'}
                       </span>
                     )}
@@ -794,7 +794,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               )}
             </div>
             {!canPrepForJournal && (sessionAttendance[String(attendanceSession.id)] || []).length > 0 && (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(226,213,187,0.25)', marginTop: '12px' }}>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'var(--ch-text-primary-25)', marginTop: '12px' }}>
                 Only the DM can change attendance.
               </div>
             )}
@@ -804,11 +804,35 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
       {/* Header */}
       <div style={{ padding: isMobile ? '12px 16px' : '14px 24px', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: isMobile ? '10px' : '8px', marginBottom: '6px' }}>
-          <span style={{ fontFamily: 'Cinzel', fontSize: '12px', letterSpacing: '0.15em', color: '#c8943a' }}>SESSION JOURNAL</span>
+        <div style={{
+          display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
+          flexWrap: 'wrap',
+          gap: isMobile ? '8px' : '12px',
+          marginBottom: '6px',
+        }}
+        >
+          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '12px', letterSpacing: '0.15em', color: 'var(--ch-accent)', flexShrink: 0 }}>
+            SESSION JOURNAL
+          </span>
           {journalCampaignRoots.length > 0 ? (
             <select
-              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', color: '#c8943a', fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', padding: isMobile ? '8px 10px' : '4px 8px', outline: 'none', cursor: 'pointer', ...(isMobile ? { width: '100%', minHeight: '40px' } : {}) }}
+              style={{
+                background: 'rgba(200,148,58,0.08)',
+                border: '1px solid var(--ch-border-strong)',
+                borderRadius: '3px',
+                color: 'var(--ch-accent)',
+                fontFamily: 'var(--ch-font-display)',
+                fontSize: '10px',
+                letterSpacing: '0.1em',
+                padding: '5px 10px',
+                outline: 'none',
+                cursor: 'pointer',
+                width: 'auto',
+                maxWidth: isMobile ? '100%' : 'min(280px, 42vw)',
+                minWidth: isMobile ? undefined : '160px',
+              }}
               ref={tutorialRefs?.campaignPicker || null}
               value={activeFolderId || ''}
               onChange={e => setActiveFolderId(e.target.value ? parseInt(e.target.value) : null)}
@@ -816,24 +840,23 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               {journalCampaignRoots.map(f => <option key={f.id} value={f.id}>{f.title}</option>)}
             </select>
           ) : (
-            <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)' }}>Create a root folder to begin</span>
+            <span style={{ fontFamily: 'var(--ch-font-body)', fontSize: '13px', color: 'var(--ch-text-primary-30)' }}>Create a root folder to begin</span>
           )}
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'nowrap' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
             <button
               type="button"
               ref={tutorialRefs?.loreBtn || null}
               style={{
-                flex: 1,
-                padding: '10px 12px',
-                minHeight: '40px',
+                padding: isMobile ? '7px 10px' : '5px 12px',
                 background: lorePanelOpen ? 'rgba(139,196,226,0.12)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'rgba(226,213,187,0.2)'}`,
+                border: `1px solid ${lorePanelOpen ? 'rgba(139,196,226,0.35)' : 'var(--ch-text-primary-20)'}`,
                 borderRadius: '3px',
                 cursor: activeFolderId ? 'pointer' : 'not-allowed',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
-                color: lorePanelOpen ? 'rgba(139,196,226,0.85)' : 'rgba(226,213,187,0.6)',
+                color: lorePanelOpen ? 'rgba(139,196,226,0.85)' : 'var(--ch-text-primary-60)',
+                whiteSpace: 'nowrap',
               }}
               onClick={() => persistLorePanelOpen(!lorePanelOpen)}
               title="AI summary of visible campaign notes + journal (per-user cache)"
@@ -845,17 +868,16 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               type="button"
               ref={tutorialRefs?.newSessionBtn || null}
               style={{
-                flex: 1,
-                padding: '10px 12px',
-                minHeight: '40px',
+                padding: isMobile ? '7px 10px' : '5px 12px',
                 background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(226,213,187,0.2)',
+                border: '1px solid var(--ch-text-primary-20)',
                 borderRadius: '3px',
                 cursor: !activeFolderId || journalLocked ? 'not-allowed' : 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
-                color: !activeFolderId || journalLocked ? 'rgba(226,213,187,0.25)' : 'rgba(226,213,187,0.6)',
+                color: !activeFolderId || journalLocked ? 'var(--ch-text-primary-25)' : 'var(--ch-text-primary-60)',
+                whiteSpace: 'nowrap',
               }}
               onClick={handleNewSession}
               title={journalLocked ? 'Journal is read-only while this campaign is marked completed' : 'Start a new session'}
@@ -866,7 +888,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           </div>
         </div>
         {!isMobile && (
-          <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.25)' }}>
+          <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '12px', color: 'var(--ch-text-primary-25)' }}>
             Enter to log · Tab/Shift+Tab to indent · click ⊕ to insert between entries · Esc to reset
           </div>
         )}
@@ -887,9 +909,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             padding: isMobile ? '10px 14px' : '10px 20px',
             borderBottom: '1px solid rgba(255,255,255,0.05)',
           }}>
-            <span style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.18em', color: 'rgba(139,196,226,0.85)' }}>LORE SO FAR</span>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.18em', color: 'rgba(139,196,226,0.85)' }}>LORE SO FAR</span>
             {loreUpdatedAt && (
-              <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em', color: 'rgba(226,213,187,0.35)' }}>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.08em', color: 'var(--ch-text-primary-35)' }}>
                 Saved {parseSQLiteDate(loreUpdatedAt).toLocaleString()}
               </span>
             )}
@@ -900,10 +922,10 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 onClick={handleLoreGenerate}
                 style={{
                   padding: '5px 12px', borderRadius: '3px', cursor: loreBusy || !aiEnabled ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
-                  border: `1px solid ${!aiEnabled ? 'rgba(226,213,187,0.1)' : 'rgba(139,196,226,0.35)'}`,
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                  border: `1px solid ${!aiEnabled ? 'var(--ch-border)' : 'rgba(139,196,226,0.35)'}`,
                   background: !aiEnabled ? 'transparent' : 'rgba(139,196,226,0.12)',
-                  color: !aiEnabled ? 'rgba(226,213,187,0.25)' : 'rgba(139,196,226,0.9)',
+                  color: !aiEnabled ? 'var(--ch-text-primary-25)' : 'rgba(139,196,226,0.9)',
                 }}
                 title={!aiEnabled ? 'Enable AI in Admin' : 'Regenerate from visible notes + journal'}
               >{loreBusy ? '…' : 'Generate / Refresh'}</button>
@@ -913,8 +935,8 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 onClick={handleLoreSave}
                 style={{
                   padding: '5px 12px', borderRadius: '3px', cursor: loreBusy ? 'default' : 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
-                  border: '1px solid rgba(200,148,58,0.35)', background: 'rgba(200,148,58,0.1)', color: '#c8943a',
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                  border: '1px solid rgba(200,148,58,0.35)', background: 'rgba(200,148,58,0.1)', color: 'var(--ch-accent)',
                 }}
                 title="Save current text as your cached lore for this campaign"
               >Save</button>
@@ -923,21 +945,21 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 onClick={() => persistLorePanelOpen(false)}
                 style={{
                   padding: '5px 12px', borderRadius: '3px', cursor: 'pointer',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
-                  border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'rgba(226,213,187,0.45)',
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                  border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'var(--ch-text-primary-45)',
                 }}
               >Close</button>
             </div>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '12px 14px 16px' : '14px 24px 18px' }}>
             {loreLoading ? (
-              <div style={{ fontFamily: 'Cinzel', fontSize: '11px', color: 'rgba(139,196,226,0.45)', letterSpacing: '0.12em' }}>Loading saved lore…</div>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', color: 'rgba(139,196,226,0.45)', letterSpacing: '0.12em' }}>Loading saved lore…</div>
             ) : loreErr ? (
-              <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(224,112,112,0.85)' }}>{loreErr}</div>
+              <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '14px', color: 'rgba(224,112,112,0.85)' }}>{loreErr}</div>
             ) : (
               <>
                 {!aiEnabled && (
-                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.4)', marginBottom: '10px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '13px', color: 'var(--ch-text-primary-40)', marginBottom: '10px' }}>
                     AI is disabled — enable it in Admin → AI to generate lore.
                   </div>
                 )}
@@ -948,12 +970,12 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                   style={{
                     width: '100%', minHeight: '120px', boxSizing: 'border-box', resize: 'vertical',
                     background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(139,196,226,0.15)', borderRadius: '4px',
-                    color: '#e2d5bb', fontSize: '14px', fontFamily: 'Crimson Pro, serif', lineHeight: 1.6,
+                    color: 'var(--ch-text-primary)', fontSize: '14px', fontFamily: 'var(--ch-font-body)', lineHeight: 1.6,
                     padding: '12px 14px', marginBottom: '14px', outline: 'none',
                   }}
                 />
-                <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(139,196,226,0.45)', marginBottom: '8px' }}>PREVIEW</div>
-                <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', lineHeight: 1.65, color: '#e2d5bb' }}>
+                <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em', color: 'rgba(139,196,226,0.45)', marginBottom: '8px' }}>PREVIEW</div>
+                <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '15px', lineHeight: 1.65, color: 'var(--ch-text-primary)' }}>
                   {loreText.trim() ? (
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
@@ -963,7 +985,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       {loreText}
                     </ReactMarkdown>
                   ) : (
-                    <span style={{ color: 'rgba(226,213,187,0.35)' }}>No lore yet.</span>
+                    <span style={{ color: 'var(--ch-text-primary-35)' }}>No lore yet.</span>
                   )}
                 </div>
               </>
@@ -975,13 +997,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       {/* Entries */}
       <div ref={tutorialRefs?.sessionsList || scrollAreaRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '0 12px 16px' : '0 24px 16px' }}>
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Cinzel', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em', fontSize: '12px' }}>LOADING...</div>
+          <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--ch-font-display)', color: 'rgba(200,148,58,0.3)', letterSpacing: '0.15em', fontSize: '12px' }}>LOADING...</div>
         ) : !activeFolderId ? (
-          <div style={{ padding: '60px 0', textAlign: 'center', fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.2)' }}>Select a campaign above to view its journal</div>
+          <div style={{ padding: '60px 0', textAlign: 'center', fontFamily: 'var(--ch-font-body)', fontSize: '15px', color: 'var(--ch-text-primary-20)' }}>Select a campaign above to view its journal</div>
         ) : groups.length === 0 ? (
           <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '13px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.25)', marginBottom: '8px' }}>NO ENTRIES YET</div>
-            <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '15px', color: 'rgba(226,213,187,0.2)' }}>Start typing below and press Enter</div>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '13px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.25)', marginBottom: '8px' }}>NO ENTRIES YET</div>
+            <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: '15px', color: 'var(--ch-text-primary-20)' }}>Start typing below and press Enter</div>
           </div>
         ) : (
           groups.map(({ session, sessionNum, parts }) => {
@@ -992,7 +1014,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '20px 0 4px', width: '100%' }}>
                   <div style={{ flex: 1, minWidth: 0, height: '1px', background: 'rgba(200,148,58,0.18)' }} />
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.25em', color: 'rgba(200,148,58,0.75)' }}>
+                    <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.25em', color: 'rgba(200,148,58,0.75)' }}>
                       SESSION {sessionNum}
                     </span>
                     {!isFirst && (
@@ -1007,7 +1029,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           border: '1px solid rgba(139,196,58,0.25)',
                           borderRadius: '3px',
                           cursor: journalLocked ? 'not-allowed' : 'pointer',
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'var(--ch-font-display)',
                           fontSize: '8px',
                           letterSpacing: '0.1em',
                           color: journalLocked ? 'rgba(139,196,58,0.2)' : 'rgba(139,196,58,0.6)',
@@ -1026,10 +1048,10 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                         style={{
                           padding: '2px 8px',
                           background: 'none',
-                          border: '1px solid rgba(200,148,58,0.2)',
+                          border: '1px solid var(--ch-border-strong)',
                           borderRadius: '3px',
                           cursor: journalLocked ? 'not-allowed' : 'pointer',
-                          fontFamily: 'Cinzel',
+                          fontFamily: 'var(--ch-font-display)',
                           fontSize: '8px',
                           letterSpacing: '0.1em',
                           color: journalLocked ? 'rgba(200,148,58,0.15)' : 'rgba(200,148,58,0.45)',
@@ -1049,7 +1071,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           type="button"
                           ref={sessionNum === 1 ? tutorialRefs?.prepBtn || null : null}
                           onClick={() => setPrepSession({ id: session.id, num: sessionNum })}
-                          style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}
+                          style={{ padding: '2px 8px', background: 'none', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)' }}
                           title={prepTitle}
                         >
                           ✓ Prep{total ? ` ${done}/${total}` : ''}
@@ -1067,7 +1089,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                           type="button"
                           ref={sessionNum === 1 ? tutorialRefs?.rollBtn || null : null}
                           onClick={() => setAttendanceSession({ id: session.id, num: sessionNum })}
-                          style={{ padding: '2px 8px', background: 'none', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.48)' }}
+                          style={{ padding: '2px 8px', background: 'none', border: '1px solid var(--ch-border-strong)', borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.48)' }}
                           title={attTitle}
                         >
                           👥 Roll{attRows.length ? ` ${presentCount}/${attRows.length}` : ''}
@@ -1078,14 +1100,14 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                       const u = usageCache[session.id];
                       const hasRecaps = u && (u.used > 0 || !u.can_generate);
                       const canGen = aiEnabled && u?.can_generate;
-                      const btnColor = canGen ? 'rgba(139,196,226,0.6)' : hasRecaps ? 'rgba(200,148,58,0.5)' : 'rgba(226,213,187,0.2)';
+                      const btnColor = canGen ? 'rgba(139,196,226,0.6)' : hasRecaps ? 'rgba(200,148,58,0.5)' : 'var(--ch-text-primary-20)';
                       const borderColor = canGen ? 'rgba(139,196,226,0.25)' : hasRecaps ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.07)';
                       return (
                         <button
                           type="button"
                           ref={sessionNum === 1 ? tutorialRefs?.recapBtn || null : null}
                           onClick={() => setRecapSession({ id: session.id, num: sessionNum })}
-                          style={{ padding: '2px 8px', background: 'none', border: `1px solid ${borderColor}`, borderRadius: '3px', cursor: 'pointer', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: btnColor }}
+                          style={{ padding: '2px 8px', background: 'none', border: `1px solid ${borderColor}`, borderRadius: '3px', cursor: 'pointer', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: btnColor }}
                           title={canGen ? 'Generate or view recaps' : hasRecaps ? 'View recaps' : 'Recaps (AI disabled)'}
                         >
                           ✦ {hasRecaps ? `RECAPS${u?.used > 0 ? ` (${u.used})` : ''}` : 'RECAP'}
@@ -1103,13 +1125,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                     {parts.length > 1 && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0 6px' }}>
                         <div style={{ width: '32px', height: '1px', background: 'rgba(200,148,58,0.08)' }} />
-                        <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)' }}>{part.date?.toUpperCase()}</span>
+                        <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.5)' }}>{part.date?.toUpperCase()}</span>
                         <div style={{ flex: 1, height: '1px', background: 'rgba(200,148,58,0.08)' }} />
                       </div>
                     )}
                     {/* Single-day: quiet date label below session header */}
                     {parts.length === 1 && (
-                      <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
+                      <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', marginBottom: '8px' }}>
                         {part.date?.toUpperCase()}
                       </div>
                     )}
@@ -1148,13 +1170,13 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
       {/* Input */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: isMobile ? '10px 16px' : '12px 24px', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
         {insertAfterId && (
-          <div style={{ marginBottom: '6px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>↳ INSERTING AFTER: <em style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', letterSpacing: 0, color: 'rgba(226,213,187,0.5)' }}>{insertAfterEntry?.content?.slice(0, 50)}{insertAfterEntry?.content?.length > 50 ? '…' : ''}</em></span>
+          <div style={{ marginBottom: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>↳ INSERTING AFTER: <em style={{ fontFamily: 'var(--ch-font-body)', fontSize: '12px', letterSpacing: 0, color: 'var(--ch-text-primary-50)' }}>{insertAfterEntry?.content?.slice(0, 50)}{insertAfterEntry?.content?.length > 50 ? '…' : ''}</em></span>
             <button onClick={() => setInsertAfterId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.5)', fontSize: '12px', padding: 0 }}>✕</button>
           </div>
         )}
         {!currentSessionId && activeFolderId && !loading && (
-          <div style={{ marginBottom: '8px', fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)' }}>
+          <div style={{ marginBottom: '8px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.5)' }}>
             No session yet —{' '}
             <button
               type="button"
@@ -1164,7 +1186,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
                 background: 'none',
                 border: 'none',
                 cursor: journalLocked ? 'not-allowed' : 'pointer',
-                fontFamily: 'Cinzel',
+                fontFamily: 'var(--ch-font-display)',
                 fontSize: '9px',
                 letterSpacing: '0.12em',
                 color: journalLocked ? 'rgba(200,148,58,0.25)' : 'rgba(200,148,58,0.75)',
@@ -1183,9 +1205,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               onMouseDown={e => e.preventDefault()}
               onClick={() => setIndentLevel(prev => Math.max(0, prev - 1))}
               disabled={journalLocked || indentLevel === 0}
-              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: journalLocked || indentLevel === 0 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel === 0 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px', color: journalLocked || indentLevel === 0 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel === 0 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             >◀</button>
-            <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flex: 1, textAlign: 'center' }}>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flex: 1, textAlign: 'center' }}>
               {indentLevel === 0 ? 'TOP LEVEL' : `INDENT ${indentLevel}`}
             </span>
             <button
@@ -1193,26 +1215,26 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               onMouseDown={e => e.preventDefault()}
               onClick={() => setIndentLevel(prev => Math.min(6, prev + 1))}
               disabled={journalLocked || indentLevel >= 6}
-              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', color: journalLocked || indentLevel >= 6 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel >= 6 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              style={{ background: 'rgba(200,148,58,0.08)', border: '1px solid var(--ch-border-strong)', borderRadius: '4px', color: journalLocked || indentLevel >= 6 ? 'rgba(200,148,58,0.2)' : '#c8943a', minWidth: '36px', minHeight: '36px', cursor: journalLocked || indentLevel >= 6 ? 'default' : 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             >▶</button>
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {!isMobile && (
-            <span style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flexShrink: 0, width: '42px', textAlign: 'right' }}>
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flexShrink: 0, width: '42px', textAlign: 'right' }}>
               {indentLevel === 0 ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
             </span>
           )}
           {indentLevel > 0 && (
-            <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
+            <div style={{ display: 'flex', gap: '5px', flexShrink: 0, alignItems: 'center' }}>
               {Array.from({ length: indentLevel }).map((_, i) => (
-                <span key={i} style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(200,148,58,0.4)' }} />
+                <span key={i} style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--ch-accent-55)' }} />
               ))}
             </div>
           )}
           <input
             ref={inputRef}
-            style={{ flex: 1, background: 'transparent', border: 'none', borderBottom: `1px solid ${insertAfterId ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.15)'}`, outline: 'none', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '16px', padding: '6px 0', lineHeight: '1.5', paddingLeft: `${indentLevel * INDENT_PX}px`, minHeight: isMobile ? '44px' : 'auto' }}
+            style={{ flex: 1, background: 'transparent', border: 'none', borderBottom: `1px solid ${insertAfterId ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.15)'}`, outline: 'none', color: 'var(--ch-text-primary)', fontFamily: 'var(--ch-font-body)', fontSize: '16px', padding: '6px 0', lineHeight: '1.5', paddingLeft: `${indentLevel * INDENT_PX}px`, minHeight: isMobile ? '44px' : 'auto' }}
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -1263,8 +1285,19 @@ function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLo
       onMouseLeave={() => setHovered(false)}
     >
       {!isMobile && (
-        <span style={{ fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.08em', color: isIndented ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.65)', flexShrink: 0, marginTop: '3px', width: '42px', textAlign: 'right' }}>
-          {isIndented ? '·' : formatTime(entry.created_at)}
+        <span style={{
+          fontFamily: 'var(--ch-font-display)',
+          fontSize: isIndented ? '16px' : '10px',
+          letterSpacing: '0.08em',
+          color: isIndented ? 'var(--ch-accent-65)' : 'rgba(200,148,58,0.65)',
+          flexShrink: 0,
+          marginTop: isIndented ? '2px' : '3px',
+          width: '42px',
+          textAlign: 'right',
+          lineHeight: 1,
+        }}
+        >
+          {isIndented ? '•' : formatTime(entry.created_at)}
         </span>
       )}
 
@@ -1272,7 +1305,7 @@ function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLo
         {isEditing ? (
           <input
             ref={editRef}
-            style={{ width: '100%', background: 'rgba(200,148,58,0.05)', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '2px', outline: 'none', color: '#e2d5bb', fontFamily: 'Crimson Pro, serif', fontSize: '16px', padding: '2px 6px', lineHeight: '1.6' }}
+            style={{ width: '100%', background: 'rgba(200,148,58,0.05)', border: '1px solid var(--ch-border-strong)', borderRadius: '2px', outline: 'none', color: 'var(--ch-text-primary)', fontFamily: 'var(--ch-font-body)', fontSize: '16px', padding: '2px 6px', lineHeight: '1.6' }}
             value={editValue}
             onChange={e => onEditChange(e.target.value)}
             onKeyDown={onEditKeyDown}
@@ -1280,15 +1313,18 @@ function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLo
           />
         ) : (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            {isMobile && isIndented && (
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '16px', color: 'var(--ch-accent-65)', flexShrink: 0, lineHeight: 1.6 }}>•</span>
+            )}
             <span
-              style={{ fontFamily: 'Crimson Pro, serif', fontSize: '16px', color: isIndented ? 'rgba(226,213,187,0.6)' : '#e2d5bb', lineHeight: '1.6', cursor: canEdit ? (isMobile ? 'pointer' : 'text') : 'default' }}
+              style={{ fontFamily: 'var(--ch-font-body)', fontSize: '16px', color: isIndented ? 'var(--ch-text-primary-60)' : 'var(--ch-text-primary)', lineHeight: '1.6', cursor: canEdit ? (isMobile ? 'pointer' : 'text') : 'default' }}
               onDoubleClick={!isMobile && canEdit ? onEdit : undefined}
               onClick={isMobile ? () => setMobileShowControls(v => !v) : undefined}
             >
               {entry.content}
             </span>
             {entry.author_username && !isMobile && (
-              <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: isIndented ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.55)', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: isIndented ? 'rgba(200,148,58,0.3)' : 'rgba(200,148,58,0.55)', flexShrink: 0 }}>
                 {entry.author_username}
               </span>
             )}
@@ -1304,7 +1340,7 @@ function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLo
           {canEdit && <button style={{ ...smallBtn, ...(isMobile ? mobileBtnExtras : {}) }} onClick={onEdit}>edit</button>}
           <button style={{ ...smallBtn, ...(isMobile ? mobileBtnExtras : {}), color: 'rgba(58,196,139,0.5)', borderColor: 'rgba(58,196,139,0.2)' }} onClick={onPromote} title="Convert to note">→ note</button>
           {canEdit && <button style={{ ...smallBtn, ...(isMobile ? mobileBtnExtras : {}), color: 'rgba(224,112,112,0.4)', borderColor: 'rgba(139,32,53,0.2)' }} onClick={onDelete}>×</button>}
-          {isMobile && <button style={{ ...smallBtn, ...mobileBtnExtras, color: 'rgba(226,213,187,0.3)' }} onClick={() => setMobileShowControls(false)}>done</button>}
+          {isMobile && <button style={{ ...smallBtn, ...mobileBtnExtras, color: 'var(--ch-text-primary-30)' }} onClick={() => setMobileShowControls(false)}>done</button>}
         </div>
       )}
     </div>
@@ -1313,8 +1349,8 @@ function EntryRow({ entry, isEditing, editValue, editRef, currentUser, journalLo
 
 const smallBtn = {
   background: 'none', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '2px',
-  cursor: 'pointer', padding: '1px 6px', fontFamily: 'Cinzel', fontSize: '8px',
-  letterSpacing: '0.1em', color: 'rgba(226,213,187,0.3)',
+  cursor: 'pointer', padding: '1px 6px', fontFamily: 'var(--ch-font-display)', fontSize: '8px',
+  letterSpacing: '0.1em', color: 'var(--ch-text-primary-30)',
 };
 
 const mobileBtnExtras = {

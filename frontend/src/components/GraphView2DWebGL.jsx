@@ -34,7 +34,7 @@ function GraphView2DWebGL({
   notes,
   connections,
   posKey,
-  edgeTheme,
+  theme,
   selectedNoteId,
   onSelectNote,
   onOpenNote,
@@ -101,7 +101,7 @@ function GraphView2DWebGL({
     renderer.mount(el);
 
     const positions = loadGraphPositions(posKey) || {};
-    renderer.setGraph(notes, connections, positions, edgeTheme);
+    renderer.setGraph(notes, connections, positions, theme);
     fingerprintRef.current = buildGraphFingerprint(notes, connections);
     canonAdjRef.current = buildCanonAdjacency(connections);
     renderer.setVisualState({ manualNodeIds });
@@ -230,16 +230,16 @@ function GraphView2DWebGL({
     fingerprintRef.current = fp;
     canonAdjRef.current = buildCanonAdjacency(connections);
     const positions = loadGraphPositions(posKey) || renderer.getPositions();
-    renderer.setGraph(notes, connections, positions, edgeTheme);
+    renderer.setGraph(notes, connections, positions, theme);
     renderer.setVisualState({ manualNodeIds });
     paintZoomHudRef.current?.();
-  }, [notes, connections, edgeTheme, posKey, manualNodeIds]);
+  }, [notes, connections, theme, posKey, manualNodeIds]);
 
   useEffect(() => {
     const renderer = rendererRefInternal.current;
     if (!renderer) return;
-    renderer.setEdgeTheme(edgeTheme);
-  }, [edgeTheme]);
+    renderer.setEdgeTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     const renderer = rendererRefInternal.current;

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Login from './components/Login.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import api from './api.js';
+import { ThemeProvider } from './theme/ThemeContext.jsx';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -39,18 +40,24 @@ export default function App() {
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', background: '#07080e'
-      }}>
-        <div style={{ fontFamily: 'Cinzel', color: '#c8943a', letterSpacing: '0.2em', fontSize: '14px' }}>
-          LOADING...
+      <ThemeProvider userId={null}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          height: '100vh', background: 'var(--ch-shell-bg, #07080e)',
+        }}>
+          <div style={{ fontFamily: 'var(--ch-font-display, Cinzel)', color: 'var(--ch-accent, #c8943a)', letterSpacing: '0.2em', fontSize: '14px' }}>
+            LOADING...
+          </div>
         </div>
-      </div>
+      </ThemeProvider>
     );
   }
 
-  return user
-    ? <Dashboard user={user} onLogout={handleLogout} />
-    : <Login onLogin={handleLogin} />;
+  return (
+    <ThemeProvider userId={user?.id ?? null}>
+      {user
+        ? <Dashboard user={user} onLogout={handleLogout} />
+        : <Login onLogin={handleLogin} />}
+    </ThemeProvider>
+  );
 }

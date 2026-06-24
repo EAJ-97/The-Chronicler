@@ -10,7 +10,7 @@ const S = {
     backdropFilter: 'blur(2px)',
   },
   modal: {
-    background: '#0e1020',
+    background: 'var(--ch-card-bg)',
     border: '1px solid rgba(200,148,58,0.25)',
     borderRadius: '6px',
     width: '420px',
@@ -28,7 +28,7 @@ const S = {
   title: {
     fontFamily: 'Cinzel Decorative, serif',
     fontSize: '13px',
-    color: '#c8943a',
+    color: 'var(--ch-accent)',
     letterSpacing: '0.03em',
     marginBottom: '4px',
   },
@@ -47,7 +47,7 @@ const S = {
     gap: '18px',
   },
   label: {
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '8px',
     letterSpacing: '0.15em',
     color: 'rgba(200,148,58,0.6)',
@@ -62,7 +62,7 @@ const S = {
     padding: '8px 10px',
     fontFamily: 'Crimson Pro, serif',
     fontSize: '15px',
-    color: '#e2d5bb',
+    color: 'var(--ch-text-primary)',
     outline: 'none',
     boxSizing: 'border-box',
     transition: 'border-color 0.15s',
@@ -87,7 +87,7 @@ const S = {
     background: isDM ? 'rgba(200,148,58,0.2)' : 'rgba(255,255,255,0.06)',
     border: `1px solid ${isDM ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)'}`,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: 'Cinzel', fontSize: '9px', color: isDM ? '#c8943a' : 'rgba(226,213,187,0.5)',
+    fontFamily: 'var(--ch-font-display)', fontSize: '9px', color: isDM ? '#c8943a' : 'rgba(226,213,187,0.5)',
     flexShrink: 0,
   }),
   memberName: {
@@ -97,7 +97,7 @@ const S = {
     color: 'rgba(226,213,187,0.85)',
   },
   dmBadge: (active) => ({
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '7px',
     letterSpacing: '0.12em',
     padding: '2px 7px',
@@ -128,7 +128,7 @@ const S = {
     padding: '6px 8px',
     fontFamily: 'Crimson Pro, serif',
     fontSize: '14px',
-    color: '#e2d5bb',
+    color: 'var(--ch-text-primary)',
     outline: 'none',
     cursor: 'pointer',
   },
@@ -137,10 +137,10 @@ const S = {
     border: '1px solid rgba(200,148,58,0.3)',
     borderRadius: '4px',
     padding: '6px 14px',
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '8px',
     letterSpacing: '0.1em',
-    color: '#c8943a',
+    color: 'var(--ch-accent)',
     cursor: 'pointer',
     transition: 'all 0.15s',
     whiteSpace: 'nowrap',
@@ -158,7 +158,7 @@ const S = {
     border: '1px solid rgba(226,213,187,0.15)',
     borderRadius: '4px',
     padding: '7px 18px',
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '9px',
     letterSpacing: '0.1em',
     color: 'rgba(226,213,187,0.4)',
@@ -170,7 +170,7 @@ const S = {
     border: `1px solid ${disabled ? 'rgba(200,148,58,0.1)' : 'rgba(200,148,58,0.4)'}`,
     borderRadius: '4px',
     padding: '7px 22px',
-    fontFamily: 'Cinzel',
+    fontFamily: 'var(--ch-font-display)',
     fontSize: '9px',
     letterSpacing: '0.1em',
     color: disabled ? 'rgba(200,148,58,0.25)' : '#c8943a',
@@ -284,7 +284,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose, initial
                   background: creationType === 'campaign' ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
                   border: `1px solid ${creationType === 'campaign' ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)'}`,
                   color: creationType === 'campaign' ? '#c8943a' : 'rgba(226,213,187,0.4)',
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'var(--ch-font-display)',
                   fontSize: '9px',
                   letterSpacing: '0.1em',
                   cursor: 'pointer',
@@ -302,7 +302,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose, initial
                   background: creationType === 'world' ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
                   border: `1px solid ${creationType === 'world' ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.1)'}`,
                   color: creationType === 'world' ? '#c8943a' : 'rgba(226,213,187,0.4)',
-                  fontFamily: 'Cinzel',
+                  fontFamily: 'var(--ch-font-display)',
                   fontSize: '9px',
                   letterSpacing: '0.1em',
                   cursor: 'pointer',
@@ -357,7 +357,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose, initial
                   <span style={S.memberName}>
                     {m.username}
                     {m.user_id === currentUser.id && (
-                      <span style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.4)', marginLeft: '6px' }}>YOU</span>
+                      <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.4)', marginLeft: '6px' }}>YOU</span>
                     )}
                   </span>
                   <span style={S.dmBadge(m.is_dm)} onClick={() => handleToggleDM(m.user_id)}>

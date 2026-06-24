@@ -96,7 +96,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
       }}>
         <div style={{ padding: '18px 22px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
-            <div style={{ fontFamily: 'Cinzel', fontSize: '13px', letterSpacing: '0.2em', color: '#c8943a' }}>
+            <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '13px', letterSpacing: '0.2em', color: 'var(--ch-accent)' }}>
               SESSION {sessionNum} RECAPS
             </div>
             {usage && (
@@ -115,7 +115,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
                 {['chronicle', 'summary'].map(t => (
                   <button key={t} type="button" onClick={() => setTone(t)} style={{
                     padding: '4px 12px', borderRadius: '3px', cursor: 'pointer',
-                    fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                    fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
                     background: tone === t ? 'rgba(200,148,58,0.15)' : 'transparent',
                     border: `1px solid ${tone === t ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`,
                     color: tone === t ? '#c8943a' : 'rgba(226,213,187,0.3)',
@@ -137,7 +137,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
                 title={generateHint() || 'Generate via Anthropic (server)'}
                 style={{
                   padding: '6px 16px', borderRadius: '3px', cursor: canGenerate ? 'pointer' : 'not-allowed',
-                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em',
+                  fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
                   background: canGenerate ? 'linear-gradient(135deg, rgba(200,148,58,0.25), rgba(200,148,58,0.1))' : 'rgba(255,255,255,0.03)',
                   border: `1px solid ${canGenerate ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.06)'}`,
                   color: canGenerate ? '#c8943a' : 'rgba(226,213,187,0.2)',
@@ -165,7 +165,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
             <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.3)' }}>Loading...</div>
           ) : recaps.length === 0 ? (
             <div style={{ padding: '60px 40px', textAlign: 'center' }}>
-              <div style={{ fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.3)', marginBottom: '10px' }}>NO RECAPS YET</div>
+              <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '11px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.3)', marginBottom: '10px' }}>NO RECAPS YET</div>
               <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.25)', lineHeight: '1.6' }}>
                 {aiEnabled && usage?.can_generate && recapServerReady
                   ? 'Generate the first recap for this session above.'
@@ -186,7 +186,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
                       background: i === activeIdx ? 'rgba(200,148,58,0.08)' : 'transparent',
                       borderLeft: i === activeIdx ? '2px solid rgba(200,148,58,0.5)' : '2px solid transparent',
                     }}>
-                      <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: i === activeIdx ? '#c8943a' : 'rgba(226,213,187,0.4)', marginBottom: '3px' }}>
+                      <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: i === activeIdx ? '#c8943a' : 'rgba(226,213,187,0.4)', marginBottom: '3px' }}>
                         {r.tone === 'chronicle' ? '📜 CHRONICLE' : '📋 SUMMARY'}
                         {r.id === newRecapId && <span style={{ marginLeft: '5px', color: 'rgba(80,200,100,0.7)' }}>NEW</span>}
                       </div>
@@ -201,14 +201,14 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
               {activeRecap && (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-                    <span style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', padding: '3px 10px', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '3px' }}>
+                    <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', padding: '3px 10px', border: '1px solid var(--ch-border-strong)', borderRadius: '3px' }}>
                       {activeRecap.tone === 'chronicle' ? '📜 CHRONICLE' : '📋 SUMMARY'}
                     </span>
                     <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)' }}>
                       by {activeRecap.author} · {formatDate(activeRecap.created_at)}
                     </span>
                     {activeRecap.id === newRecapId && (
-                      <span style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(80,200,100,0.7)', padding: '2px 8px', border: '1px solid rgba(80,200,100,0.2)', borderRadius: '3px' }}>JUST GENERATED</span>
+                      <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(80,200,100,0.7)', padding: '2px 8px', border: '1px solid rgba(80,200,100,0.2)', borderRadius: '3px' }}>JUST GENERATED</span>
                     )}
                   </div>
                   <div style={{
