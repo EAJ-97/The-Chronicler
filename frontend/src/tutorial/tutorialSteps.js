@@ -324,10 +324,10 @@ function buildWebChapterSteps() {
       id: 'web_expand',
       chapterId: 'web',
       chapter: 'Web',
-      subsection: 'Expand',
-      title: 'Expand / auto-arrange',
+      subsection: 'Layout',
+      title: 'Layout menu',
       target: 'graphBtn_expand',
-      body: 'Expand auto-arranges nodes to reduce overlap in 2D.',
+      body: 'Layout ▾ opens Highlight New (gold rings on unseen nodes) and Organize (preview layout for nodes you have not moved by hand).',
       ui: { view: 'graph', graphForce2D: true },
     },
     {

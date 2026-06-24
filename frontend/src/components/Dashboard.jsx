@@ -14,6 +14,7 @@ import CampaignModal from './CampaignModal.jsx';
 import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
 import api from '../api.js';
+import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
 
@@ -145,9 +146,7 @@ export default function Dashboard({ user, onLogout }) {
   const windowWidth = useWindowWidth();
   const isNarrow = windowWidth <= 960;
   const isMobile = windowWidth <= 600;
-  const isDevPort = (() => {
-    try { return window.location.port === '3002'; } catch { return false; }
-  })();
+  const devSite = useDevGraphToolsEnabled();
 
   // Sidebar collapse — default open on wide, collapsed on narrow, persisted
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -254,6 +253,10 @@ export default function Dashboard({ user, onLogout }) {
   const notesForList = useMemo(
     () => filterNotesHideDemoRoots(notes, hideDemoFolders),
     [notes, hideDemoFolders],
+  );
+  const graphNotes = useMemo(
+    () => notesForList.filter((n) => !n.is_folder),
+    [notesForList],
   );
   const [dmCampaignIds, setDmCampaignIds] = useState([]);
   const [snapshotFolder, setSnapshotFolder] = useState(null);
@@ -976,7 +979,7 @@ export default function Dashboard({ user, onLogout }) {
           </button>
           <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
             <span style={{ ...S.brand, marginRight: 0, fontSize: '13px' }}>
-              The Chronicler{isDevPort ? ' (DEV)' : ''}
+              The Chronicler{devSite ? ' (DEV)' : ''}
             </span>
           </div>
           <div style={{ minWidth: '44px' }} />
@@ -984,7 +987,7 @@ export default function Dashboard({ user, onLogout }) {
       ) : (
         /* Desktop topbar: unchanged */
         <div ref={topbarRef} style={S.topbar}>
-          <span style={S.brand}>The Chronicler{isDevPort ? ' (DEV)' : ''}</span>
+          <span style={S.brand}>The Chronicler{devSite ? ' (DEV)' : ''}</span>
           <div ref={viewToggleRef} style={S.viewToggle}>
             <button style={S.viewBtn(view === 'notes')} onClick={() => setView('notes')}>📜 Notes</button>
             <button style={S.viewBtn(view === 'graph')} onClick={() => setView('graph')}>🕸 Web</button>
@@ -1374,7 +1377,7 @@ export default function Dashboard({ user, onLogout }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <GraphView
                   allNotes={notesForList}
-                  notes={notesForList.filter(n => !n.is_folder)}
+                  notes={graphNotes}
                   connections={connections}
                   onSelectNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(id); }}
                   onOpenNote={(id) => { setSelectedNoteId(id); setGraphPanelNoteId(null); setView('notes'); }}

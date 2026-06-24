@@ -1,6 +1,6 @@
 {
   "name": "dnd-notes-frontend",
-  "version": "1.2.0",
+  "version": "1.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,12 @@
     "3d-force-graph": "^1.73.0",
     "axios": "^1.6.7",
     "cytoscape": "^3.28.1",
+    "graphology": "^0.26.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0",
+    "sigma": "^3.0.3",
     "three": "^0.179.1"
   },
   "devDependencies": {

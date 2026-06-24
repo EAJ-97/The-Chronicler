@@ -6,6 +6,16 @@ export default defineConfig({
   resolve: {
     dedupe: ['three'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/sigma') || id.includes('node_modules/graphology')) return 'sigma';
+          if (id.includes('node_modules/cytoscape')) return 'cytoscape';
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

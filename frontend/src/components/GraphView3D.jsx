@@ -2,73 +2,37 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import ForceGraph3D from '3d-force-graph';
 import * as THREE from 'three';
 import { getCategoryColor } from './NoteEditor.jsx';
+import {
+  buildCanonAdjacency,
+  getTiersFromAdj,
+  getAllShortestPaths,
+} from '../graph/adjacency.js';
+import { MAX_HOPS } from '../graph/constants.js';
 
 const N_SEG = 24;
 
-const MAX_HOPS    = 6;
 const FLOOR_OP    = 0.04;
 /** Non-highlighted nodes/links while choosing the second Find Path node (~35% dim vs full). */
 const PATH_PICK_DIM = 0.65;
 const HOP_OPACITY = [1.0, 1.0, 0.85, 0.6, 0.35, 0.18, 0.08];
 
 /**
- * True if this connection is canonical for pathfinding and hop highlighting (excludes theory/ship gimmick edges).
- * @param {{ connection_kind?: string, is_speculative?: number }} c
- * @returns {boolean}
+ * Builds 3D force-graph adjacency from canon connections only.
+ * @param {object[]} connections
+ * @returns {Map<string, string[]>}
  */
-function isCanonConnection(c) {
-  const k = c.connection_kind;
-  if (k === 'theory' || k === 'ship') return false;
-  if (k === 'canon') return true;
-  return !c.is_speculative;
+function build3DAdjacency(connections) {
+  return buildCanonAdjacency(connections);
 }
 
+/** @deprecated use getTiersFromAdj */
 function buildTiers(startId, adjacency) {
-  const tiers = new Map();
-  if (!startId) return tiers;
-  const queue = [[startId, 0]];
-  while (queue.length) {
-    const [id, depth] = queue.shift();
-    if (tiers.has(id)) continue;
-    tiers.set(id, depth);
-    (adjacency.get(id) || []).forEach(nbr => {
-      if (!tiers.has(nbr)) queue.push([nbr, depth + 1]);
-    });
-  }
-  return tiers;
+  return getTiersFromAdj(adjacency, startId, MAX_HOPS);
 }
 
+/** @deprecated use getAllShortestPaths */
 function getAllShortestPaths3D(adjacency, srcId, tgtId, maxPaths = 3) {
-  if (srcId === tgtId) return [];
-  const dist    = new Map([[srcId, 0]]);
-  const parents = new Map([[srcId, []]]);
-  const queue   = [srcId];
-  let   found   = false;
-
-  while (queue.length) {
-    const cur = queue.shift();
-    const d   = dist.get(cur);
-    if (cur === tgtId) { found = true; break; }
-    (adjacency.get(cur) || []).forEach(nbr => {
-      if (!dist.has(nbr)) {
-        dist.set(nbr, d + 1);
-        parents.set(nbr, [cur]);
-        queue.push(nbr);
-      } else if (dist.get(nbr) === d + 1) {
-        parents.get(nbr).push(cur);
-      }
-    });
-  }
-
-  if (!found) return [];
-  const paths = [];
-  const stack = [[tgtId, [tgtId]]];
-  while (stack.length && paths.length < maxPaths) {
-    const [node, path] = stack.pop();
-    if (node === srcId) { paths.push([...path].reverse()); continue; }
-    for (const p of (parents.get(node) || [])) stack.push([p, [...path, p]]);
-  }
-  return paths;
+  return getAllShortestPaths(adjacency, srcId, tgtId, maxPaths);
 }
 
 function makeLinkMaterial() {
@@ -299,15 +263,7 @@ export default function GraphView3D({ notes, connections, onSelectNote, onOpenNo
   }, [notes, connections]);
 
   const rebuildAdj = useCallback(() => {
-    const adj = new Map();
-    connections.forEach(c => {
-      if (!isCanonConnection(c)) return;
-      const s = String(c.source_note_id), t = String(c.target_note_id);
-      if (!adj.has(s)) adj.set(s, []);
-      if (!adj.has(t)) adj.set(t, []);
-      adj.get(s).push(t); adj.get(t).push(s);
-    });
-    adjacencyRef.current = adj;
+    adjacencyRef.current = build3DAdjacency(connections);
   }, [connections]);
 
   useEffect(() => { rebuildAdj(); }, [rebuildAdj]);

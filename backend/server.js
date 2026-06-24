@@ -64,7 +64,11 @@ app.get('/api/server-time', (req, res) => {
 
 // Version — returns the git commit hash baked in at build time
 app.get('/api/version', (req, res) => {
-  res.json({ commit: process.env.GIT_COMMIT || 'unknown' });
+  const port = String(process.env.PORT || '');
+  res.json({
+    commit: process.env.GIT_COMMIT || 'unknown',
+    dev: port === '3002' || process.env.CHRONICLER_DEV === '1',
+  });
 });
 
 // In production, serve the built React app

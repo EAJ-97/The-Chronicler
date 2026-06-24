@@ -1,9 +1,59 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, memo, lazy, Suspense } from 'react';
 import cytoscape from 'cytoscape';
 import { getCategoryColor } from './NoteEditor.jsx';
 import GraphView3D from './GraphView3D.jsx';
+import GraphSigmaBench, { isSigmaBenchEnabled } from './GraphSigmaBench.jsx';
+import GraphDevTools from './GraphDevTools.jsx';
+import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
+import { generateBenchmarkGraph } from '../graph/spike/generateFixture.js';
+import {
+  BENCH_FIXTURE_POS_KEY,
+  loadDevScoreThreshold,
+  saveDevScoreThreshold,
+  effectiveGraphScoreThreshold,
+} from '../graph/devGraphTools.js';
 import api from '../api.js';
 import { getGraphCampaignRoots, isUnderCompletedArchive } from '../utils/campaignTree.js';
+import {
+  HOP_OPACITY,
+  FLOOR_OPACITY,
+  PATH_FIND_PICK_DIM_OPACITY,
+  MAX_HOPS,
+  HOVER_HIGHLIGHT_MAX_NODES,
+  HOVER_DELAY_MS,
+  HOVER_TRANSITION_MS,
+  GRAPH_MIN_ZOOM,
+  GRAPH_MAX_ZOOM,
+  GRAPH_PIXEL_RATIO_CAP,
+  LARGE_GRAPH_SCORE_THRESHOLD,
+} from '../graph/constants.js';
+import {
+  DEFAULT_EDGE_THEME,
+  EDGE_KIND_META,
+  loadEdgeTheme,
+  hexToRgba,
+} from '../graph/connections.js';
+import {
+  buildCanonAdjacency,
+  getTiersFromAdj,
+  getAllShortestPaths,
+} from '../graph/adjacency.js';
+import {
+  loadGraphNodeIdSet,
+  saveGraphNodeIdSet,
+} from '../graph/storage.js';
+import { computeGraphLod, zoomPerformanceZone } from '../graph/lod.js';
+import { buildGraphFingerprint, buildElements } from '../graph/elements.js';
+import {
+  selectGraphRenderer,
+  loadRendererPref,
+  saveRendererPref,
+  graphSizeScore,
+  resolveAutoRenderer,
+} from '../graph/selectRenderer.js';
+import { paintZoomHud as paintZoomHudDom } from '../graph/paintZoomHud.js';
+
+const GraphView2DWebGL = lazy(() => import('./GraphView2DWebGL.jsx'));
 
 function useContainerWidth(ref) {
   const [width, setWidth] = useState(9999);
@@ -18,167 +68,229 @@ function useContainerWidth(ref) {
   return width;
 }
 
-const HOP_OPACITY = [1.0, 1.0, 0.85, 0.6, 0.35, 0.18, 0.08];
-const FLOOR_OPACITY = 0.04;
-/** While choosing the second node in Find Path, non-source nodes use this opacity (~35% dim vs full). */
-const PATH_FIND_PICK_DIM_OPACITY = 0.65;
-const MAX_HOPS = 6;
-
-/** Per-kind edge appearance defaults (line, label, arrows share brightness). */
-const DEFAULT_EDGE_THEME = {
-  canon: { color: '#c8943a', brightness: 0.2 },
-  theory: { color: '#9664c8', brightness: 0.24 },
-  ship: { color: '#d05090', brightness: 0.24 },
-};
-
-const EDGE_KIND_META = [
-  { key: 'canon', label: 'Canon' },
-  { key: 'theory', label: 'Theory' },
-  { key: 'ship', label: 'Ship' },
-];
+/** Tier / path / connect classes cleared incrementally instead of scanning all elements. */
+const HIGHLIGHT_CLASS_LIST = ['tier-0', 'tier-1', 'tier-2', 'tier-3', 'tier-4', 'tier-5', 'tier-6', 'dimmed', 'highlighted', 'path-node', 'path-edge', 'path-floor', 'path-pick-dim', 'connect-source', 'connect-dim', 'theory-source', 'ship-source', 'new-highlight', 'new-highlight-flash'];
+const HIGHLIGHT_CLASSES = HIGHLIGHT_CLASS_LIST.join(' ');
 
 /**
- * Loads persisted edge theme from localStorage, merged with defaults.
- * @param {string} storageKey
- * @returns {typeof DEFAULT_EDGE_THEME}
+ * Removes highlight classes only from elements that were previously styled.
+ * @param {import('cytoscape').Core} cy
+ * @param {{ current: { touched: import('cytoscape').CollectionReturnValue|null } }} highlightStateRef
  */
-function loadEdgeTheme(storageKey) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(storageKey));
-    if (!raw || typeof raw !== 'object') return { ...DEFAULT_EDGE_THEME };
-    const merged = { ...DEFAULT_EDGE_THEME };
-    for (const { key } of EDGE_KIND_META) {
-      if (raw[key] && typeof raw[key] === 'object') {
-        merged[key] = {
-          color: typeof raw[key].color === 'string' ? raw[key].color : merged[key].color,
-          brightness: Number.isFinite(raw[key].brightness) ? raw[key].brightness : merged[key].brightness,
-        };
-      }
-    }
-    return merged;
-  } catch {
-    return { ...DEFAULT_EDGE_THEME };
+function clearHighlightClasses(cy, highlightStateRef) {
+  const touched = highlightStateRef?.current?.touched;
+  if (touched && touched.length) {
+    touched.removeClass(HIGHLIGHT_CLASSES);
+    highlightStateRef.current.touched = null;
   }
 }
 
 /**
- * Converts #rrggbb to rgba with the given alpha (brightness).
- * @param {string} hex
- * @param {number} alpha
- * @returns {string}
+ * Applies tier-based hover/selection styling in a single batched pass; tracks touched elements.
+ * @param {import('cytoscape').Core} cy
+ * @param {Map<string, number>} tiers
+ * @param {number} maxDepth
+ * @param {{ current: { touched: import('cytoscape').CollectionReturnValue|null } }} highlightStateRef
  */
-function hexToRgba(hex, alpha) {
-  const h = String(hex || '#c8943a').replace('#', '');
-  if (h.length !== 6) return `rgba(200,148,58,${alpha})`;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-/**
- * BFS hop depths from startId using **canonical edges only** — theory/ship links do not expand tiers or affect hover/selection halos.
- */
-function getTiers(cy, startId, maxDepth = MAX_HOPS) {
-  const tiers = new Map();
-  const start = String(startId);
-  const queue = [[start, 0]];
-  tiers.set(start, 0);
-  while (queue.length > 0) {
-    const [id, depth] = queue.shift();
-    if (depth >= maxDepth) continue;
-    for (const nid of getCanonNeighborIds(cy, id)) {
-      if (!tiers.has(nid)) {
-        tiers.set(nid, depth + 1);
-        queue.push([nid, depth + 1]);
+function applyTierHighlight(cy, tiers, maxDepth, highlightStateRef) {
+  clearHighlightClasses(cy, highlightStateRef);
+  let touched = cy.collection();
+  cy.batch(() => {
+    cy.nodes().forEach((n) => {
+      const t = tiers.get(n.id());
+      if (t === undefined) n.addClass('dimmed');
+      else n.addClass(`tier-${Math.min(t, maxDepth)}`);
+      touched = touched.union(n);
+    });
+    cy.edges().forEach((edge) => {
+      if (edge.hasClass('kind-theory') || edge.hasClass('kind-ship')) {
+        const sT = tiers.get(edge.source().id()) ?? Infinity;
+        const tT = tiers.get(edge.target().id()) ?? Infinity;
+        if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
+        else edge.addClass('highlighted');
+      } else {
+        const sT = tiers.get(edge.source().id()) ?? Infinity;
+        const tT = tiers.get(edge.target().id()) ?? Infinity;
+        if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
+        else edge.addClass(`tier-${Math.min(Math.max(sT, tT), maxDepth)}`);
       }
-    }
-  }
-  return tiers;
-}
-
-/** Neighbour node ids reachable via canonical (orange) edges only — respects edge direction. */
-function getCanonNeighborIds(cy, nodeId) {
-  const out = [];
-  const el = cy.getElementById(nodeId);
-  if (!el || el.length === 0) return out;
-  el.connectedEdges('.kind-canon').forEach((edge) => {
-    const src = edge.source().id();
-    const tgt = edge.target().id();
-    const dir = edge.data('direction') || 'bidirectional';
-    if (dir === 'bidirectional') {
-      if (src === nodeId) out.push(tgt);
-      else if (tgt === nodeId) out.push(src);
-    } else if (dir === 'forward' && src === nodeId) {
-      out.push(tgt);
-    } else if (dir === 'reverse' && tgt === nodeId) {
-      out.push(src);
-    }
+      touched = touched.union(edge);
+    });
   });
-  return out;
+  highlightStateRef.current.touched = touched;
 }
 
-// Returns all shortest paths between src and tgt, capped at maxPaths (canonical edges only)
-// Each path is an array of node id strings
-function getAllShortestPaths(cy, srcId, tgtId, maxPaths = 3) {
-  const src = String(srcId), tgt = String(tgtId);
-  if (src === tgt) return [];
-
-  // BFS tracking all parents for shortest-path reconstruction — only `kind-canon` edges
-  const dist    = new Map([[src, 0]]);
-  const parents = new Map([[src, []]]);
-  const queue   = [src];
-  let   found   = false;
-
-  while (queue.length) {
-    const cur = queue.shift();
-    const d   = dist.get(cur);
-    if (cur === tgt) { found = true; break; }
-    for (const nid of getCanonNeighborIds(cy, cur)) {
-      if (!dist.has(nid)) {
-        dist.set(nid, d + 1);
-        parents.set(nid, [cur]);
-        queue.push(nid);
-      } else if (dist.get(nid) === d + 1) {
-        parents.get(nid).push(cur);
-      }
-    }
-  }
-
-  if (!found) return [];
-
-  // Reconstruct all paths by walking parents backwards from tgt
-  const paths = [];
-  const stack = [[tgt, [tgt]]];
-  while (stack.length && paths.length < maxPaths) {
-    const [node, path] = stack.pop();
-    if (node === src) { paths.push([...path].reverse()); continue; }
-    for (const p of (parents.get(node) || [])) {
-      stack.push([p, [...path, p]]);
-    }
-  }
-  return paths;
-}
-
-// Get all note ids in a folder subtree (inclusive of the root folder id)
+/**
+ * Returns all note ids in a folder subtree (inclusive of the root folder id).
+ * @param {object[]} allNotes
+ * @param {number} rootId
+ * @returns {Set<number>}
+ */
 function getSubtreeIds(allNotes, rootId) {
+  const childrenOf = new Map();
+  for (const n of allNotes) {
+    const pid = n.parent_id;
+    if (!childrenOf.has(pid)) childrenOf.set(pid, []);
+    childrenOf.get(pid).push(n.id);
+  }
   const ids = new Set();
   const queue = [rootId];
   while (queue.length) {
     const id = queue.shift();
     ids.add(id);
-    allNotes.filter(n => n.parent_id === id).forEach(n => queue.push(n.id));
+    for (const cid of (childrenOf.get(id) || [])) queue.push(cid);
   }
   return ids;
 }
 
-export default function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false }) {
+/**
+ * Counts nodes whose centers fall inside the current graph viewport (FPS HUD diagnostic).
+ * @param {import('cytoscape').Core} cy
+ * @returns {number}
+ */
+function countNodesInViewport(cy) {
+  const ext = cy.extent();
+  let n = 0;
+  cy.nodes().forEach((node) => {
+    const p = node.position();
+    if (p.x >= ext.x1 && p.x <= ext.x2 && p.y >= ext.y1 && p.y <= ext.y2) n += 1;
+  });
+  return n;
+}
+
+/**
+ * Applies far-zoom label culling only — all labels stay visible at normal zoom levels.
+ * @param {import('cytoscape').Core} cy
+ * @param {{ edgeLabelsHidden: boolean, nodeLabelsHidden: boolean }} lodState
+ */
+function updateGraphLod(cy, lodState) {
+  const { hideEdgeLabels, hideNodeLabels } = computeGraphLod(cy.zoom(), cy.nodes().length);
+  if (hideEdgeLabels !== lodState.edgeLabelsHidden) {
+    lodState.edgeLabelsHidden = hideEdgeLabels;
+    cy.edges().toggleClass('no-edge-labels', hideEdgeLabels);
+  }
+  if (hideNodeLabels !== lodState.nodeLabelsHidden) {
+    lodState.nodeLabelsHidden = hideNodeLabels;
+    cy.nodes().toggleClass('no-node-labels', hideNodeLabels);
+  }
+}
+
+/**
+ * Toggles a gold flash class on new-highlight nodes until interval is cleared.
+ * @param {import('cytoscape').Core} cy
+ * @param {{ current: ReturnType<typeof setInterval>|null }} flashRef
+ */
+function startNewHighlightFlash(cy, flashRef) {
+  if (flashRef.current) clearInterval(flashRef.current);
+  let on = false;
+  flashRef.current = setInterval(() => {
+    on = !on;
+    cy.nodes('.new-highlight').toggleClass('new-highlight-flash', on);
+  }, 550);
+}
+
+/**
+ * Stops the gold flash interval and clears flash styling on new nodes.
+ * @param {{ current: ReturnType<typeof setInterval>|null }} flashRef
+ * @param {import('cytoscape').Core|null} [cy]
+ */
+function stopNewHighlightFlash(flashRef, cy = null) {
+  if (flashRef.current) clearInterval(flashRef.current);
+  flashRef.current = null;
+  cy?.nodes().removeClass('new-highlight-flash');
+}
+
+/**
+ * Pushes cytoscape viewport stats into the shared zoom HUD DOM.
+ * @param {HTMLElement|null} el
+ * @param {import('cytoscape').Core|null} cy
+ */
+function paintZoomHud(el, cy) {
+  if (!el || !cy) return;
+  paintZoomHudDom(el, {
+    zoom: cy.zoom(),
+    nodes: cy.nodes().length,
+    edges: cy.edges().length,
+    engine: 'standard (Cytoscape)',
+    visibleInView: countNodesInViewport(cy),
+  });
+}
+
+const NODE_TRANSITION_PROPS = 'opacity, width, height, border-width, background-opacity, border-opacity, font-size';
+const EDGE_TRANSITION_PROPS = 'opacity, width, line-opacity';
+
+/**
+ * Enables/disables Cytoscape style transitions — must be off during pan/zoom or every frame interpolates the whole graph.
+ * @param {import('cytoscape').Core} cy
+ * @param {boolean} enabled
+ */
+function setGraphStyleTransitions(cy, enabled) {
+  const dur = enabled ? `${HOVER_TRANSITION_MS}ms` : '0ms';
+  const nodeProp = enabled ? NODE_TRANSITION_PROPS : 'none';
+  const edgeProp = enabled ? EDGE_TRANSITION_PROPS : 'none';
+  cy.style()
+    .selector('node')
+    .style({
+      'transition-property': nodeProp,
+      'transition-duration': dur,
+      'transition-timing-function': 'ease-in-out',
+    })
+    .selector('edge')
+    .style({
+      'transition-property': edgeProp,
+      'transition-duration': dur,
+      'transition-timing-function': 'ease-in-out',
+    })
+    .update();
+}
+
+export default memo(function GraphView({ allNotes, notes, connections, onSelectNote, onOpenNote, onCreateConnection, onDeleteConnection, onUpdateConnection, selectedNoteId, currentUser, dmCampaignIds, simulatedRole, isMobile, tutorialRefs = null, tutorialForce3D = false, tutorialForce2D = false }) {
+  const devGraphToolsEnabled = useDevGraphToolsEnabled();
   const containerRef = useRef(null);
   const cyRef = useRef(null);
+  /** WebGL sigma adapter instance when performance map is active. */
+  const sigmaRendererRef = useRef(null);
   const hoverTimerRef = useRef(null);
+  /** True while panning the background or dragging a node — blocks hover tier preview. */
+  const suppressHoverRef = useRef(false);
   const isFirstMount = useRef(true);
   /** Skips redundant Cytoscape patches when parent re-renders with the same graph data. */
   const dataFingerprintRef = useRef('');
+  /** Precomputed canon adjacency — avoids per-hop Cytoscape edge queries during hover/path/selection. */
+  const canonAdjRef = useRef(new Map());
+  /** Tracks elements that received highlight classes for incremental clear. */
+  const highlightStateRef = useRef({ touched: null });
+  /** Avoids re-centering animation when selection id is unchanged. */
+  const lastCenteredRef = useRef(null);
+  /** Zoom HUD overlay root — updated on viewport without React state. */
+  const zoomHudRef = useRef(null);
+  /** Latest paintZoomHud callback from the Cytoscape mount effect. */
+  const paintZoomHudRef = useRef(() => {});
+  /** Stable handler bag — bindEvents reads .current so listeners are never rebound on data updates. */
+  const graphHandlersRef = useRef({});
+  const zoomHudKey = `chronicler_graph_zoom_hud_${currentUser?.id || 'anon'}`;
+  const [showZoomHud, setShowZoomHudRaw] = useState(() => {
+    try {
+      const stored = localStorage.getItem(zoomHudKey);
+      if (stored === null) return true;
+      return stored === 'true';
+    } catch { return true; }
+  });
+  const setShowZoomHud = useCallback((val) => {
+    setShowZoomHudRaw((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      try { localStorage.setItem(zoomHudKey, String(next)); } catch (e) {}
+      requestAnimationFrame(() => paintZoomHudRef.current());
+      return next;
+    });
+  }, [zoomHudKey]);
+  const showZoomHudRef = useRef(showZoomHud);
+  showZoomHudRef.current = showZoomHud;
+  /** Label LOD flags shared between mount and data-patch effects. */
+  const graphLodRef = useRef({ edgeLabelsHidden: false, nodeLabelsHidden: false });
+  /** Throttled live zoom stats for legend panel (React state, not per-frame). */
+  const [zoomHudLive, setZoomHudLive] = useState({ zoom: 1, zone: 'comfortable', nodes: 0, edges: 0 });
+  const pushZoomHudLiveRef = useRef(() => {});
   const edgeThemeKey = `chronicler_graph_edge_theme_${currentUser?.id || 'anon'}`;
   const [edgeTheme, setEdgeThemeRaw] = useState(() => loadEdgeTheme(edgeThemeKey));
   const setEdgeTheme = useCallback((updater) => {
@@ -214,14 +326,34 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   theoryModeRef.current = theoryMode;
   shipModeRef.current = shipMode;
 
+  /** Highlight-new mode: block note open until all flashing new nodes are acknowledged. */
+  const highlightNewModeRef = useRef(false);
+  const newHighlightFlashRef = useRef(null);
+  /** Node ids the user has acknowledged on the graph (persisted per campaign). */
+  const seenGraphNodesRef = useRef(new Set());
+  /** Node ids the user has manually dragged — skipped by Organize. */
+  const manualGraphNodesRef = useRef(new Set());
+  /** Snapshot of positions before an organize preview — restored on cancel. */
+  const organizePreviewSnapshotRef = useRef(null);
+  /** Mirrors activeEngine === webgl for callbacks defined before renderer selection. */
+  const useWebGLRef = useRef(false);
+  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const [layoutHint, setLayoutHint] = useState('');
+  const [highlightNewActive, setHighlightNewActive] = useState(false);
+  const [newHighlightIds, setNewHighlightIds] = useState(() => new Set());
+  const [organizePreview, setOrganizePreview] = useState(false);
+  const [unseenCount, setUnseenCount] = useState(0);
+
   const exitPathMode = useCallback(() => {
     setPathMode(false);
     setPathSource(null);
     setPathResult(null);
     pathModeRef.current   = false;
     pathSourceRef.current = null;
-    cyRef.current?.elements().removeClass('path-node path-edge path-floor path-pick-dim');
-    cyRef.current?.elements().removeClass('tier-0 tier-1 tier-2 tier-3 tier-4 tier-5 tier-6 dimmed highlighted');
+    const cy = cyRef.current;
+    if (!cy) return;
+    clearHighlightClasses(cy, highlightStateRef);
+    cy.elements().removeClass('connect-source connect-dim theory-source ship-source');
   }, []);
 
   // Campaign scoping — playable campaigns only (exclude world-layer roots; matches DB is_world)
@@ -278,16 +410,28 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     }
   }, [graphCampaignRoots, activeCampaignId]);
 
-  // Filter notes + connections to active campaign subtree
-  const subtreeIds = activeCampaignId ? getSubtreeIds(allNotes || [], activeCampaignId) : null;
-  const subtreeNotes = subtreeIds ? notes.filter(n => subtreeIds.has(n.id)) : notes;
-  // Strip DM-only notes unless the viewer is a DM/admin with DM View enabled
-  const visibleNotes = subtreeNotes.filter(n => !n.is_dm_only || (isDMOfActiveCampaign && dmView));
-  const visibleNoteIds = new Set(visibleNotes.map(n => n.id));
-  const visibleConnections = (subtreeIds
-    ? connections.filter(c => subtreeIds.has(c.source_note_id) && subtreeIds.has(c.target_note_id))
-    : connections
-  ).filter(c => visibleNoteIds.has(c.source_note_id) && visibleNoteIds.has(c.target_note_id));
+  // Filter notes + connections to active campaign subtree (memoized — avoids fingerprint churn)
+  const subtreeIds = useMemo(
+    () => (activeCampaignId ? getSubtreeIds(allNotes || [], activeCampaignId) : null),
+    [allNotes, activeCampaignId]
+  );
+  const visibleNotes = useMemo(() => {
+    const subtreeNotes = subtreeIds ? notes.filter(n => subtreeIds.has(n.id)) : notes;
+    return subtreeNotes.filter(n => !n.is_dm_only || (isDMOfActiveCampaign && dmView));
+  }, [subtreeIds, notes, isDMOfActiveCampaign, dmView]);
+  const visibleConnections = useMemo(() => {
+    const visibleNoteIds = new Set(visibleNotes.map(n => n.id));
+    const conns = subtreeIds
+      ? connections.filter(c => subtreeIds.has(c.source_note_id) && subtreeIds.has(c.target_note_id))
+      : connections;
+    return conns.filter(c => visibleNoteIds.has(c.source_note_id) && visibleNoteIds.has(c.target_note_id));
+  }, [subtreeIds, connections, visibleNotes]);
+
+  const [devFixture, setDevFixture] = useState(null);
+  const [devScoreThreshold, setDevScoreThresholdRaw] = useState(() => loadDevScoreThreshold());
+  /** Notes/connections fed to cytoscape or WebGL (campaign or dev synthetic fixture). */
+  const renderNotes = devFixture?.notes ?? visibleNotes;
+  const renderConnections = devFixture?.connections ?? visibleConnections;
 
   // Edge label + direction editor (graph-only; notes drawer unchanged)
   const [editingEdge, setEditingEdge] = useState(null);
@@ -348,6 +492,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     else exitConnectMode();
   };
 
+
   useEffect(() => {
     if (!webReadOnly) return;
     exitConnectMode();
@@ -359,14 +504,294 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
 
   // Position key for localStorage per campaign
   const posKey = `chronicler_graph_positions_${activeCampaignId || 'all'}`;
+  const renderPosKey = devFixture ? BENCH_FIXTURE_POS_KEY : posKey;
+  const seenKey = `chronicler_graph_seen_${activeCampaignId || 'all'}`;
+  const manualKey = `chronicler_graph_manual_${activeCampaignId || 'all'}`;
 
   /**
-   * Places nodes that have no saved coordinates near neighbours or on an outward spiral.
-   * @param {import('cytoscape').Core} cy
-   * @param {string[]} addedNodeIds - node ids to position (Cytoscape string ids)
-   * @param {Record<string, { x: number, y: number }>|null} savedPositions
-   * @param {string} posKey - localStorage key for persisting all node positions
+   * Counts nodes on the canvas that the user has not yet acknowledged in highlight mode.
+   * @returns {number}
    */
+  const refreshUnseenCount = useCallback(() => {
+    const cy = cyRef.current;
+    if (!cy) {
+      const seen = seenGraphNodesRef.current;
+      const n = visibleNotes.filter(note => !seen.has(String(note.id))).length;
+      setUnseenCount(n);
+      return n;
+    }
+    const seen = seenGraphNodesRef.current;
+    const count = cy.nodes().filter(n => !seen.has(n.id())).length;
+    setUnseenCount(count);
+    return count;
+  }, [visibleNotes]);
+
+  useEffect(() => {
+    seenGraphNodesRef.current = loadGraphNodeIdSet(seenKey);
+    manualGraphNodesRef.current = loadGraphNodeIdSet(manualKey);
+    refreshUnseenCount();
+    highlightNewModeRef.current = false;
+    setHighlightNewActive(false);
+    stopNewHighlightFlash(newHighlightFlashRef, cyRef.current);
+    organizePreviewSnapshotRef.current = null;
+    setOrganizePreview(false);
+    setLayoutHint('');
+  }, [seenKey, manualKey, refreshUnseenCount]);
+
+  /**
+   * Leaves highlight-new mode and clears gold rings from the canvas.
+   */
+  const exitHighlightNewMode = useCallback(() => {
+    highlightNewModeRef.current = false;
+    setHighlightNewActive(false);
+    setNewHighlightIds(new Set());
+    stopNewHighlightFlash(newHighlightFlashRef, cyRef.current);
+    cyRef.current?.nodes().removeClass('new-highlight new-highlight-flash');
+    sigmaRendererRef.current?.clearNewHighlights();
+    setLayoutHint('');
+  }, []);
+
+  /**
+   * Marks one new node as seen and exits highlight mode when none remain.
+   * @param {string} nodeId
+   */
+  const acknowledgeNewNode = useCallback((nodeId) => {
+    if (!highlightNewModeRef.current) return;
+    const id = String(nodeId);
+    seenGraphNodesRef.current.add(id);
+    saveGraphNodeIdSet(seenKey, seenGraphNodesRef.current);
+    cyRef.current?.getElementById(id).removeClass('new-highlight new-highlight-flash');
+    setNewHighlightIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      const remaining = next.size;
+      refreshUnseenCount();
+      if (remaining === 0) {
+        exitHighlightNewMode();
+        setLayoutHint('All new nodes acknowledged');
+        setTimeout(() => setLayoutHint(''), 2800);
+      } else {
+        setLayoutHint(`${remaining} new node${remaining > 1 ? 's' : ''} remaining — click each ring`);
+      }
+      return next;
+    });
+  }, [seenKey, exitHighlightNewMode, refreshUnseenCount]);
+
+  /**
+   * Enters highlight-new mode: gold flashing rings on unseen nodes; blocks note open until done.
+   */
+  const enterHighlightNewMode = useCallback(() => {
+    if (effectiveIs3D) return;
+    exitConnectMode();
+    exitTheoryMode();
+    exitShipMode();
+    exitPathMode();
+    setEditingEdge(null);
+    const unseenIds = renderNotes
+      .filter((n) => !seenGraphNodesRef.current.has(String(n.id)))
+      .map((n) => String(n.id));
+    if (unseenIds.length === 0) {
+      setLayoutHint('No new nodes on the map');
+      setTimeout(() => setLayoutHint(''), 2800);
+      return;
+    }
+    highlightNewModeRef.current = true;
+    setHighlightNewActive(true);
+    setNewHighlightIds(new Set(unseenIds));
+    const cy = cyRef.current;
+    if (cy) {
+      cy.batch(() => {
+        cy.nodes().removeClass('new-highlight new-highlight-flash');
+        unseenIds.forEach((nid) => cy.getElementById(nid).addClass('new-highlight'));
+      });
+      startNewHighlightFlash(cy, newHighlightFlashRef);
+    }
+    setLayoutHint(`${unseenIds.length} new node${unseenIds.length > 1 ? 's' : ''} — click each golden ring`);
+  }, [effectiveIs3D, exitPathMode, renderNotes]);
+
+  /**
+   * Restores the pre-preview node positions and unlocks all nodes.
+   */
+  const cancelOrganizePreview = useCallback(() => {
+    if (useWebGLRef.current) {
+      sigmaRendererRef.current?.cancelOrganizePreview();
+      organizePreviewSnapshotRef.current = null;
+      setOrganizePreview(false);
+      setLayoutHint('');
+      return;
+    }
+    const cy = cyRef.current;
+    const snapshot = organizePreviewSnapshotRef.current;
+    if (!cy || !snapshot) {
+      setOrganizePreview(false);
+      return;
+    }
+    cy.nodes().unlock();
+    cy.batch(() => {
+      cy.nodes().forEach(n => {
+        const p = snapshot[n.id()];
+        if (p) n.position(p);
+      });
+    });
+    organizePreviewSnapshotRef.current = null;
+    setOrganizePreview(false);
+    setLayoutHint('');
+  }, []);
+
+  /**
+   * Commits the organize preview layout to localStorage and unlocks nodes.
+   */
+  const confirmOrganizePreview = useCallback(() => {
+    if (useWebGLRef.current) {
+      const renderer = sigmaRendererRef.current;
+      if (!renderer) return;
+      const pos = renderer.getPositions();
+      try { localStorage.setItem(renderPosKey, JSON.stringify(pos)); } catch (e) {}
+      renderer.confirmOrganizePreview();
+      organizePreviewSnapshotRef.current = null;
+      setOrganizePreview(false);
+      setLayoutHint('Layout applied');
+      setTimeout(() => setLayoutHint(''), 2800);
+      return;
+    }
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.nodes().unlock();
+    const pos = {};
+    cy.nodes().forEach(n => { pos[n.id()] = { ...n.position() }; });
+    try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
+    organizePreviewSnapshotRef.current = null;
+    setOrganizePreview(false);
+    setLayoutHint('Layout applied');
+    setTimeout(() => setLayoutHint(''), 2800);
+  }, [posKey, renderPosKey]);
+
+  /**
+   * Runs organize layout on the WebGL renderer when organize preview is toggled on.
+   * @param {import('../graph/renderers/SigmaRenderer.js').SigmaRenderer} renderer
+   */
+  const handleWebGLOrganize = useCallback((renderer) => {
+    const manual = manualGraphNodesRef.current;
+    const movable = renderNotes.filter((n) => !manual.has(String(n.id))).length;
+    if (movable === 0) {
+      setOrganizePreview(false);
+      setLayoutHint('Every node has been moved by hand — nothing to organize');
+      setTimeout(() => setLayoutHint(''), 3200);
+      return;
+    }
+    renderer.runOrganizePreview(manual);
+    setLayoutHint(`Organizing ${movable} node${movable > 1 ? 's' : ''} — confirm or cancel below`);
+  }, [renderNotes]);
+
+  /**
+   * Persists manual node flag and position after a WebGL drag ends.
+   * @param {string} nodeId
+   */
+  const handleWebGLDragEnd = useCallback((nodeId) => {
+    manualGraphNodesRef.current.add(String(nodeId));
+    saveGraphNodeIdSet(manualKey, manualGraphNodesRef.current);
+    const renderer = sigmaRendererRef.current;
+    if (renderer) {
+      renderer.setVisualState({ manualNodeIds: manualGraphNodesRef.current });
+      try { localStorage.setItem(renderPosKey, JSON.stringify(renderer.getPositions())); } catch (e) {}
+    }
+  }, [manualKey, renderPosKey]);
+
+  /**
+   * Opens the edge label editor from a WebGL edge tap.
+   * @param {{ connId: number, label: string, direction: string, kind: string, screenX: number, screenY: number }} payload
+   */
+  const handleWebGLEdgeClick = useCallback((payload) => {
+    if (connectModeRef.current || theoryModeRef.current || shipModeRef.current || pathModeRef.current) return;
+    const gimmickKind = payload.kind === 'theory' || payload.kind === 'ship' ? payload.kind : null;
+    setEditingEdge({
+      connId: payload.connId,
+      label: payload.label,
+      direction: payload.direction || 'bidirectional',
+      gimmickKind,
+      x: payload.screenX,
+      y: payload.screenY,
+    });
+  }, []);
+
+  /**
+   * Runs a force layout on nodes the user has not manually placed; shows confirm/cancel preview.
+   */
+  const runOrganizePreview = useCallback(() => {
+    if (useWebGLRef.current) {
+      if (effectiveIs3D || organizePreview) return;
+      exitHighlightNewMode();
+      exitConnectMode();
+      exitTheoryMode();
+      exitShipMode();
+      exitPathMode();
+      setEditingEdge(null);
+      const manual = manualGraphNodesRef.current;
+      const movable = renderNotes.filter((n) => !manual.has(String(n.id))).length;
+      if (movable === 0) {
+        setLayoutHint('Every node has been moved by hand — nothing to organize');
+        setTimeout(() => setLayoutHint(''), 3200);
+        return;
+      }
+      setOrganizePreview(true);
+      return;
+    }
+    const cy = cyRef.current;
+    if (!cy || effectiveIs3D || organizePreview) return;
+    exitHighlightNewMode();
+    exitConnectMode();
+    exitTheoryMode();
+    exitShipMode();
+    exitPathMode();
+    setEditingEdge(null);
+    const manual = manualGraphNodesRef.current;
+    const movable = cy.nodes().filter(n => !manual.has(n.id()));
+    if (movable.length === 0) {
+      setLayoutHint('Every node has been moved by hand — nothing to organize');
+      setTimeout(() => setLayoutHint(''), 3200);
+      return;
+    }
+    const snapshot = {};
+    cy.nodes().forEach(n => { snapshot[n.id()] = { ...n.position() }; });
+    organizePreviewSnapshotRef.current = snapshot;
+    setOrganizePreview(true);
+    setLayoutHint(`Organizing ${movable.length} node${movable.length > 1 ? 's' : ''} — confirm or cancel below`);
+    cy.nodes().forEach(n => {
+      if (manual.has(n.id())) n.lock();
+      else n.unlock();
+    });
+    const layout = cy.layout({
+      name: 'cose',
+      animate: true,
+      animationDuration: 900,
+      fit: false,
+      randomize: false,
+      nodeRepulsion: () => 140000,
+      idealEdgeLength: () => 190,
+      edgeElasticity: () => 120,
+      nodeOverlap: 24,
+      gravity: 0.12,
+      numIter: 2500,
+      padding: 70,
+    });
+    layout.one('layoutstop', () => separateLabels(cy, null));
+    layout.run();
+  }, [effectiveIs3D, organizePreview, exitHighlightNewMode, exitPathMode, posKey]);
+
+  /** Updated every render so Cytoscape listeners always call latest handlers (no rebind). */
+  graphHandlersRef.current = {
+    onSelectNote,
+    onOpenNote,
+    onCreateConnection: safeCreateConnection,
+    setConnectSource,
+    finishActiveLinkMode,
+    setEditingEdge,
+    setPathSource,
+    setPathResult,
+    exitPathMode,
+    acknowledgeNewNode,
+  };
+
   const placeNewGraphNodes = useCallback((cy, addedNodeIds, savedPositions, posKey) => {
     if (addedNodeIds.length === 0) return;
     addedNodeIds.forEach((nid, idx) => {
@@ -399,49 +824,161 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
   }, []);
 
-  const runExpand = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const layout = cy.layout({
-      name: 'cose',
-      animate: true,
-      animationDuration: 900,
-      nodeRepulsion: () => 80000,
-      idealEdgeLength: () => 200,
-      nodeOverlap: 40,
-      gravity: 0.25,
-      numIter: 2000,
-      padding: 80,
-    });
-    layout.one('layoutstop', () => separateLabels(cy, posKey));
-    layout.run();
-  }, [posKey]);
+  const rendererPrefKey = `chronicler_graph_renderer_${currentUser?.id || 'anon'}`;
+  const [rendererPref, setRendererPrefRaw] = useState(() => loadRendererPref(rendererPrefKey));
+  const lockedRendererRef = useRef(null);
 
-  // Initial mount
   useEffect(() => {
-    if (!containerRef.current) return;
+    lockedRendererRef.current = null;
+  }, [activeCampaignId, rendererPref]);
 
-    const elements = buildElements(visibleNotes, visibleConnections);
+  const activeEngine = useMemo(() => {
+    const threshold = effectiveGraphScoreThreshold(devScoreThreshold);
+    const score = graphSizeScore(renderNotes.length, renderConnections.length);
+    const picked = selectGraphRenderer({
+      nodeCount: renderNotes.length,
+      edgeCount: renderConnections.length,
+      userPref: rendererPref,
+      deviceMemoryGb: typeof navigator !== 'undefined' ? navigator.deviceMemory : undefined,
+      isMobile,
+      scoreThreshold: threshold,
+    });
+    if (rendererPref !== 'auto') {
+      lockedRendererRef.current = picked;
+      return picked;
+    }
+    const resolved = resolveAutoRenderer(picked, lockedRendererRef.current, score, threshold);
+    lockedRendererRef.current = resolved;
+    return resolved;
+  }, [renderNotes.length, renderConnections.length, rendererPref, isMobile, activeCampaignId, devScoreThreshold, devFixture]);
+
+  const useWebGL = activeEngine === 'webgl' && !effectiveIs3D;
+  useWebGLRef.current = useWebGL;
+
+  const graphRenderScore = graphSizeScore(renderNotes.length, renderConnections.length);
+
+  /**
+   * Loads a synthetic benchmark graph into the live renderer (dev port 3002 only).
+   * @param {number} nodeCount
+   */
+  const loadDevFixture = useCallback((nodeCount) => {
+    const { notes, connections, positions } = generateBenchmarkGraph(nodeCount);
+    try { localStorage.setItem(BENCH_FIXTURE_POS_KEY, JSON.stringify(positions)); } catch (e) {}
+    setDevFixture({ notes, connections });
+    lockedRendererRef.current = null;
+  }, []);
+
+  /** Restores the campaign graph after a dev synthetic fixture. */
+  const clearDevFixture = useCallback(() => {
+    setDevFixture(null);
+    lockedRendererRef.current = null;
+  }, []);
+
+  /**
+   * Updates dev-only auto-WebGL score threshold (null = production default).
+   * @param {number|null} threshold
+   */
+  const applyDevScoreThreshold = useCallback((threshold) => {
+    saveDevScoreThreshold(threshold);
+    setDevScoreThresholdRaw(threshold);
+    lockedRendererRef.current = null;
+  }, []);
+
+  const setRendererPref = useCallback((val) => {
+    setRendererPrefRaw((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      saveRendererPref(rendererPrefKey, next);
+      lockedRendererRef.current = null;
+      return next;
+    });
+  }, [rendererPrefKey]);
+
+  /**
+   * Blocks Cytoscape-only toolbar actions when the performance (WebGL) map is active.
+   * @param {() => void} action
+   */
+  const guardStandardMapOnly = useCallback((action) => {
+    action();
+  }, []);
+
+  // Initial mount — Cytoscape only when standard engine is active
+  useEffect(() => {
+    if (!containerRef.current || useWebGL) return;
+
+    const elements = buildElements(renderNotes, renderConnections);
     const nodeElements = elements.filter(e => !e.data.source);
     let savedPositions = null;
-    try { savedPositions = JSON.parse(localStorage.getItem(posKey)); } catch (e) {}
+    try { savedPositions = JSON.parse(localStorage.getItem(renderPosKey)); } catch (e) {}
     const hasAnySaved = savedPositions && nodeElements.some(e => savedPositions[e.data.id]);
     const allSaved = savedPositions && nodeElements.every(e => savedPositions[e.data.id]);
     const runFullLayout = !hasAnySaved;
 
+    const basePixelRatio = Math.min(
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+      GRAPH_PIXEL_RATIO_CAP
+    );
+    let styleTransitionsOn = true;
+
     cyRef.current = cytoscape({
       container: containerRef.current,
       elements,
-      style: buildStyle(edgeTheme),
+      style: getCachedStyle(edgeTheme),
       layout: runFullLayout
         ? { name: 'cose', animate: true, animationDuration: 900, nodeRepulsion: () => 80000, idealEdgeLength: () => 200, nodeOverlap: 40, gravity: 0.25, numIter: 2000, padding: 80 }
         : { name: 'preset', positions: (node) => savedPositions[node.id()], padding: 80 },
-      wheelSensitivity: 0,   // neutralize Cytoscape's wheel — we handle it ourselves
+      wheelSensitivity: 0,
       boxSelectionEnabled: false,
       zoomingEnabled: true,
+      panningEnabled: true,
+      minZoom: GRAPH_MIN_ZOOM,
+      maxZoom: GRAPH_MAX_ZOOM,
+      pixelRatio: basePixelRatio,
     });
 
     const cy = cyRef.current;
+    const lodState = graphLodRef.current;
+    let gestureEndTimer = null;
+    let hudPaintTimer = null;
+
+    if (!localStorage.getItem(seenKey)) {
+      const initial = [];
+      cy.nodes().forEach(n => initial.push(n.id()));
+      seenGraphNodesRef.current = new Set(initial);
+      saveGraphNodeIdSet(seenKey, seenGraphNodesRef.current);
+    } else {
+      seenGraphNodesRef.current = loadGraphNodeIdSet(seenKey);
+    }
+    manualGraphNodesRef.current = loadGraphNodeIdSet(manualKey);
+    refreshUnseenCount();
+
+    const cancelHoverPreview = () => {
+      clearTimeout(hoverTimerRef.current);
+      clearHighlightClasses(cy, highlightStateRef);
+    };
+    const beginViewportGesture = () => {
+      suppressHoverRef.current = true;
+      cancelHoverPreview();
+      if (styleTransitionsOn) {
+        styleTransitionsOn = false;
+        setGraphStyleTransitions(cy, false);
+      }
+    };
+    const endViewportGesture = () => {
+      suppressHoverRef.current = false;
+      if (!styleTransitionsOn) {
+        styleTransitionsOn = true;
+        setGraphStyleTransitions(cy, true);
+      }
+    };
+    const scheduleViewportSettle = () => {
+      clearTimeout(gestureEndTimer);
+      gestureEndTimer = setTimeout(() => {
+        endViewportGesture();
+        updateGraphLod(cy, lodState);
+        paintZoomHudRef.current();
+        pushZoomHudLiveRef.current();
+      }, 200);
+    };
 
     // Restore saved positions and place only nodes that lack coordinates — never re-run cose for the whole graph.
     if (hasAnySaved && !allSaved) {
@@ -451,17 +988,18 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         if (saved) n.position(saved);
         else unsavedIds.push(n.id());
       });
-      placeNewGraphNodes(cy, unsavedIds, savedPositions, posKey);
+      placeNewGraphNodes(cy, unsavedIds, savedPositions, renderPosKey);
     }
 
-    // Smooth zoom — Cytoscape's built-in wheel is disabled via wheelSensitivity:0
+    // Smooth wheel zoom — same rates as pre–perf-work (v1.5.0).
     let zoomTarget = cy.zoom();
-    let zoomRAF    = null;
+    let zoomRAF = null;
     let lastWheelPos = null;
     const smoothZoom = (e) => {
       e.preventDefault();
-      const delta  = e.deltaY > 0 ? 0.92 : 1.09;
-      zoomTarget   = Math.min(Math.max(zoomTarget * delta, 0.1), 5);
+      beginViewportGesture();
+      const delta = e.deltaY > 0 ? 0.92 : 1.09;
+      zoomTarget = Math.min(Math.max(zoomTarget * delta, GRAPH_MIN_ZOOM), GRAPH_MAX_ZOOM);
       const containerRect = containerRef.current.getBoundingClientRect();
       lastWheelPos = {
         x: e.clientX - containerRect.left,
@@ -469,110 +1007,183 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
       };
       if (zoomRAF) return;
       const tick = () => {
-        const cur  = cy.zoom();
+        const cur = cy.zoom();
         const diff = zoomTarget - cur;
-        if (Math.abs(diff) < 0.0008) { cy.zoom({ level: zoomTarget, renderedPosition: lastWheelPos }); zoomRAF = null; return; }
+        if (Math.abs(diff) < 0.0008) {
+          cy.zoom({ level: zoomTarget, renderedPosition: lastWheelPos });
+          zoomRAF = null;
+          scheduleViewportSettle();
+          return;
+        }
         cy.zoom({ level: cur + diff * 0.18, renderedPosition: lastWheelPos });
         zoomRAF = requestAnimationFrame(tick);
       };
       zoomRAF = requestAnimationFrame(tick);
     };
     containerRef.current.addEventListener('wheel', smoothZoom, { passive: false });
+    // Keep wheel target in sync after programmatic zoom (selection center) — not during wheel lerp.
+    cy.on('zoom', () => {
+      if (!zoomRAF) zoomTarget = cy.zoom();
+    });
     const savePositions = () => {
       const pos = {};
       cy.nodes().forEach(n => { pos[n.id()] = { ...n.position() }; });
-      try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
+      try { localStorage.setItem(renderPosKey, JSON.stringify(pos)); } catch (e) {}
     };
-    cy.on('dragfree', 'node', savePositions);
+    cy.on('dragfree', 'node', (e) => {
+      manualGraphNodesRef.current.add(e.target.id());
+      saveGraphNodeIdSet(manualKey, manualGraphNodesRef.current);
+      savePositions();
+    });
     cy.on('layoutstop', savePositions);
     // On first load with no saved positions, de-overlap labels after layout settles
     if (runFullLayout) {
-      cy.one('layoutstop', () => separateLabels(cy, posKey));
+      cy.one('layoutstop', () => separateLabels(cy, renderPosKey));
     }
 
-    dataFingerprintRef.current = buildGraphFingerprint(visibleNotes, visibleConnections);
+    dataFingerprintRef.current = buildGraphFingerprint(renderNotes, renderConnections);
+    canonAdjRef.current = buildCanonAdjacency(renderConnections);
 
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
+    let renderFrames = 0;
+    let fpsInterval = null;
+    paintZoomHudRef.current = () => {
+      if (!showZoomHudRef.current) return;
+      paintZoomHud(zoomHudRef.current, cy);
+    };
+    pushZoomHudLiveRef.current = () => {
+      setZoomHudLive({
+        zoom: cy.zoom(),
+        zone: zoomPerformanceZone(cy.zoom()),
+        nodes: cy.nodes().length,
+        edges: cy.edges().length,
+      });
+    };
+    const onRender = () => { renderFrames += 1; };
+    cy.on('render', onRender);
+    fpsInterval = setInterval(() => {
+      if (!showZoomHudRef.current) return;
+      const fpsEl = zoomHudRef.current?.querySelector('[data-fps]');
+      if (fpsEl) fpsEl.textContent = `${renderFrames} FPS`;
+      renderFrames = 0;
+    }, 1000);
+    const onViewportChange = () => {
+      scheduleViewportSettle();
+      clearTimeout(hudPaintTimer);
+      hudPaintTimer = setTimeout(() => paintZoomHudRef.current(), 120);
+    };
+    cy.on('zoom pan', onViewportChange);
+    updateGraphLod(cy, lodState);
+    paintZoomHudRef.current();
+    pushZoomHudLiveRef.current();
+
+    bindEvents(cy, graphHandlersRef, hoverTimerRef, suppressHoverRef, connectModeRef, connectSourceRef, editingEdgeRef, pathModeRef, pathSourceRef, theoryModeRef, shipModeRef, canonAdjRef, highlightStateRef, highlightNewModeRef);
+
+    cy.on('panstart', beginViewportGesture);
+    cy.on('mousedown', (e) => {
+      if (e.target === cy) beginViewportGesture();
+    });
+    cy.on('grab', 'node', beginViewportGesture);
+    cy.on('panend', scheduleViewportSettle);
+    cy.on('mouseup', scheduleViewportSettle);
+    cy.on('free', 'node', scheduleViewportSettle);
+
+    cy.ready(() => {
+      if (cy.zoom() > GRAPH_MAX_ZOOM) cy.zoom(GRAPH_MAX_ZOOM);
+      cy.forceRender();
+    });
 
     return () => {
       clearTimeout(hoverTimerRef.current);
+      clearTimeout(gestureEndTimer);
+      clearTimeout(hudPaintTimer);
+      stopNewHighlightFlash(newHighlightFlashRef, cy);
+      if (fpsInterval) clearInterval(fpsInterval);
+      cy.off('render', onRender);
       if (zoomRAF) cancelAnimationFrame(zoomRAF);
+      paintZoomHudRef.current = () => {};
+      pushZoomHudLiveRef.current = () => {};
       containerRef.current?.removeEventListener('wheel', smoothZoom);
       cy.destroy();
       cyRef.current = null;
       isFirstMount.current = true;
+      highlightStateRef.current.touched = null;
+      suppressHoverRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCampaignId]);
+  }, [activeCampaignId, useWebGL]);
 
   // Update graph when notes/connections change after mount
   useEffect(() => {
+    if (useWebGL) return;
     const cy = cyRef.current;
     if (!cy) return;
     if (isFirstMount.current) { isFirstMount.current = false; return; }
 
-    const fp = buildGraphFingerprint(visibleNotes, visibleConnections);
+    const fp = buildGraphFingerprint(renderNotes, renderConnections);
     if (fp === dataFingerprintRef.current) return;
     dataFingerprintRef.current = fp;
+    canonAdjRef.current = buildCanonAdjacency(renderConnections);
 
-    const newElements = buildElements(visibleNotes, visibleConnections);
+    const newElements = buildElements(renderNotes, renderConnections);
     const newIds = new Set(newElements.map(e => e.data.id));
 
-    cy.elements().forEach(el => { if (!newIds.has(el.id())) el.remove(); });
-
-    // Track which nodes are truly new (no saved position)
     let savedPositions = null;
-    try { savedPositions = JSON.parse(localStorage.getItem(posKey)); } catch (e) {}
+    try { savedPositions = JSON.parse(localStorage.getItem(renderPosKey)); } catch (e) {}
     const addedNodeIds = [];
 
-    newElements.forEach(el => {
-      if (!cy.getElementById(el.data.id).length) {
-        cy.add(el);
-        if (!el.data.source) addedNodeIds.push(el.data.id); // it's a node, not an edge
-      } else {
-        const existing = cy.getElementById(el.data.id);
-        if (el.data.label !== undefined) existing.data('label', el.data.label);
-        if (el.data.source) {
-          if (el.data.direction !== undefined) existing.data('direction', el.data.direction);
-          if (el.classes) existing.classes(el.classes);
+    cy.batch(() => {
+      cy.elements().forEach(el => { if (!newIds.has(el.id())) el.remove(); });
+      newElements.forEach(el => {
+        if (!cy.getElementById(el.data.id).length) {
+          cy.add(el);
+          if (!el.data.source) addedNodeIds.push(el.data.id);
+        } else {
+          const existing = cy.getElementById(el.data.id);
+          if (el.data.label !== undefined) existing.data('label', el.data.label);
+          if (el.data.source) {
+            if (el.data.direction !== undefined) existing.data('direction', el.data.direction);
+            if (el.classes) existing.classes(el.classes);
+          }
         }
-      }
+      });
     });
 
-    placeNewGraphNodes(cy, addedNodeIds, savedPositions, posKey);
-
-    cy.removeAllListeners();
-    const savePositions = () => {
-      const pos = {};
-      cy.nodes().forEach(n => { pos[n.id()] = { ...n.position() }; });
-      try { localStorage.setItem(posKey, JSON.stringify(pos)); } catch (e) {}
-    };
-    cy.on('dragfree', 'node', savePositions);
-    cy.on('layoutstop', savePositions);
-    bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, safeCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef);
-  }, [visibleNotes, visibleConnections]);
+    placeNewGraphNodes(cy, addedNodeIds, savedPositions, renderPosKey);
+    updateGraphLod(cy, graphLodRef.current);
+    paintZoomHudRef.current();
+    refreshUnseenCount();
+  }, [renderNotes, renderConnections, placeNewGraphNodes, renderPosKey, refreshUnseenCount, useWebGL]);
 
   // Re-apply edge colors / arrows when the user adjusts appearance controls
   useEffect(() => {
+    if (useWebGL) return;
     applyGraphStyle(cyRef.current, edgeTheme);
   }, [edgeTheme]);
 
-  // Tiered highlight
+  // Tiered highlight for selected note — uses precomputed adjacency, batched class updates
   useEffect(() => {
+    if (useWebGL) return;
     const cy = cyRef.current;
     if (!cy) return;
-    cy.elements().removeClass('tier-0 tier-1 tier-2 tier-3 dimmed highlighted');
-    if (selectedNoteId) {
-      const tiers = getTiers(cy, selectedNoteId, 3);
-      cy.nodes().forEach(n => { const t = tiers.get(n.id()); n.addClass(t === undefined ? 'dimmed' : `tier-${Math.min(t, 3)}`); });
-      cy.edges().forEach(e => {
-        const sT = tiers.get(e.source().id()), tT = tiers.get(e.target().id());
-        e.addClass(sT === undefined || tT === undefined ? 'dimmed' : 'highlighted');
-      });
+    if (!selectedNoteId) {
+      clearHighlightClasses(cy, highlightStateRef);
+      lastCenteredRef.current = null;
+      return;
+    }
+    const tiers = getTiersFromAdj(canonAdjRef.current, selectedNoteId, 3);
+    applyTierHighlight(cy, tiers, 3, highlightStateRef);
+    if (selectedNoteId !== lastCenteredRef.current) {
+      lastCenteredRef.current = selectedNoteId;
       const sel = cy.$(`#${selectedNoteId}`);
       if (sel.length) cy.animate({ center: { eles: sel }, zoom: 1.4 }, { duration: 350 });
     }
-  }, [selectedNoteId]);
+  }, [selectedNoteId, useWebGL]);
+
+  /** Paint HUD once the overlay mounts after toggling on. */
+  useEffect(() => {
+    if (!showZoomHud || effectiveIs3D) return;
+    requestAnimationFrame(() => paintZoomHudRef.current());
+  }, [showZoomHud, effectiveIs3D, useWebGL]);
 
   const activeCampaignName = graphCampaignRoots.find((f) => f.id === activeCampaignId)?.title;
 
@@ -582,12 +1193,112 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
   const toolbarRef = useRef(null);
   const [isNarrowGraph, setIsNarrowGraph] = useState(false);
   const [showToolMenu, setShowToolMenu] = useState(false);
+  const [sigmaBench, setSigmaBench] = useState(() => isSigmaBenchEnabled());
+  const [showDevPanel, setShowDevPanel] = useState(true);
+
+  const enginePrefLabel = rendererPref === 'auto'
+    ? `Auto (${activeEngine})`
+    : rendererPref === 'webgl' ? 'Performance' : 'Standard';
+
+  const cycleEnginePref = useCallback(() => {
+    setRendererPref((prev) => {
+      if (prev === 'auto') return 'cytoscape';
+      if (prev === 'cytoscape') return 'webgl';
+      return 'auto';
+    });
+  }, [setRendererPref]);
 
   /**
    * Mobile UX: force the graph action bar into an overflow menu.
    * On vertical mobile screens, the action set is too wide to fit without overflow.
    */
   const shouldCollapseToolbar = isMobile || isNarrowGraph;
+
+  /** Shared styles for Layout dropdown menu items (Highlight New / Organize). */
+  const layoutMenuItemStyle = (opts = {}) => ({
+    fontFamily: 'Cinzel',
+    fontSize: '9px',
+    letterSpacing: '0.1em',
+    padding: isMobile ? '11px 10px' : '7px 10px',
+    minHeight: isMobile ? '44px' : 'auto',
+    borderRadius: '3px',
+    cursor: opts.disabled ? 'default' : 'pointer',
+    textAlign: 'left',
+    background: 'transparent',
+    border: '1px solid rgba(200,148,58,0.12)',
+    color: 'rgba(200,148,58,0.7)',
+    opacity: opts.disabled ? 0.45 : 1,
+    whiteSpace: 'nowrap',
+  });
+
+  /**
+   * Renders Layout submenu entries used in both the overflow and inline toolbars.
+   * @param {() => void} closeMenu
+   */
+  const renderLayoutMenuItems = (closeMenu) => (
+    <>
+      <button
+        type="button"
+        onClick={() => { cycleEnginePref(); closeMenu(); }}
+        style={layoutMenuItemStyle()}
+      >
+        Map engine: {enginePrefLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => { enterHighlightNewMode(); closeMenu(); }}
+        style={layoutMenuItemStyle()}
+      >
+        ◎ Highlight New{unseenCount > 0 ? ` (${unseenCount})` : ''}
+      </button>
+      <button
+        type="button"
+        onClick={() => { runOrganizePreview(); closeMenu(); }}
+        disabled={organizePreview}
+        style={layoutMenuItemStyle({ disabled: organizePreview })}
+      >
+        ⊞ Organize
+      </button>
+      {devGraphToolsEnabled && (
+        <>
+          <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(58,196,120,0.55)', padding: '6px 4px 2px', borderTop: '1px solid rgba(58,196,120,0.2)', marginTop: 4 }}>
+            DEV TESTS
+          </div>
+          <button type="button" onClick={() => { loadDevFixture(500); closeMenu(); }} style={layoutMenuItemStyle()}>
+            ⊕ Load 500 nodes
+          </button>
+          <button type="button" onClick={() => { loadDevFixture(100); closeMenu(); }} style={layoutMenuItemStyle()}>
+            ⊕ Load 100 nodes
+          </button>
+          {devFixture && (
+            <button type="button" onClick={() => { clearDevFixture(); closeMenu(); }} style={layoutMenuItemStyle()}>
+              ↩ Clear fixture
+            </button>
+          )}
+          <button type="button" onClick={() => { applyDevScoreThreshold(40); closeMenu(); }} style={layoutMenuItemStyle()}>
+            Auto threshold: Demo (40)
+          </button>
+          <button type="button" onClick={() => { applyDevScoreThreshold(null); closeMenu(); }} style={layoutMenuItemStyle()}>
+            Auto threshold: Prod ({LARGE_GRAPH_SCORE_THRESHOLD})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              try { localStorage.setItem('chronicler_dev_sigma_bench', '1'); } catch (e) {}
+              setSigmaBench(true);
+              closeMenu();
+            }}
+            style={layoutMenuItemStyle()}
+          >
+            ◈ Sigma bench
+          </button>
+          <button type="button" onClick={() => { setShowDevPanel((v) => !v); closeMenu(); }} style={layoutMenuItemStyle()}>
+            {showDevPanel ? '▾ Hide dev panel' : '▸ Show dev panel'}
+          </button>
+        </>
+      )}
+    </>
+  );
 
   // Collapse toolbar to dropdown if it would overlap the campaign selector
   useEffect(() => {
@@ -598,6 +1309,17 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
     const toolbarLeft = toolbar.getBoundingClientRect().left;
     setIsNarrowGraph(toolbarLeft - 16 < campaignRight);
   }, [containerWidth, activeCampaignId, isDMOfActiveCampaign, is3D]);
+
+  if (sigmaBench) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%', background: '#07080e' }}>
+        <GraphSigmaBench onExit={() => {
+          try { localStorage.removeItem('chronicler_dev_sigma_bench'); } catch (e) {}
+          setSigmaBench(false);
+        }} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -613,7 +1335,90 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.012) 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.012) 40px)`,
       }} />
 
-      <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 1, display: effectiveIs3D ? 'none' : 'block' }} />
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0, zIndex: 1, display: (effectiveIs3D || useWebGL) ? 'none' : 'block' }} />
+
+      {useWebGL && (
+        <Suspense fallback={(
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'rgba(200,148,58,0.6)', fontFamily: 'Cinzel', fontSize: '11px', letterSpacing: '0.12em',
+          }}
+          >
+            Loading performance map…
+          </div>
+        )}
+        >
+          <GraphView2DWebGL
+            notes={renderNotes}
+            connections={renderConnections}
+            posKey={renderPosKey}
+            edgeTheme={edgeTheme}
+            selectedNoteId={selectedNoteId}
+            onSelectNote={onSelectNote}
+            onOpenNote={onOpenNote}
+            onCreateConnection={safeCreateConnection}
+            onEdgeClick={handleWebGLEdgeClick}
+            onAcknowledgeNewNode={acknowledgeNewNode}
+            onDragEnd={handleWebGLDragEnd}
+            connectMode={connectMode}
+            theoryMode={theoryMode}
+            shipMode={shipMode}
+            pathMode={pathMode}
+            connectSource={connectSource}
+            pathSource={pathSource}
+            pathResult={pathResult}
+            onConnectSourceSet={setConnectSource}
+            onPathSourceSet={setPathSource}
+            onPathResult={setPathResult}
+            highlightNewActive={highlightNewActive}
+            newHighlightIds={newHighlightIds}
+            manualNodeIds={manualGraphNodesRef.current}
+            organizePreview={organizePreview}
+            onRunOrganize={handleWebGLOrganize}
+            zoomHudRef={zoomHudRef}
+            showZoomHudRef={showZoomHudRef}
+            paintZoomHudRef={paintZoomHudRef}
+            pushZoomHudLiveRef={pushZoomHudLiveRef}
+            rendererRef={sigmaRendererRef}
+          />
+        </Suspense>
+      )}
+
+      {/* Zoom / FPS HUD — bottom-right so the left legend does not cover it */}
+      {showZoomHud && !effectiveIs3D && (
+        <div
+          ref={zoomHudRef}
+          style={{
+            position: 'absolute',
+            bottom: 14,
+            right: 14,
+            zIndex: 20,
+            pointerEvents: 'none',
+            fontFamily: 'Cinzel, serif',
+            fontSize: '10px',
+            letterSpacing: '0.08em',
+            color: 'rgba(226,213,187,0.9)',
+            background: 'rgba(7,8,14,0.92)',
+            border: '1px solid rgba(200,148,58,0.35)',
+            borderRadius: '4px',
+            padding: '9px 12px',
+            lineHeight: 1.55,
+            minWidth: '172px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.55)',
+          }}
+        >
+          <div style={{ fontSize: '8px', letterSpacing: '0.18em', color: 'rgba(200,148,58,0.65)', marginBottom: '4px' }}>ZOOM SCALE</div>
+          <div data-zoom style={{ color: '#c8943a', fontSize: '13px' }}>—</div>
+          <div data-zone style={{ fontSize: '9px', color: 'rgba(226,213,187,0.55)', marginTop: '2px' }}>—</div>
+          <div data-visible style={{ fontSize: '9px', color: 'rgba(226,213,187,0.45)', marginTop: '2px' }}>—</div>
+          <div data-stats style={{ fontSize: '9px', color: 'rgba(226,213,187,0.5)', marginTop: '4px' }}>—</div>
+          <div data-fps style={{ fontSize: '9px', color: 'rgba(139,196,226,0.75)', marginTop: '2px' }}>— FPS</div>
+          <div data-engine style={{ fontSize: '8px', color: 'rgba(226,213,187,0.45)', marginTop: '4px' }}>—</div>
+          <div style={{ fontSize: '8px', color: 'rgba(226,213,187,0.35)', marginTop: '6px', letterSpacing: '0.04em' }}>
+            Range {GRAPH_MIN_ZOOM.toFixed(2)}–{GRAPH_MAX_ZOOM.toFixed(2)} · drag pan · wheel zoom
+          </div>
+        </div>
+      )}
 
       {/* Edge editor — label + direction (graph only) */}
       {editingEdge && (
@@ -776,7 +1581,15 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
 
       {/* Legend — anchored below the toolbar row so it never overlaps it */}
       <div ref={tutorialRefs?.legend || null}>
-        <LegendPanel selectedNoteId={selectedNoteId} edgeTheme={edgeTheme} onEdgeThemeChange={setEdgeTheme} tutorialRefs={tutorialRefs} />
+        <LegendPanel
+          selectedNoteId={selectedNoteId}
+          edgeTheme={edgeTheme}
+          onEdgeThemeChange={setEdgeTheme}
+          tutorialRefs={tutorialRefs}
+          showZoomHud={showZoomHud}
+          onToggleZoomHud={() => setShowZoomHud((v) => !v)}
+          zoomHudLive={zoomHudLive}
+        />
       </div>
 
       {/* Toolbar — top-right: buttons first, status hints below (so hints never sit above the buttons) */}
@@ -793,21 +1606,21 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               >{isMobile ? 'MENU' : '···'}</button>
               {showToolMenu && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30, background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px', padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: isMobile ? '160px' : '140px', boxShadow: '0 6px 24px rgba(0,0,0,0.7)' }}>
-                  <button onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); }}
+                  <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); is3D ? setConnectMode(v => !v) : connectMode ? exitConnectMode() : setConnectMode(true); setShowToolMenu(false); })}
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: connectMode ? 'rgba(58,139,196,0.2)' : 'transparent', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.12)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {connectMode ? '✕ Cancel Connect' : '⟵⟶ Connect'}
                   </button>
-                  <button onClick={() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); }}
+                  <button onClick={() => guardStandardMapOnly(() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); setShowToolMenu(false); })}
                     style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: pathMode ? 'rgba(139,196,58,0.18)' : 'transparent', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.4)' : 'rgba(200,148,58,0.12)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.7)' }}>
                     {pathMode ? '✕ Cancel Path' : '⬡ Find Path'}
                   </button>
                   {!effectiveIs3D && (
                     <>
-                      <button onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); }}
+                      <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); setShowToolMenu(false); })}
                         style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'transparent', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.45)' : 'rgba(200,148,58,0.12)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.7)' }}>
                         {theoryMode ? '✕ Theory' : '◇ Theory'}
                       </button>
-                      <button onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); setShowToolMenu(false); }}
+                      <button onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); setShowToolMenu(false); })}
                         style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: shipMode ? 'rgba(220,80,140,0.18)' : 'transparent', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.45)' : 'rgba(200,148,58,0.12)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.7)' }}>
                         {shipMode ? '✕ Ship' : '♥ Ship'}
                       </button>
@@ -818,9 +1631,15 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
                     {effectiveIs3D ? '↩ 2D View' : '◈ 3D View'}
                   </button>
                   {!effectiveIs3D && (
-                    <button onClick={() => { runExpand(); setShowToolMenu(false); }}
-                      style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: 'transparent', border: '1px solid rgba(200,148,58,0.12)', color: 'rgba(200,148,58,0.7)' }}>
-                      ⊹ Expand
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      <div style={{ fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.16em', color: 'rgba(200,148,58,0.45)', padding: '2px 4px 0' }}>LAYOUT</div>
+                      {renderLayoutMenuItems(() => setShowToolMenu(false))}
+                    </div>
+                  )}
+                  {!effectiveIs3D && (
+                    <button onClick={() => { setShowZoomHud(v => !v); setShowToolMenu(false); }}
+                      style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.1em', padding: isMobile ? '11px 10px' : '7px 10px', minHeight: isMobile ? '44px' : 'auto', borderRadius: '3px', cursor: 'pointer', textAlign: 'left', background: showZoomHud ? 'rgba(200,148,58,0.15)' : 'transparent', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.35)' : 'rgba(200,148,58,0.12)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.7)' }}>
+                      {showZoomHud ? '✕ Zoom HUD' : '⌖ Zoom HUD'}
                     </button>
                   )}
                   {isDMOfActiveCampaign && (
@@ -838,25 +1657,25 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           <div ref={toolbarRef} style={{ display: 'flex', gap: '6px', flexWrap: 'nowrap', justifyContent: 'flex-end', visibility: shouldCollapseToolbar ? 'hidden' : 'visible', pointerEvents: shouldCollapseToolbar ? 'none' : 'auto' }}>
             <button
               ref={tutorialRefs?.btnConnect || null}
-              onClick={() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } }}
+              onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitTheoryMode(); exitShipMode(); if (is3D) { setConnectMode(v => !v); } else { connectMode ? exitConnectMode() : setConnectMode(true); } })}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: connectMode ? 'rgba(58,139,196,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${connectMode ? 'rgba(58,139,196,0.5)' : 'rgba(200,148,58,0.25)'}`, color: connectMode ? 'rgba(58,196,226,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{connectMode ? '✕ Cancel' : '⟵⟶ Connect'}</button>
             <button
               ref={tutorialRefs?.btnPath || null}
-              onClick={() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); }}
+              onClick={() => guardStandardMapOnly(() => { exitConnectMode(); exitTheoryMode(); exitShipMode(); pathMode ? exitPathMode() : setPathMode(true); })}
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: pathMode ? 'rgba(139,196,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${pathMode ? 'rgba(139,196,58,0.5)' : 'rgba(200,148,58,0.25)'}`, color: pathMode ? 'rgba(180,226,100,0.9)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{pathMode ? '✕ Cancel' : '⬡ Find Path'}</button>
                   {!effectiveIs3D && (
               <>
                 <button
                   ref={tutorialRefs?.btnTheory || null}
-                  onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); }}
+                  onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitShipMode(); theoryMode ? exitTheoryMode() : setTheoryMode(true); })}
                   title="Add a speculative theory link (dashed violet)"
                   style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: theoryMode ? 'rgba(150,100,200,0.2)' : 'rgba(200,148,58,0.08)', border: `1px solid ${theoryMode ? 'rgba(180,130,220,0.5)' : 'rgba(200,148,58,0.25)'}`, color: theoryMode ? 'rgba(200,170,240,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
                 >{theoryMode ? '✕ Theory' : '◇ Theory'}</button>
                 <button
                   ref={tutorialRefs?.btnShip || null}
-                  onClick={() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); }}
+                  onClick={() => guardStandardMapOnly(() => { if (pathMode) exitPathMode(); exitConnectMode(); exitTheoryMode(); shipMode ? exitShipMode() : setShipMode(true); })}
                   title="Ship two NPC/Character notes (dashed pink)"
                   style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: shipMode ? 'rgba(220,80,140,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${shipMode ? 'rgba(255,120,170,0.5)' : 'rgba(200,148,58,0.25)'}`, color: shipMode ? 'rgba(255,170,200,0.95)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
                 >{shipMode ? '✕ Ship' : '♥ Ship'}</button>
@@ -868,9 +1687,38 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
               style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: effectiveIs3D ? 'rgba(58,139,196,0.15)' : 'rgba(200,148,58,0.08)', border: `1px solid ${effectiveIs3D ? 'rgba(58,139,196,0.4)' : 'rgba(200,148,58,0.25)'}`, color: effectiveIs3D ? 'rgba(139,196,226,0.8)' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
             >{effectiveIs3D ? '2D' : '3D'}</button>
             {!effectiveIs3D && (
-              <button ref={tutorialRefs?.btnExpand || null} onClick={runExpand} title="Auto-arrange all nodes to remove overlaps"
-                style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(200,148,58,0.08)', border: '1px solid rgba(200,148,58,0.25)', color: 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
-              >⊹ Expand</button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  ref={tutorialRefs?.btnExpand || null}
+                  onClick={() => setShowLayoutMenu(v => !v)}
+                  title="Layout tools — highlight new nodes or organize the graph"
+                  style={{
+                    fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer',
+                    background: (showLayoutMenu || highlightNewActive || organizePreview) ? 'rgba(200,148,58,0.18)' : 'rgba(200,148,58,0.08)',
+                    border: `1px solid ${(showLayoutMenu || highlightNewActive) ? 'rgba(200,148,58,0.45)' : 'rgba(200,148,58,0.25)'}`,
+                    color: (showLayoutMenu || highlightNewActive) ? '#c8943a' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap',
+                  }}
+                >
+                  ⊹ Layout ▾{unseenCount > 0 ? ` · ${unseenCount}` : ''}
+                </button>
+                {showLayoutMenu && (
+                  <div style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: '4px', zIndex: 30,
+                    background: '#0f1219', border: '1px solid rgba(200,148,58,0.2)', borderRadius: '4px',
+                    padding: '5px', display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '168px',
+                    boxShadow: '0 6px 24px rgba(0,0,0,0.7)',
+                  }}>
+                    {renderLayoutMenuItems(() => setShowLayoutMenu(false))}
+                  </div>
+                )}
+              </div>
+            )}
+            {!effectiveIs3D && (
+              <button
+                onClick={() => setShowZoomHud(v => !v)}
+                title={showZoomHud ? 'Hide zoom scale overlay' : 'Show zoom scale, FPS, and performance zone'}
+                style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.12em', padding: '6px 14px', borderRadius: '3px', cursor: 'pointer', background: showZoomHud ? 'rgba(200,148,58,0.18)' : 'rgba(200,148,58,0.08)', border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.45)' : 'rgba(200,148,58,0.25)'}`, color: showZoomHud ? '#c8943a' : 'rgba(200,148,58,0.6)', whiteSpace: 'nowrap' }}
+              >{showZoomHud ? '✕ HUD' : '⌖ Zoom/FPS'}</button>
             )}
             {isDMOfActiveCampaign && (
               <button ref={tutorialRefs?.btnDmView || null} onClick={() => setDmView(v => !v)} title={dmView ? 'Showing DM-only notes — click to hide' : 'Show DM-only notes'}
@@ -881,6 +1729,19 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         </div>
 
         {/* Status / hints — below the button row */}
+        {(layoutHint || highlightNewActive) && (
+          <div style={{
+            fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.1em', padding: '6px 12px',
+            background: highlightNewActive ? 'rgba(200,148,58,0.14)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${highlightNewActive ? 'rgba(200,148,58,0.4)' : 'rgba(200,148,58,0.2)'}`,
+            borderRadius: '3px', color: highlightNewActive ? '#e8c060' : 'rgba(226,213,187,0.75)', maxWidth: 'min(92vw, 420px)', textAlign: 'right',
+          }}>
+            {layoutHint || 'Acknowledge each new node'}
+            {highlightNewActive && (
+              <button type="button" onClick={exitHighlightNewMode} style={{ marginLeft: '10px', fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.12em', padding: '2px 6px', borderRadius: '2px', cursor: 'pointer', background: 'transparent', border: '1px solid rgba(200,148,58,0.35)', color: 'rgba(200,148,58,0.8)' }}>Cancel</button>
+            )}
+          </div>
+        )}
         {(connectMode || theoryMode || shipMode || pathMode || pathResult) && (
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {(connectMode || theoryMode || shipMode) && !pathMode && (
@@ -914,12 +1775,37 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         )}
       </div>
 
+      {organizePreview && !effectiveIs3D && (
+        <div style={{
+          position: 'absolute', bottom: showZoomHud ? 88 : 24, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', pointerEvents: 'auto',
+        }}>
+          <div style={{
+            fontFamily: 'Cinzel', fontSize: '10px', letterSpacing: '0.12em', color: 'rgba(226,213,187,0.9)',
+            background: 'rgba(7,8,14,0.94)', border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px',
+            padding: '10px 14px', textAlign: 'center', maxWidth: 'min(92vw, 380px)', lineHeight: 1.45,
+          }}>
+            Preview layout — only nodes you have not moved by hand were reorganized
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" onClick={confirmOrganizePreview}
+              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(200,148,58,0.22)', border: '1px solid rgba(200,148,58,0.5)', color: '#e8c060' }}>
+              Confirm
+            </button>
+            <button type="button" onClick={cancelOrganizePreview}
+              style={{ fontFamily: 'Cinzel', fontSize: '9px', letterSpacing: '0.14em', padding: '8px 16px', borderRadius: '3px', cursor: 'pointer', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(226,213,187,0.75)' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3D graph overlay */}
       {effectiveIs3D && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 3 }}>
           <GraphView3D
-            notes={visibleNotes}
-            connections={visibleConnections}
+            notes={renderNotes}
+            connections={renderConnections}
             onSelectNote={onSelectNote}
             onOpenNote={onOpenNote}
             activeCampaignId={activeCampaignId}
@@ -937,7 +1823,7 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
         </div>
       )}
 
-      {visibleNotes.length === 0 && (
+      {visibleNotes.length === 0 && !devFixture && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' }}>
           <div style={{ textAlign: 'center', opacity: 0.25 }}>
             <div style={{ fontFamily: 'Cinzel', fontSize: '18px', color: '#c8943a', marginBottom: '8px' }}>No notes in this campaign</div>
@@ -945,21 +1831,49 @@ export default function GraphView({ allNotes, notes, connections, onSelectNote, 
           </div>
         </div>
       )}
+      {devGraphToolsEnabled && showDevPanel && (
+        <GraphDevTools
+          rendererPref={rendererPref}
+          activeEngine={activeEngine}
+          fixtureActive={!!devFixture}
+          nodeCount={renderNotes.length}
+          edgeCount={renderConnections.length}
+          graphScore={graphRenderScore}
+          scoreThreshold={effectiveGraphScoreThreshold(devScoreThreshold)}
+          onSetRendererPref={setRendererPref}
+          onSetScoreThreshold={applyDevScoreThreshold}
+          onLoadFixture={loadDevFixture}
+          onClearFixture={clearDevFixture}
+          onOpenSigmaBench={() => {
+            try { localStorage.setItem('chronicler_dev_sigma_bench', '1'); } catch (e) {}
+            setSigmaBench(true);
+          }}
+        />
+      )}
     </div>
   );
-}
+});
 
 /**
- * Wires Cytoscape: normal select/open, connect/theory/ship two-tap links, path finder, edge label edit, background clear, hover tier preview.
- * Theory/ship edges skip orange tier styling and use dim/highlight only.
+ * Wires Cytoscape once per mount: select/open, connect/theory/ship links, path finder, edge edit, hover preview.
+ * Handlers read graphHandlersRef.current so callbacks stay fresh without rebinding listeners.
  */
-function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef, connectSourceRef, setConnectSource, finishActiveLinkMode, onCreateConnection, editingEdgeRef, setEditingEdge, pathModeRef, pathSourceRef, setPathSource, setPathResult, exitPathMode, theoryModeRef, shipModeRef) {
+function bindEvents(cy, graphHandlersRef, hoverTimerRef, suppressHoverRef, connectModeRef, connectSourceRef, editingEdgeRef, pathModeRef, pathSourceRef, theoryModeRef, shipModeRef, canonAdjRef, highlightStateRef, highlightNewModeRef) {
   const lastClickRef = { id: null, time: 0 };
-  const TIER_CLASSES = ['tier-0','tier-1','tier-2','tier-3','tier-4','tier-5','tier-6'];
-  const ALL_CLASSES  = [...TIER_CLASSES, 'dimmed', 'highlighted', 'path-node', 'path-edge', 'path-floor', 'path-pick-dim', 'connect-source', 'connect-dim', 'theory-source', 'ship-source'].join(' ');
 
   cy.on('tap', 'node', (e) => {
-    // Connect / theory / ship (shared two-tap flow)
+    if (highlightNewModeRef.current) {
+      if (e.target.hasClass('new-highlight')) {
+        graphHandlersRef.current.acknowledgeNewNode(e.target.id());
+      }
+      return;
+    }
+
+    const {
+      onSelectNote, onOpenNote, onCreateConnection, setConnectSource, finishActiveLinkMode,
+      setPathSource, setPathResult,
+    } = graphHandlersRef.current;
+
     const inLinkMode = connectModeRef.current || theoryModeRef.current || shipModeRef.current;
     if (inLinkMode) {
       if (!connectSourceRef.current) {
@@ -981,80 +1895,92 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
       return;
     }
 
-    // Path finder mode
     if (pathModeRef.current) {
-      const id    = e.target.id();
+      const id = e.target.id();
       const title = e.target.data('label');
       if (!pathSourceRef.current) {
         setPathSource({ id, title });
-        // Highlight source node immediately
-        cy.elements().removeClass(ALL_CLASSES);
-        cy.getElementById(id).addClass('tier-0');
-        cy.nodes().not(`#${id}`).addClass('path-pick-dim');
-        cy.edges().addClass('path-pick-dim');
+        clearHighlightClasses(cy, highlightStateRef);
+        let touched = cy.collection();
+        cy.batch(() => {
+          const src = cy.getElementById(id);
+          src.addClass('tier-0');
+          touched = touched.union(src);
+          const dimNodes = cy.nodes().not(`#${id}`);
+          dimNodes.addClass('path-pick-dim');
+          touched = touched.union(dimNodes);
+          const dimEdges = cy.edges().addClass('path-pick-dim');
+          touched = touched.union(dimEdges);
+        });
+        highlightStateRef.current.touched = touched;
       } else {
         const srcId = pathSourceRef.current.id;
-        if (srcId === id) return; // same node — ignore
-        const paths = getAllShortestPaths(cy, srcId, id, 3);
-        cy.elements().removeClass(ALL_CLASSES);
-        if (paths.length === 0) {
-          setPathResult({ found: false, paths: [] });
-          // Show both chosen nodes, floor everything else
-          cy.getElementById(srcId).addClass('tier-0');
-          cy.getElementById(id).addClass('tier-0');
-          cy.nodes().not(`#${srcId}`).not(`#${id}`).addClass('path-floor');
-        } else {
-          setPathResult({ found: true, paths });
-          // Collect all node ids and edges on any path
-          const pathNodeIds = new Set();
-          const pathEdgePairs = new Set(); // "minId_maxId" for each hop
-          paths.forEach(path => {
-            path.forEach(nid => pathNodeIds.add(nid));
-            for (let i = 0; i < path.length - 1; i++) {
-              const a = path[i], b = path[i + 1];
-              pathEdgePairs.add([a, b].sort().join('_'));
-            }
-          });
-          // Apply path-node class + floor everything else
-          cy.nodes().forEach(n => {
-            if (pathNodeIds.has(n.id())) n.addClass('path-node');
-            else n.addClass('path-floor');
-          });
-          // Apply path-edge or floor to edges
-          cy.edges().forEach(edge => {
-            const pair = [edge.source().id(), edge.target().id()].sort().join('_');
-            if (pathEdgePairs.has(pair)) edge.addClass('path-edge');
-            else edge.addClass('path-floor');
-          });
-        }
+        if (srcId === id) return;
+        const paths = getAllShortestPaths(canonAdjRef.current, srcId, id, 3);
+        clearHighlightClasses(cy, highlightStateRef);
+        let touched = cy.collection();
+        cy.batch(() => {
+          if (paths.length === 0) {
+            setPathResult({ found: false, paths: [] });
+            const a = cy.getElementById(srcId).addClass('tier-0');
+            const b = cy.getElementById(id).addClass('tier-0');
+            touched = touched.union(a).union(b);
+            const floorNodes = cy.nodes().not(`#${srcId}`).not(`#${id}`).addClass('path-floor');
+            touched = touched.union(floorNodes);
+          } else {
+            setPathResult({ found: true, paths });
+            const pathNodeIds = new Set();
+            const pathEdgePairs = new Set();
+            paths.forEach(path => {
+              path.forEach(nid => pathNodeIds.add(nid));
+              for (let i = 0; i < path.length - 1; i++) {
+                const a = path[i], b = path[i + 1];
+                pathEdgePairs.add([a, b].sort().join('_'));
+              }
+            });
+            cy.nodes().forEach(n => {
+              if (pathNodeIds.has(n.id())) n.addClass('path-node');
+              else n.addClass('path-floor');
+              touched = touched.union(n);
+            });
+            cy.edges().forEach(edge => {
+              const pair = [edge.source().id(), edge.target().id()].sort().join('_');
+              if (pathEdgePairs.has(pair)) edge.addClass('path-edge');
+              else edge.addClass('path-floor');
+              touched = touched.union(edge);
+            });
+          }
+        });
+        highlightStateRef.current.touched = touched;
       }
       return;
     }
 
-    // Normal click — single/double detection
     const now = Date.now();
-    const id = e.target.id();
-    if (id === lastClickRef.id && now - lastClickRef.time < 350) {
-      onOpenNote(parseInt(id));
+    const nodeId = e.target.id();
+    if (nodeId === lastClickRef.id && now - lastClickRef.time < 350) {
+      onOpenNote(parseInt(nodeId));
       lastClickRef.id = null;
     } else {
-      lastClickRef.id = id;
+      lastClickRef.id = nodeId;
       lastClickRef.time = now;
-      onSelectNote(parseInt(id));
+      onSelectNote(parseInt(nodeId));
     }
   });
 
   cy.on('tap', (e) => {
     if (e.target === cy) {
-      cy.elements().removeClass(ALL_CLASSES);
+      clearHighlightClasses(cy, highlightStateRef);
+      const { setEditingEdge, setConnectSource } = graphHandlersRef.current;
       if (editingEdgeRef.current) setEditingEdge(null);
       if (connectModeRef.current || theoryModeRef.current || shipModeRef.current) setConnectSource(null);
     }
   });
 
-  // Edge click → open label + direction editor
   cy.on('tap', 'edge', (e) => {
+    if (highlightNewModeRef.current) return;
     if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
+    const { setEditingEdge } = graphHandlersRef.current;
     const edge = e.target;
     const connId = edge.data('connId');
     if (!connId) return;
@@ -1079,37 +2005,26 @@ function bindEvents(cy, onSelectNote, onOpenNote, hoverTimerRef, connectModeRef,
   });
 
   cy.on('mouseover', 'node', (e) => {
+    if (highlightNewModeRef.current) return;
+    if (suppressHoverRef.current) return;
     if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
+    if (cy.nodes().length > HOVER_HIGHLIGHT_MAX_NODES) return;
+    const nodeId = e.target.id();
     clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = setTimeout(() => {
+      if (suppressHoverRef.current) return;
       if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
-      const id = e.target.id();
-      cy.elements().removeClass(ALL_CLASSES);
-      const tiers = getTiers(cy, id, MAX_HOPS);
-      cy.nodes().forEach(n => {
-        const t = tiers.get(n.id());
-        n.addClass(t === undefined ? 'dimmed' : `tier-${Math.min(t, MAX_HOPS)}`);
-      });
-      cy.edges().forEach(edge => {
-        if (edge.hasClass('kind-theory') || edge.hasClass('kind-ship')) {
-          const sT = tiers.get(edge.source().id()) ?? Infinity;
-          const tT = tiers.get(edge.target().id()) ?? Infinity;
-          if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
-          else edge.addClass('highlighted');
-          return;
-        }
-        const sT = tiers.get(edge.source().id()) ?? Infinity;
-        const tT = tiers.get(edge.target().id()) ?? Infinity;
-        if (sT === Infinity || tT === Infinity) edge.addClass('dimmed');
-        else edge.addClass(`tier-${Math.min(Math.max(sT, tT), MAX_HOPS)}`);
-      });
-    }, 200);
+      if (cy.nodes().length > HOVER_HIGHLIGHT_MAX_NODES) return;
+      const tiers = getTiersFromAdj(canonAdjRef.current, nodeId, MAX_HOPS);
+      applyTierHighlight(cy, tiers, MAX_HOPS, highlightStateRef);
+    }, HOVER_DELAY_MS);
   });
 
   cy.on('mouseout', 'node', () => {
+    if (highlightNewModeRef.current) return;
     if (connectModeRef.current || pathModeRef.current || theoryModeRef.current || shipModeRef.current) return;
     clearTimeout(hoverTimerRef.current);
-    cy.elements().removeClass(ALL_CLASSES);
+    if (!suppressHoverRef.current) clearHighlightClasses(cy, highlightStateRef);
   });
 }
 
@@ -1141,8 +2056,17 @@ function separateLabels(cy, posKey, maxPasses = 12) {
         const pushX = ((ba.x2 + PAD) - (bb.x1 - PAD)) / 2 * dx;
         const pushY = ((ba.y2 + PAD) - (bb.y1 - PAD)) / 2 * dy;
         const pa = a.position(), pb = b.position();
-        a.position({ x: pa.x - pushX, y: pa.y - pushY });
-        b.position({ x: pb.x + pushX, y: pb.y + pushY });
+        const aLocked = a.locked();
+        const bLocked = b.locked();
+        if (aLocked && bLocked) continue;
+        if (aLocked) {
+          b.position({ x: pb.x + pushX * 2, y: pb.y + pushY * 2 });
+        } else if (bLocked) {
+          a.position({ x: pa.x - pushX * 2, y: pa.y - pushY * 2 });
+        } else {
+          a.position({ x: pa.x - pushX, y: pa.y - pushY });
+          b.position({ x: pb.x + pushX, y: pb.y + pushY });
+        }
         moved = true;
       }
     }
@@ -1196,7 +2120,7 @@ function buildDirectionArrowStyles(theme) {
           'target-arrow-shape': 'triangle',
           'target-arrow-color': t.color,
           'target-arrow-opacity': arrowOp,
-          'arrow-scale': 1.3,
+          'arrow-scale': 1.1,
         },
       },
       {
@@ -1205,7 +2129,7 @@ function buildDirectionArrowStyles(theme) {
           'source-arrow-shape': 'triangle',
           'source-arrow-color': t.color,
           'source-arrow-opacity': arrowOp,
-          'arrow-scale': 1.3,
+          'arrow-scale': 1.1,
         },
       },
       {
@@ -1256,56 +2180,32 @@ function buildKindEdgeStyles(theme) {
  * @param {import('cytoscape').Core|null} cy
  * @param {typeof DEFAULT_EDGE_THEME} theme
  */
+/** Memoized Cytoscape stylesheet JSON — theme edits are infrequent. */
+const styleCacheByTheme = new Map();
+const STYLE_CACHE_VERSION = 6;
+
+/**
+ * Returns cached buildStyle output for a theme object.
+ * @param {typeof DEFAULT_EDGE_THEME} theme
+ * @returns {object[]}
+ */
+function getCachedStyle(theme) {
+  const key = `${STYLE_CACHE_VERSION}:${JSON.stringify(theme)}`;
+  if (!styleCacheByTheme.has(key)) {
+    styleCacheByTheme.set(key, buildStyle(theme));
+  }
+  return styleCacheByTheme.get(key);
+}
+
+/**
+ * Re-applies edge theme stylesheet to a live Cytoscape instance.
+ * @param {import('cytoscape').Core|null} cy
+ * @param {typeof DEFAULT_EDGE_THEME} theme
+ */
 function applyGraphStyle(cy, theme) {
   if (!cy) return;
-  cy.style().fromJson(buildStyle(theme));
+  cy.style().fromJson(getCachedStyle(theme));
   cy.style().update();
-}
-
-/**
- * Returns a Cytoscape edge class for connection_kind (canon / theory / ship).
- * Legacy rows use is_speculative → theory; unknown values default to canon.
- */
-function connectionKindClass(conn) {
-  const k = conn.connection_kind;
-  if (k === 'theory' || k === 'ship') return `kind-${k}`;
-  if (k === 'canon') return 'kind-canon';
-  if (conn.is_speculative) return 'kind-theory';
-  return 'kind-canon';
-}
-
-/**
- * Stable fingerprint of visible graph data — ignores parent re-render array identity.
- * @param {object[]} notes
- * @param {object[]} connections
- * @returns {string}
- */
-function buildGraphFingerprint(notes, connections) {
-  return notes.map(n => `${n.id}:${n.title}:${n.category}`)
-    .concat(connections.map(c => `${c.id}:${c.source_note_id}-${c.target_note_id}:${c.label || ''}:${c.connection_kind || ''}:${c.direction || 'bidirectional'}:${c.is_speculative ? 1 : 0}`))
-    .join('|');
-}
-
-function buildElements(notes, connections) {
-  const nodeIds = new Set(notes.map(n => String(n.id)));
-  return [
-    ...notes.map(note => ({
-      data: { id: String(note.id), label: note.title, category: note.category, color: getCategoryColor(note.category) },
-    })),
-    ...connections
-      .filter(conn => nodeIds.has(String(conn.source_note_id)) && nodeIds.has(String(conn.target_note_id)))
-      .map(conn => ({
-        data: {
-          id: `e${conn.id}`,
-          connId: conn.id,
-          source: String(conn.source_note_id),
-          target: String(conn.target_note_id),
-          label: conn.label || '',
-          direction: conn.direction || 'bidirectional',
-        },
-        classes: `${connectionKindClass(conn)} ${connectionDirectionClass(conn)}`,
-      })),
-  ];
 }
 
 function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
@@ -1330,6 +2230,7 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
   }));
 
   return [
+    { selector: 'core', style: { 'background-color': '#07080e' } },
     {
       selector: 'node',
       style: {
@@ -1337,13 +2238,34 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
         'border-color': 'data(color)', 'border-width': 1.5, 'border-opacity': 0.8,
         'label': 'data(label)', 'color': '#e2d5bb', 'font-family': 'Cinzel, serif', 'font-size': '11px',
         'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 6,
-        'text-background-color': '#07080e', 'text-background-opacity': 0.75, 'text-background-padding': '3px',
+        'text-background-color': '#07080e', 'text-background-opacity': 0.8, 'text-background-padding': '3px',
         'text-wrap': 'ellipsis', 'text-max-width': '120px',
         'width': 34, 'height': 34,
-        'transition-property': 'opacity, width, height, border-width, background-opacity', 'transition-duration': '200ms',
+        'transition-property': 'opacity, width, height, border-width, background-opacity, border-opacity, font-size',
+        'transition-duration': `${HOVER_TRANSITION_MS}ms`,
+        'transition-timing-function': 'ease-in-out',
       },
     },
     ...nodeTierStyles,
+    { selector: 'node.no-node-labels', style: { 'text-opacity': 0 } },
+    {
+      selector: 'node.new-highlight',
+      style: {
+        'border-color': '#e8c060',
+        'border-width': 4,
+        'border-opacity': 1,
+        'overlay-color': '#c8943a',
+        'overlay-opacity': 0.35,
+        'overlay-padding': 10,
+      },
+    },
+    {
+      selector: 'node.new-highlight-flash',
+      style: {
+        'border-width': 5,
+        'overlay-opacity': 0.65,
+      },
+    },
     { selector: 'node.dimmed',     style: { 'opacity': FLOOR_OPACITY } },
     { selector: 'node.path-pick-dim', style: { 'opacity': PATH_FIND_PICK_DIM_OPACITY } },
     { selector: 'edge.path-pick-dim', style: { 'opacity': PATH_FIND_PICK_DIM_OPACITY } },
@@ -1352,14 +2274,18 @@ function buildStyle(edgeTheme = DEFAULT_EDGE_THEME) {
     {
       selector: 'edge',
       style: {
-        'width': 2, 'line-color': canon.color, 'line-opacity': canonB, 'curve-style': 'bezier',
+        'width': 2, 'line-color': canon.color, 'line-opacity': canonB,
+        'curve-style': 'straight',
         'label': 'data(label)', 'font-size': '9px', 'color': canon.color,
         'text-opacity': Math.min(1, canonB * 1.1),
-        'font-family': 'Cinzel, serif', 'text-background-color': '#07080e',
-        'text-background-opacity': 0.7, 'text-background-padding': '2px',
-        'transition-property': 'opacity, line-color, line-opacity, width', 'transition-duration': '200ms',
+        'font-family': 'Cinzel, serif',
+        'text-background-color': '#07080e', 'text-background-opacity': 0.75, 'text-background-padding': '2px',
+        'transition-property': 'opacity, width, line-opacity',
+        'transition-duration': `${HOVER_TRANSITION_MS}ms`,
+        'transition-timing-function': 'ease-in-out',
       },
     },
+    { selector: 'edge.no-edge-labels', style: { 'text-opacity': 0 } },
     ...buildKindEdgeStyles(edgeTheme),
     {
       selector: 'edge.kind-theory.dimmed',
@@ -1515,7 +2441,7 @@ function ChroniclerBrightnessSlider({ value, onChange, accentColor, label }) {
   );
 }
 
-function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRefs = null }) {
+function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRefs = null, showZoomHud = false, onToggleZoomHud = null, zoomHudLive = null }) {
   const [open, setOpen] = useState(false);
   const panelW = 210;
   return (
@@ -1617,6 +2543,40 @@ function LegendPanel({ selectedNoteId, edgeTheme, onEdgeThemeChange, tutorialRef
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {onToggleZoomHud && (
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '10px 0 8px' }}>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.2em', color: 'rgba(200,148,58,0.7)', marginBottom: '8px' }}>ZOOM / FPS</div>
+              {zoomHudLive && (
+                <div style={{ marginBottom: '8px' }}>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '12px', color: '#c8943a' }}>
+                    {zoomHudLive.zoom.toFixed(2)}× ({Math.round(zoomHudLive.zoom * 100)}%)
+                  </div>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(226,213,187,0.55)', marginTop: '3px' }}>
+                    {zoomHudLive.zone}
+                  </div>
+                  <div style={{ fontFamily: 'Cinzel', fontSize: '8px', color: 'rgba(226,213,187,0.4)', marginTop: '2px' }}>
+                    {zoomHudLive.nodes} nodes · {zoomHudLive.edges} edges
+                  </div>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={onToggleZoomHud}
+                style={{
+                  width: '100%', padding: '6px 8px', borderRadius: '3px', cursor: 'pointer',
+                  fontFamily: 'Cinzel', fontSize: '8px', letterSpacing: '0.08em',
+                  background: showZoomHud ? 'rgba(200,148,58,0.15)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${showZoomHud ? 'rgba(200,148,58,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                  color: showZoomHud ? '#c8943a' : 'rgba(226,213,187,0.55)',
+                }}
+              >
+                {showZoomHud ? 'Hide zoom overlay' : 'Show zoom overlay'}
+              </button>
+              <div style={{ fontFamily: 'Cinzel', fontSize: '7px', color: 'rgba(200,148,58,0.4)', marginTop: '6px', lineHeight: 1.4 }}>
+                Overlay also in toolbar: ⌖ Zoom/FPS
+              </div>
             </div>
           )}
           <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '8px', fontFamily: 'Cinzel', fontSize: '7px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.55)' }}>
