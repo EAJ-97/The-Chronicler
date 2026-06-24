@@ -764,7 +764,7 @@ router.put('/:id', authenticateToken, (req, res) => {
     canManage && parent_id === null ? -1 : null,
     canManage && parent_id !== undefined ? parent_id : null,
     canManage ? (parent_id ?? null) : null,
-    sort_order ?? null,
+    canManage && sort_order !== undefined ? sort_order : null,
     (canChangePerms && newVisibility) ? newVisibility : null,
     canFullEdit ? (significance ?? null) : null,
     canFullEdit ? (narrative_weight ?? null) : null,

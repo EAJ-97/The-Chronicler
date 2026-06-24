@@ -5,6 +5,8 @@ import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/c
 import { resolveSidebarIcon, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
 
+/** @typedef {{ nodeId: number, edge: 'before'|'after'|'into' }} DropIndicator */
+
 /**
  * Builds parent_id-linked tree roots for the sidebar (no virtual inherit rows).
  * @param {Array<object>} notes
@@ -61,7 +63,7 @@ const INDENT = 16;
 function TreeNode({
   node, depth, selectedId, onSelect, onCreateNote, onCreateFolder,
   onDelete, expandedIds, onToggleExpand, currentUser, onRename,
-  draggedId, onDragStart, onDragEnd, onDrop, dropTargetId, onSnapshot, onExport, onSync,
+  draggedId, onDragStart, onDragEnd, onDrop, onReorder, dropTargetId, dropIndicator, onDragOverNode, onSnapshot, onExport, onSync,
   allNotes, dmCampaignIds, simulatedRole, isMobile,
   tutorialForceHoverNodeId,
   tutorialActionRefs,
@@ -81,7 +83,7 @@ function TreeNode({
     : simulatedRole ? false
     : node.user_id === currentUser.id;
   const isDragging = draggedId === node.id;
-  const isDropTarget = dropTargetId === node.id;
+  const isDropTarget = dropTargetId === node.id || (dropIndicator?.nodeId === node.id && dropIndicator.edge === 'into');
 
   // Determine if current user is DM of the campaign containing this node
   const isDM = isAdmin || isDmOfNote(node, dmCampaignIds, allNotes);
@@ -107,8 +109,9 @@ function TreeNode({
       : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
     border: `1px solid ${isDropTarget ? 'rgba(200,148,58,0.5)' : isSelected ? 'rgba(200,148,58,0.2)' : 'transparent'}`,
     marginBottom: '1px', gap: '6px', minHeight: isMobile ? '44px' : '28px',
-    transition: 'background 0.1s',
-    opacity: isDragging ? 0.35 : 1,
+    transition: 'opacity 0.15s ease, transform 0.15s ease, background 0.1s',
+    opacity: isDragging ? 0.4 : 1,
+    transform: isDragging ? 'scale(0.98)' : 'none',
     touchAction: 'manipulation',
     WebkitUserSelect: 'none', userSelect: 'none',
   };
@@ -139,22 +142,59 @@ function TreeNode({
 
   return (
     <div>
+      {dropIndicator?.nodeId === node.id && dropIndicator.edge === 'before' && (
+        <div
+          style={{
+            height: '2px',
+            marginLeft: `${indent}px`,
+            marginRight: '8px',
+            marginBottom: '1px',
+            background: 'rgba(200,148,58,0.9)',
+            borderRadius: '1px',
+            boxShadow: '0 0 8px rgba(200,148,58,0.5)',
+          }}
+        />
+      )}
       <div
         style={rowStyle}
         onClick={handleClick}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        onDragOver={e => { e.preventDefault(); e.stopPropagation(); if (isFolder && draggedId !== node.id) e.dataTransfer.dropEffect = 'move'; }}
-        onDrop={e => { e.preventDefault(); e.stopPropagation(); if (isFolder) onDrop(node.id); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!draggedId || draggedId === node.id || !canManage) return;
+          e.dataTransfer.dropEffect = 'move';
+          const rect = e.currentTarget.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          const h = rect.height;
+          if (isFolder && y > h * 0.28 && y < h * 0.72) {
+            onDragOverNode(node.id, 'into');
+          } else if (y < h / 2) {
+            onDragOverNode(node.id, 'before');
+          } else {
+            onDragOverNode(node.id, 'after');
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!draggedId || !canManage) return;
+          if (dropIndicator?.nodeId === node.id && dropIndicator.edge === 'into' && isFolder) {
+            onDrop(node.id);
+          } else if (dropIndicator?.nodeId === node.id && dropIndicator.edge !== 'into') {
+            onReorder(node.id, dropIndicator.edge);
+          }
+        }}
       >
         {/* Drag handle */}
         {canManage && !renaming ? (
           <span
             draggable={!isMobile}
-            onDragStart={e => { e.stopPropagation(); onDragStart(node.id); }}
+            onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; onDragStart(node.id); }}
             onDragEnd={e => { e.stopPropagation(); onDragEnd(); }}
-            title="Drag to move"
-            style={{ fontSize: '10px', color: hovered ? 'rgba(200,148,58,0.4)' : 'transparent', cursor: 'grab', flexShrink: 0, width: '10px', userSelect: 'none' }}
+            title="Drag to reorder or move into a folder"
+            style={{ fontSize: '10px', color: hovered || isDragging ? 'rgba(200,148,58,0.55)' : 'transparent', cursor: isDragging ? 'grabbing' : 'grab', flexShrink: 0, width: '10px', userSelect: 'none', transition: 'color 0.12s' }}
             onClick={e => e.stopPropagation()}
           >⠿</span>
         ) : <span style={{ width: '10px', flexShrink: 0 }} />}
@@ -288,6 +328,19 @@ function TreeNode({
           </span>
         )}
       </div>
+      {dropIndicator?.nodeId === node.id && dropIndicator.edge === 'after' && (
+        <div
+          style={{
+            height: '2px',
+            marginLeft: `${indent}px`,
+            marginRight: '8px',
+            marginTop: '1px',
+            background: 'rgba(200,148,58,0.9)',
+            borderRadius: '1px',
+            boxShadow: '0 0 8px rgba(200,148,58,0.5)',
+          }}
+        />
+      )}
 
       {isFolder && isExpanded && node.children.map(child => (
         <TreeNode
@@ -297,7 +350,8 @@ function TreeNode({
           onDelete={onDelete} expandedIds={expandedIds} onToggleExpand={onToggleExpand}
           currentUser={currentUser} onRename={onRename}
           draggedId={draggedId} onDragStart={onDragStart} onDragEnd={onDragEnd}
-          onDrop={onDrop} dropTargetId={dropTargetId} onSnapshot={onSnapshot} onExport={onExport} onSync={onSync}
+          onDrop={onDrop} onReorder={onReorder} dropTargetId={dropTargetId}
+          dropIndicator={dropIndicator} onDragOverNode={onDragOverNode} onSnapshot={onSnapshot} onExport={onExport} onSync={onSync}
           allNotes={allNotes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
           isMobile={isMobile}
           tutorialForceHoverNodeId={tutorialForceHoverNodeId}
@@ -333,6 +387,7 @@ export default function NoteList({
   onDelete,
   onRename,
   onMove,
+  onReorder,
   onSnapshot,
   onExport,
   onSync,
@@ -352,6 +407,8 @@ export default function NoteList({
   const [activeTag, setActiveTag] = useState(new Set());
   const [draggedId, setDraggedId] = useState(null);
   const [dropTargetId, setDropTargetId] = useState(null);
+  /** @type {[DropIndicator|null, Function]} */
+  const [dropIndicator, setDropIndicator] = useState(null);
   const searchTimer = useRef(null);
   const expandKey = `chronicler_expanded_${currentUser?.id || 'anon'}`;
   const [expandedIds, setExpandedIds] = useState(() => {
@@ -390,13 +447,33 @@ export default function NoteList({
 
   // Drag handlers
   const handleDragStart = useCallback((id) => setDraggedId(id), []);
-  const handleDragEnd = useCallback(() => { setDraggedId(null); setDropTargetId(null); }, []);
+  const handleDragEnd = useCallback(() => {
+    setDraggedId(null);
+    setDropTargetId(null);
+    setDropIndicator(null);
+  }, []);
+
+  const handleDragOverNode = useCallback((nodeId, edge) => {
+    setDropIndicator({ nodeId, edge });
+    if (edge === 'into') setDropTargetId(nodeId);
+    else setDropTargetId(null);
+  }, []);
+
+  const handleReorderDrop = useCallback(async (targetId, edge) => {
+    if (!draggedId || !onReorder) return;
+    const dragId = draggedId;
+    setDraggedId(null);
+    setDropTargetId(null);
+    setDropIndicator(null);
+    await onReorder(dragId, targetId, edge);
+  }, [draggedId, onReorder]);
 
   const handleDrop = useCallback(async (targetFolderId) => {
     if (!draggedId || draggedId === targetFolderId) return;
     if (isDescendant(notes, draggedId, targetFolderId)) return; // can't drop into own child
     setDraggedId(null);
     setDropTargetId(null);
+    setDropIndicator(null);
     setExpandedIds(prev => { const next = new Set(prev); next.add(targetFolderId); return next; }); // auto-expand target
     await onMove(draggedId, targetFolderId);
   }, [draggedId, notes, onMove]);
@@ -407,6 +484,7 @@ export default function NoteList({
     if (!draggedId) return;
     setDraggedId(null);
     setDropTargetId(null);
+    setDropIndicator(null);
     await onMove(draggedId, null);
   }, [draggedId, onMove]);
 
@@ -573,7 +651,9 @@ export default function NoteList({
                 onDelete={onDelete} expandedIds={expandedIds} onToggleExpand={toggleExpand}
                 currentUser={currentUser} onRename={onRename}
                 draggedId={draggedId} onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd} onDrop={handleDrop} dropTargetId={dropTargetId}
+                onDragEnd={handleDragEnd} onDrop={handleDrop} onReorder={handleReorderDrop}
+                dropTargetId={dropTargetId} dropIndicator={dropIndicator}
+                onDragOverNode={handleDragOverNode}
                 onSnapshot={onSnapshot}
                 onExport={onExport}
                 onSync={onSync}

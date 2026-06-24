@@ -15,6 +15,7 @@ import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
 import api from '../api.js';
 import { ddbPost, isDdbLinkedNote } from '../utils/ddbCobalt.js';
+import { planSiblingReorder, sortOrderForFolderEnd } from '../utils/noteSortOrder.js';
 import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
@@ -761,7 +762,28 @@ export default function Dashboard({ user, onLogout }) {
           if (!ok) return;
         }
       }
-      await api.put(`/notes/${noteId}`, { parent_id: newParentId ?? null });
+      const sort_order = sortOrderForFolderEnd(notes, newParentId ?? null);
+      await api.put(`/notes/${noteId}`, { parent_id: newParentId ?? null, sort_order });
+      await loadData();
+    } catch (err) { console.error(err); }
+  };
+
+  /**
+   * Reorders a note before or after a sibling in the sidebar tree (DM / owner / admin).
+   * @param {number} draggedId
+   * @param {number} targetId
+   * @param {'before'|'after'} edge
+   */
+  const handleReorderNote = async (draggedId, targetId, edge) => {
+    try {
+      const updates = planSiblingReorder(notes, draggedId, targetId, edge);
+      if (!updates.length) return;
+      for (const row of updates) {
+        await api.put(`/notes/${row.id}`, {
+          parent_id: row.parent_id,
+          sort_order: row.sort_order,
+        });
+      }
       await loadData();
     } catch (err) { console.error(err); }
   };
@@ -872,6 +894,7 @@ export default function Dashboard({ user, onLogout }) {
     onDelete: handleDeleteNote,
     onRename: handleRenameNote,
     onMove: handleMoveNote,
+    onReorder: handleReorderNote,
     onSnapshot: (folderId) => setSnapshotFolder(notes.find(n => n.id === folderId)),
     onExport: async (folderId, folderTitle) => {
       try {
