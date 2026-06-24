@@ -553,6 +553,98 @@ migrate('042_connections_direction', () => {
   }
 });
 
+// Campaign timeline: ordered blocks (eras/chapters) and note pins on a horizontal axis
+migrate('043_campaign_timeline', () => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS timeline_blocks (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      folder_id     INTEGER NOT NULL,
+      title         TEXT    DEFAULT '',
+      sort_order    REAL    DEFAULT 0,
+      width_weight  REAL    DEFAULT 1,
+      created_by    INTEGER NOT NULL,
+      created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (folder_id)  REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    CREATE TABLE IF NOT EXISTS timeline_points (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      folder_id      INTEGER NOT NULL,
+      block_id       INTEGER DEFAULT NULL,
+      note_id        INTEGER NOT NULL,
+      sort_order     REAL    DEFAULT 0,
+      label_override TEXT    DEFAULT NULL,
+      created_by     INTEGER NOT NULL,
+      created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (folder_id)  REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (block_id)   REFERENCES timeline_blocks(id) ON DELETE SET NULL,
+      FOREIGN KEY (note_id)    REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id),
+      UNIQUE(folder_id, note_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_timeline_blocks_folder ON timeline_blocks(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_timeline_points_folder ON timeline_points(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_timeline_points_block ON timeline_points(block_id);
+  `);
+});
+
+// Timeline points: user-specified time label on the central axis (replaces block grouping in UI)
+migrate('044_timeline_time_label', () => {
+  try {
+    db.exec("ALTER TABLE timeline_points ADD COLUMN time_label TEXT DEFAULT ''");
+  } catch {
+    /* column may already exist */
+  }
+});
+
+// Timeline boxes on axis: anchor + branch geometry; note_id optional until DM fills the box
+migrate('045_timeline_box_geometry', () => {
+  const hasAnchor = db.prepare(
+    "SELECT 1 FROM pragma_table_info('timeline_points') WHERE name = 'anchor_x'"
+  ).get();
+  if (hasAnchor) return;
+
+  db.exec(`
+    CREATE TABLE timeline_points_v2 (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      folder_id      INTEGER NOT NULL,
+      block_id       INTEGER DEFAULT NULL,
+      note_id        INTEGER DEFAULT NULL,
+      anchor_x       REAL    NOT NULL DEFAULT 0,
+      end_x          REAL    NOT NULL DEFAULT 0,
+      end_y          REAL    NOT NULL DEFAULT -100,
+      path_json      TEXT    DEFAULT NULL,
+      sort_order     REAL    DEFAULT 0,
+      time_label     TEXT    DEFAULT '',
+      label_override TEXT    DEFAULT NULL,
+      created_by     INTEGER NOT NULL,
+      created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (folder_id)  REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (block_id)   REFERENCES timeline_blocks(id) ON DELETE SET NULL,
+      FOREIGN KEY (note_id)    REFERENCES notes(id) ON DELETE SET NULL,
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    INSERT INTO timeline_points_v2 (
+      id, folder_id, block_id, note_id, anchor_x, end_x, end_y, path_json,
+      sort_order, time_label, label_override, created_by, created_at
+    )
+    SELECT
+      id, folder_id, block_id, note_id,
+      COALESCE((sort_order + 1) * 160, 160),
+      0,
+      -100,
+      NULL,
+      sort_order, time_label, label_override, created_by, created_at
+    FROM timeline_points;
+    DROP TABLE timeline_points;
+    ALTER TABLE timeline_points_v2 RENAME TO timeline_points;
+    CREATE INDEX IF NOT EXISTS idx_timeline_points_folder ON timeline_points(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_timeline_points_block ON timeline_points(block_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_timeline_points_note_once
+      ON timeline_points(folder_id, note_id) WHERE note_id IS NOT NULL;
+  `);
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

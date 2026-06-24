@@ -18,8 +18,8 @@ import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
 
-/** Set to true to show the Timeline tab (ITEM_9). Hidden by default; implementation kept in TimelineView.jsx. */
-const SHOW_TIMELINE_TAB = false;
+/** Campaign timeline tab — horizontal note pins curated by the DM. */
+const SHOW_TIMELINE_TAB = true;
 
 const LS_HIDE_DEMO = 'chronicler_hide_demo_folders';
 
@@ -552,6 +552,9 @@ export default function Dashboard({ user, onLogout }) {
           }
           if (msg.type === 'journal_changed') {
             window.dispatchEvent(new CustomEvent('ws_journal', { detail: e.data }));
+          }
+          if (msg.type === 'timeline_changed') {
+            window.dispatchEvent(new CustomEvent('ws_timeline', { detail: e.data }));
           }
         } catch {}
       };
@@ -1453,7 +1456,15 @@ export default function Dashboard({ user, onLogout }) {
           )}
 
           {SHOW_TIMELINE_TAB && view === 'timeline' && (
-            <TimelineView notes={notesForList} currentUser={user} />
+            <TimelineView
+              notes={notesForList}
+              currentUser={user}
+              dmCampaignIds={effectiveDmCampaignIds}
+              onSelectNote={(id) => {
+                setSelectedNoteId(id);
+                setView('notes');
+              }}
+            />
           )}
         </div>
       </div>
