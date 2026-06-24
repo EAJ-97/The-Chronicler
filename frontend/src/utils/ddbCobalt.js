@@ -110,3 +110,15 @@ export function parseCharacterIdFromInput(input) {
   const m = s.match(/\/characters\/(\d+)/i) || s.match(/^(\d+)$/);
   return m ? parseInt(m[1], 10) : null;
 }
+
+/**
+ * True when a Chronicler note is linked to a D&D Beyond character import.
+ * @param {object|null|undefined} note
+ * @returns {boolean}
+ */
+export function isDdbLinkedNote(note) {
+  if (!note) return false;
+  if (note.ddb_character_id) return true;
+  if (Array.isArray(note.tags) && note.tags.includes('dnd-beyond')) return true;
+  return /<!--\s*ddb-character-id:\s*\d+\s*-->/i.test(String(note.content || ''));
+}

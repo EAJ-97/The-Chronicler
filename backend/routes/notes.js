@@ -136,7 +136,7 @@ router.get('/', authenticateToken, (req, res) => {
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
     n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id,
-    n.display_icon, n.display_summary, n.is_completed, u.username AS author`;
+    n.display_icon, n.display_summary, n.is_completed, n.ddb_character_id, u.username AS author`;
 
   let notes;
   if (listingAdminAll) {

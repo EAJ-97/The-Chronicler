@@ -645,6 +645,24 @@ migrate('045_timeline_box_geometry', () => {
   `);
 });
 
+// D&D Beyond linked character notes: id, flavor hash, last sync timestamp
+migrate('046_notes_ddb_link', () => {
+  try { db.exec('ALTER TABLE notes ADD COLUMN ddb_character_id INTEGER DEFAULT NULL'); } catch {}
+  try { db.exec('ALTER TABLE notes ADD COLUMN ddb_flavor_hash TEXT DEFAULT NULL'); } catch {}
+  try { db.exec('ALTER TABLE notes ADD COLUMN ddb_flavor_synced_at DATETIME DEFAULT NULL'); } catch {}
+
+  const rows = db.prepare(`
+    SELECT id, content FROM notes
+    WHERE ddb_character_id IS NULL AND content LIKE '%ddb-character-id:%'
+  `).all();
+  const update = db.prepare('UPDATE notes SET ddb_character_id = ? WHERE id = ?');
+  const re = /<!--\s*ddb-character-id:\s*(\d+)\s*-->/i;
+  for (const row of rows) {
+    const m = String(row.content || '').match(re);
+    if (m) update.run(parseInt(m[1], 10), row.id);
+  }
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

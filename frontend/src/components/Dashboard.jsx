@@ -14,6 +14,7 @@ import CampaignModal from './CampaignModal.jsx';
 import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
 import api from '../api.js';
+import { ddbPost, isDdbLinkedNote } from '../utils/ddbCobalt.js';
 import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
@@ -276,6 +277,9 @@ export default function Dashboard({ user, onLogout }) {
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [showIntegrity, setShowIntegrity] = useState(false);
   const [showDdbImport, setShowDdbImport] = useState(false);
+  /** Result of background D&D Beyond flavor check for the open linked note. */
+  const [ddbFlavorUpdate, setDdbFlavorUpdate] = useState(null);
+  const [ddbFlavorDismissed, setDdbFlavorDismissed] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [tutorialForceHoverNodeId, setTutorialForceHoverNodeId] = useState(null);
@@ -610,6 +614,42 @@ export default function Dashboard({ user, onLogout }) {
       );
     }).catch(() => {});
   }, [selectedNoteId, selectedNoteHasContent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Reset D&D Beyond flavor banner when switching notes. */
+  useEffect(() => {
+    setDdbFlavorUpdate(null);
+    setDdbFlavorDismissed(false);
+  }, [selectedNoteId]);
+
+  /**
+   * Background flavor check when a linked note's content is loaded (notify-only; user applies manually).
+   */
+  useEffect(() => {
+    if (!selectedNoteId || !selectedNote || selectedNote.content == null) return;
+    if (!isDdbLinkedNote(selectedNote)) return;
+
+    let cancelled = false;
+    ddbPost('/flavor/check', { note_id: selectedNoteId, force: true })
+      .then((r) => {
+        if (!cancelled) setDdbFlavorUpdate(r.data);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedNoteId, selectedNote?.content, selectedNote?.ddb_character_id, selectedNote?.tags]);
+
+  /**
+   * Applies D&D Beyond flavor updates to the open note after user confirmation.
+   */
+  const handleApplyDdbFlavor = useCallback(async () => {
+    if (!selectedNoteId) return null;
+    const res = await ddbPost('/flavor/apply', { note_id: selectedNoteId });
+    setNotes((prev) =>
+      prev.map((n) => (n.id === selectedNoteId ? { ...n, ...res.data } : n))
+    );
+    setDdbFlavorUpdate(null);
+    setDdbFlavorDismissed(false);
+    return res.data;
+  }, [selectedNoteId]);
 
   /**
    * Pushes a note id onto the reference peek stack and loads full note content via GET /notes/:id when needed.
@@ -1327,6 +1367,10 @@ export default function Dashboard({ user, onLogout }) {
                   isMobile={isMobile}
                   onBackToList={() => setMobileSidebarOpen(true)}
                   onOpenReferenceNote={openReferenceNote}
+                  ddbFlavorUpdate={ddbFlavorUpdate}
+                  ddbFlavorDismissed={ddbFlavorDismissed}
+                  onDismissDdbFlavor={() => setDdbFlavorDismissed(true)}
+                  onApplyDdbFlavor={handleApplyDdbFlavor}
                   onSelectNote={(id) => {
                     setSelectedNoteId(id);
                     loadData();

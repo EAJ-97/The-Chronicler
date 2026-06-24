@@ -310,7 +310,7 @@ async function fetchCharacter(cobalt, characterId) {
     bearer = await getBearerToken(trimmed);
   }
 
-  const url = `${CHARACTER_BASE}/character/${id}?includeCustomItems=true`;
+  const url = `${CHARACTER_BASE}/character/${id}?includeCustomItems=true&_=${Date.now()}`;
   const res = await fetch(url, { headers: ddbHeaders(bearer, trimmed) });
 
   if (res.status === 403 || res.status === 401) {

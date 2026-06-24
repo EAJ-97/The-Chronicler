@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isNoteUnderCompletedArchive } = require('../utils/access');
+const { isAdmin, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const {
   testCobalt,
@@ -10,6 +10,18 @@ const {
   parseCharacterId,
 } = require('../utils/ddbClient');
 const { characterToMarkdown } = require('../utils/ddbCharacterToMarkdown');
+const { downloadCharacterAvatar } = require('../utils/ddbAvatar');
+const {
+  parseDdbCharacterId,
+  isDdbLinkedNote,
+  buildFlavorMarkdown,
+  flavorHash,
+  isNoteOnCooldown,
+  recordNoteCheck,
+  clearNoteCheckCooldown,
+  compareFlavor,
+  contentPreview,
+} = require('../utils/ddbFlavorSync');
 
 const router = express.Router();
 
@@ -35,8 +47,38 @@ function assertRateLimit(userId) {
   if (bucket.count > RATE_LIMIT) {
     const err = new Error('Too many D&D Beyond requests. Try again in an hour.');
     err.status = 429;
+    err.code = 'DDB_RATE_LIMIT';
     throw err;
   }
+}
+
+/**
+ * True when the user may view the note (mirrors notes route canSee).
+ * @param {number} noteId
+ * @param {number} userId
+ * @param {boolean} admin
+ * @returns {boolean}
+ */
+function canSeeNote(noteId, userId, admin) {
+  if (admin) return true;
+  const note = db.prepare('SELECT user_id, visibility FROM notes WHERE id = ?').get(noteId);
+  if (!note) return false;
+  if (note.user_id === userId) return true;
+  if (note.visibility === 'shared') return true;
+  return isGrantedUser(noteId, userId);
+}
+
+/**
+ * True when the user may fully edit note content (mirrors notes PUT canFullEdit).
+ * @param {object} note
+ * @param {number} userId
+ * @param {boolean} admin
+ * @returns {boolean}
+ */
+function canFullEditNote(note, userId, admin) {
+  if (admin) return true;
+  if (note.user_id === userId) return true;
+  return isGrantedUser(note.id, userId);
 }
 
 /**
@@ -110,15 +152,16 @@ function validateImportParent(userId, parentId) {
 }
 
 /**
- * Creates an npc note under parent_id with inherited visibility and grants.
+ * Creates an npc note under parent_id with inherited visibility, grants, and optional DDB link metadata.
  * @param {number} userId
  * @param {number} parentId
  * @param {string} title
  * @param {string} content
  * @param {string[]} tags
+ * @param {{ displayIcon?: string|null, characterId?: number|null, flavorHashValue?: string|null }} [ddbMeta]
  * @returns {object}
  */
-function createImportedNote(userId, parentId, title, content, tags) {
+function createImportedNote(userId, parentId, title, content, tags, ddbMeta = {}) {
   const parent = validateImportParent(userId, parentId);
   const visibility = parent.visibility || 'hidden';
   const inheritedGrants = db
@@ -126,10 +169,28 @@ function createImportedNote(userId, parentId, title, content, tags) {
     .all(parentId)
     .map((r) => r.user_id);
 
+  const displayIcon = ddbMeta.displayIcon || null;
+  const characterId = ddbMeta.characterId ?? null;
+  const hash = ddbMeta.flavorHashValue ?? null;
+  const syncedAt = hash ? new Date().toISOString() : null;
+
   const result = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility, is_world)
-    VALUES (?, ?, ?, ?, 0, 0, 'npc', '', 0, ?, 0)
-  `).run(userId, parentId, title.trim(), content, visibility);
+    INSERT INTO notes (
+      user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order,
+      visibility, is_world, display_icon, ddb_character_id, ddb_flavor_hash, ddb_flavor_synced_at
+    )
+    VALUES (?, ?, ?, ?, 0, 0, 'npc', '', 0, ?, 0, ?, ?, ?, ?)
+  `).run(
+    userId,
+    parentId,
+    title.trim(),
+    content,
+    visibility,
+    displayIcon,
+    characterId,
+    hash,
+    syncedAt,
+  );
 
   const noteId = result.lastInsertRowid;
   saveTags(noteId, tags);
@@ -148,20 +209,50 @@ function createImportedNote(userId, parentId, title, content, tags) {
  * @returns {import('express').Response|null}
  */
 function sendDdbError(err, res) {
+  if (err.code === 'DDB_RATE_LIMIT' || err.status === 429) {
+    return res.status(429).json({ error: err.message, ddb_status: 'rate_limited' });
+  }
   if (err.status) return res.status(err.status).json({ error: err.message });
   if (err.code === 'DDB_AUTH' || err.code === 'DDB_NO_COBALT') {
     return res.status(422).json({ error: err.message, ddb: true });
   }
   if (err.code === 'DDB_FORBIDDEN') {
-    return res.status(403).json({ error: err.message });
+    return res.status(403).json({ error: err.message, ddb_status: 'private' });
   }
   if (err.code === 'DDB_NOT_FOUND' || err.code === 'DDB_BAD_ID') {
-    return res.status(404).json({ error: err.message });
+    return res.status(404).json({ error: err.message, ddb_status: 'deleted' });
   }
   if (err.code === 'DDB_UPSTREAM') {
     return res.status(502).json({ error: err.message });
   }
   return null;
+}
+
+/**
+ * Loads a note for DDB flavor operations; throws when missing or not linked.
+ * @param {number} noteId
+ * @returns {{ note: object, tags: string[] }}
+ */
+function loadLinkedNote(noteId) {
+  const note = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(noteId);
+  if (!note) {
+    const err = new Error('Note not found');
+    err.status = 404;
+    throw err;
+  }
+  const tags = db.prepare('SELECT tag FROM note_tags WHERE note_id = ?').all(noteId).map((r) => r.tag);
+  if (!isDdbLinkedNote(note, tags)) {
+    const err = new Error('This note is not linked to D&D Beyond');
+    err.status = 400;
+    throw err;
+  }
+  const characterId = parseDdbCharacterId(note);
+  if (!characterId) {
+    const err = new Error('D&D Beyond character id not found on this note');
+    err.status = 400;
+    throw err;
+  }
+  return { note, tags, characterId };
 }
 
 /** POST /auth/test — validate cobalt cookie (not stored server-side). */
@@ -230,7 +321,14 @@ router.post('/import', authenticateToken, async (req, res) => {
 
     const data = await fetchCharacter(cobalt, characterId);
     const { title, content, tags } = characterToMarkdown(data);
-    const note = createImportedNote(req.user.id, parentId, title, content, tags);
+    const displayIcon = await downloadCharacterAvatar(data);
+    const hash = flavorHash(content);
+
+    const note = createImportedNote(req.user.id, parentId, title, content, tags, {
+      displayIcon,
+      characterId,
+      flavorHashValue: hash,
+    });
 
     if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
     return res.status(201).json(withTagsAndPerms(note));
@@ -239,6 +337,131 @@ router.post('/import', authenticateToken, async (req, res) => {
     if (sent) return sent;
     console.error('ddb import:', err.message);
     return res.status(500).json({ error: 'Import failed' });
+  }
+});
+
+/** POST /flavor/check — compare stored flavor with live D&D Beyond (notify-only; no mutation). */
+router.post('/flavor/check', authenticateToken, async (req, res) => {
+  try {
+    const noteId = parseInt(req.body?.note_id ?? req.body?.noteId, 10);
+    if (!Number.isFinite(noteId)) return res.status(400).json({ error: 'note_id is required' });
+
+    const admin = isAdmin(req.user.id);
+    if (!canSeeNote(noteId, req.user.id, admin)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { note, characterId } = loadLinkedNote(noteId);
+
+    const force = req.body?.force === true || req.body?.force === 1 || req.body?.force === '1';
+    if (force) clearNoteCheckCooldown(req.user.id, noteId);
+
+    if (!force && isNoteOnCooldown(req.user.id, noteId)) {
+      return res.json({
+        has_updates: false,
+        ddb_status: 'cooldown',
+        checked_at: new Date().toISOString(),
+      });
+    }
+
+    assertRateLimit(req.user.id);
+    const cobalt = req.body?.cobalt ? String(req.body.cobalt).trim() : '';
+
+    let data;
+    try {
+      data = await fetchCharacter(cobalt, characterId);
+    } catch (err) {
+      recordNoteCheck(req.user.id, noteId);
+      if (err.code === 'DDB_NOT_FOUND') {
+        return res.json({
+          has_updates: false,
+          ddb_status: 'deleted',
+          checked_at: new Date().toISOString(),
+        });
+      }
+      if (err.code === 'DDB_FORBIDDEN') {
+        return res.json({
+          has_updates: false,
+          ddb_status: 'private',
+          error: err.message,
+          checked_at: new Date().toISOString(),
+        });
+      }
+      throw err;
+    }
+
+    recordNoteCheck(req.user.id, noteId);
+    const fresh = buildFlavorMarkdown(data);
+    const comparison = compareFlavor(note, fresh);
+
+    if (!comparison.has_updates && !note.ddb_flavor_hash) {
+      db.prepare(
+        'UPDATE notes SET ddb_flavor_hash = ?, ddb_flavor_synced_at = CURRENT_TIMESTAMP WHERE id = ?'
+      ).run(comparison.fresh_hash, noteId);
+    }
+
+    return res.json({
+      has_updates: comparison.has_updates,
+      ddb_status: 'ok',
+      title: fresh.title,
+      content_preview: contentPreview(fresh.content),
+      checked_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    const sent = sendDdbError(err, res);
+    if (sent) return sent;
+    console.error('ddb flavor/check:', err.message);
+    return res.status(500).json({ error: 'Flavor check failed' });
+  }
+});
+
+/** POST /flavor/apply — re-fetch D&D Beyond flavor and update note content (title only; not display_icon). */
+router.post('/flavor/apply', authenticateToken, async (req, res) => {
+  try {
+    const noteId = parseInt(req.body?.note_id ?? req.body?.noteId, 10);
+    if (!Number.isFinite(noteId)) return res.status(400).json({ error: 'note_id is required' });
+
+    const admin = isAdmin(req.user.id);
+    if (!canSeeNote(noteId, req.user.id, admin)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const { note, characterId } = loadLinkedNote(noteId);
+
+    if (!canFullEditNote(note, req.user.id, admin)) {
+      return res.status(403).json({ error: 'You do not have permission to edit this note' });
+    }
+
+    if (isNoteUnderCompletedArchive(noteId) && !admin) {
+      return res.status(403).json({
+        error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
+      });
+    }
+
+    const demoErr = demoMutateForbiddenMessage(req.user.id, noteId);
+    if (demoErr) return res.status(403).json({ error: demoErr });
+
+    assertRateLimit(req.user.id);
+    const cobalt = req.body?.cobalt ? String(req.body.cobalt).trim() : '';
+    const data = await fetchCharacter(cobalt, characterId);
+    const fresh = buildFlavorMarkdown(data);
+    const hash = flavorHash(fresh.content);
+
+    db.prepare(`
+      UPDATE notes
+      SET title = ?, content = ?, ddb_character_id = ?, ddb_flavor_hash = ?,
+          ddb_flavor_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(fresh.title, fresh.content, characterId, hash, noteId);
+
+    const updated = db.prepare('SELECT * FROM notes WHERE id = ?').get(noteId);
+    if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
+    return res.json(withTagsAndPerms(updated));
+  } catch (err) {
+    const sent = sendDdbError(err, res);
+    if (sent) return sent;
+    console.error('ddb flavor/apply:', err.message);
+    return res.status(500).json({ error: 'Flavor apply failed' });
   }
 });
 

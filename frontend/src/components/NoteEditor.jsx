@@ -22,6 +22,7 @@ import {
   isManagedSidebarIconUrl,
 } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
+import { isDdbLinkedNote } from '../utils/ddbCobalt.js';
 
 /**
  * If the cursor is in an active @mention segment on the current line, returns the query text (may
@@ -229,6 +230,11 @@ export default function NoteEditor({
   onBackToList,
   /** Open a referenced note in the side peek stack (e.g. `note:` link in preview or “Open source note”). */
   onOpenReferenceNote,
+  /** Background D&D Beyond flavor check result from Dashboard (notify-only sync). */
+  ddbFlavorUpdate = null,
+  ddbFlavorDismissed = false,
+  onDismissDdbFlavor,
+  onApplyDdbFlavor,
   /** After AI creates a note (NPC / continuity), select it in the sidebar and refresh the list. */
   onSelectNote,
   /** Tutorial: request showing a particular root tools tab ('icons'|'ai'|'continuity'). */
@@ -274,6 +280,7 @@ export default function NoteEditor({
   const [uploadingSidebarIcon, setUploadingSidebarIcon] = useState(false);
   /** User-visible error from the last sidebar icon upload attempt (403/400 etc.). */
   const [sidebarIconUploadErr, setSidebarIconUploadErr] = useState(null);
+  const [ddbFlavorApplying, setDdbFlavorApplying] = useState(false);
   const titleInputRef = useRef(null);
   // Permissions
   const [noteVisibility, setNoteVisibility] = useState(note?.visibility || 'hidden');
@@ -445,6 +452,13 @@ export default function NoteEditor({
   );
   const showContinuityTab = showAiToolsTab;
   const showRootToolsTabBar = showIconsTab || showAiToolsTab;
+
+  /** D&D Beyond import portrait shown under the title (full size, not sidebar thumbnail). */
+  const ddbPortraitUrl = useMemo(() => {
+    if (!note || note.is_folder || !isDdbLinkedNote(note)) return null;
+    const icon = displayIcon || note.display_icon || '';
+    return isManagedSidebarIconUrl(icon) ? icon.trim() : null;
+  }, [note, displayIcon]);
 
   /**
    * All descendant folders under continuityFolderId (recursive), sorted by title — NPC target picker.
@@ -1799,6 +1813,124 @@ export default function NoteEditor({
             This campaign or world is marked <strong style={{ color: '#c8943a' }}>completed</strong>. Notes and journal are read-only. A DM can clear completion on the world or campaign root folder.
           </div>
         )}
+        {ddbFlavorUpdate?.ddb_status === 'private' && !ddbFlavorDismissed && (
+          <div
+            style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(139,196,226,0.28)',
+              background: 'rgba(139,196,226,0.07)',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '13px',
+              color: 'rgba(226,213,187,0.82)',
+              lineHeight: 1.45,
+            }}
+          >
+            {ddbFlavorUpdate.error || 'This character is private on D&D Beyond.'}{' '}
+            Set the character to Public, or connect with your Cobalt cookie via Import D&D Beyond.
+          </div>
+        )}
+        {ddbFlavorUpdate?.ddb_status === 'deleted' && !ddbFlavorDismissed && (
+          <div
+            style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(200,148,58,0.22)',
+              background: 'rgba(200,148,58,0.06)',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '13px',
+              color: 'rgba(226,213,187,0.75)',
+              lineHeight: 1.45,
+            }}
+          >
+            This character is no longer available on D&D Beyond. Your Chronicler copy is unchanged.
+            <button
+              type="button"
+              onClick={() => onDismissDdbFlavor?.()}
+              style={{
+                marginLeft: '12px',
+                background: 'transparent',
+                border: 'none',
+                color: 'rgba(200,148,58,0.65)',
+                cursor: 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '10px',
+                letterSpacing: '0.08em',
+              }}
+            >
+              DISMISS
+            </button>
+          </div>
+        )}
+        {ddbFlavorUpdate?.has_updates && !ddbFlavorDismissed && !dirty && (
+          <div
+            style={{
+              marginBottom: '12px',
+              padding: '10px 12px',
+              borderRadius: '4px',
+              border: '1px solid rgba(139,196,226,0.35)',
+              background: 'rgba(139,196,226,0.08)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '10px',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '13px',
+              color: 'rgba(226,213,187,0.88)',
+              lineHeight: 1.45,
+            }}
+          >
+            <span style={{ flex: '1 1 200px' }}>
+              D&D Beyond has updated flavor text for this character.
+            </span>
+            {canEdit && onApplyDdbFlavor && (
+              <button
+                type="button"
+                disabled={ddbFlavorApplying}
+                onClick={async () => {
+                  setDdbFlavorApplying(true);
+                  try {
+                    await onApplyDdbFlavor();
+                  } catch {
+                    /* api.js handles auth reload */
+                  } finally {
+                    setDdbFlavorApplying(false);
+                  }
+                }}
+                style={{
+                  ...S.saveBtn(false),
+                  marginLeft: 0,
+                  color: '#8bc4e2',
+                  borderColor: 'rgba(139,196,226,0.45)',
+                  minHeight: '36px',
+                  padding: '6px 14px',
+                }}
+              >
+                {ddbFlavorApplying ? 'Applying…' : 'Apply update'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onDismissDdbFlavor?.()}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '4px',
+                color: 'rgba(226,213,187,0.55)',
+                cursor: 'pointer',
+                fontFamily: 'Cinzel',
+                fontSize: '10px',
+                letterSpacing: '0.08em',
+                padding: '6px 12px',
+                minHeight: '36px',
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', marginLeft: '-8px' }}>
             <button
@@ -1858,6 +1990,23 @@ export default function NoteEditor({
             </div>
           )}
         </div>
+        {ddbPortraitUrl && (
+          <div style={{ marginBottom: '16px' }}>
+            <img
+              src={ddbPortraitUrl}
+              alt={`${title || note?.title || 'Character'} portrait from D&D Beyond`}
+              style={{
+                display: 'block',
+                maxWidth: 'min(300px, 100%)',
+                width: 'auto',
+                height: 'auto',
+                borderRadius: '6px',
+                border: '1px solid rgba(200,148,58,0.28)',
+                boxShadow: '0 6px 24px rgba(0,0,0,0.35)',
+              }}
+            />
+          </div>
+        )}
         <div style={{ ...S.metaRow, WebkitOverflowScrolling: 'touch' }} className="toolbar-scroll">
           {!note?.is_folder && <select
             style={{ ...S.select, borderColor: `${getCategoryColor(category)}50`, color: getCategoryColor(category), ...(isMobile ? { minHeight: '44px', fontSize: '14px' } : {}) }}

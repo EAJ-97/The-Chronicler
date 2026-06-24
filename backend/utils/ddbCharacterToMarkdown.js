@@ -22,7 +22,7 @@ const SIZE_BY_ID = {
 };
 
 /**
- * Strips HTML tags for markdown-safe plain text snippets.
+ * Strips HTML tags for markdown-safe plain text snippets (single-line friendly fields).
  * @param {string} html
  * @returns {string}
  */
@@ -36,6 +36,30 @@ function stripHtml(html) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/\s+\n/g, '\n')
+    .trim();
+}
+
+/**
+ * Converts DDB HTML flavor fields to markdown paragraphs (preserves blank lines between blocks).
+ * Handles: two adjacent <p> tags → paragraph break; <br> within a paragraph → line break.
+ * @param {string} html
+ * @returns {string}
+ */
+function htmlToFlavorText(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<p[^>]*>/gi, '')
+    .replace(/<div[^>]*>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -54,7 +78,21 @@ function pickText(...values) {
 }
 
 /**
- * Normalizes DDB trait/notes fields that may be string or array.
+ * Returns the first non-empty flavor text from candidates (paragraph-aware HTML conversion).
+ * @param {...unknown} values
+ * @returns {string}
+ */
+function pickFlavorText(...values) {
+  for (const v of values) {
+    if (v == null) continue;
+    const s = htmlToFlavorText(String(v)).trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+/**
+ * Normalizes DDB trait/notes fields that may be string or array (backstory, allies, traits, etc.).
  * @param {unknown} value
  * @returns {string}
  */
@@ -63,13 +101,14 @@ function normalizeTraitText(value) {
     return value
       .map((entry) => {
         if (entry == null) return '';
-        if (typeof entry === 'string') return stripHtml(entry);
-        return pickText(entry.text, entry.value, entry.description, entry.name);
+        if (typeof entry === 'string') return htmlToFlavorText(entry);
+        return pickFlavorText(entry.text, entry.value, entry.description, entry.name);
       })
       .filter(Boolean)
-      .join('\n');
+      .join('\n\n');
   }
-  return pickText(value);
+  if (typeof value === 'string') return htmlToFlavorText(value);
+  return pickFlavorText(value);
 }
 
 /**
@@ -119,7 +158,7 @@ function readBackgroundFeature(data) {
   const bgDef = Object.keys(customDef).length > 0 ? customDef : (bg.definition || {});
 
   const name = pickText(bgDef.featureName);
-  const description = pickText(
+  const description = pickFlavorText(
     bgDef.featureDescription,
     bgDef.featureSnippet,
     bgDef.snippet,
@@ -137,7 +176,7 @@ function readBackgroundFeature(data) {
   if (fromFeatures) {
     return {
       name: pickText(fromFeatures.definition?.name, fromFeatures.name),
-      description: pickText(fromFeatures.definition?.snippet, fromFeatures.definition?.description),
+      description: pickFlavorText(fromFeatures.definition?.snippet, fromFeatures.definition?.description),
     };
   }
 
@@ -326,6 +365,17 @@ function characterToMarkdown(data) {
   };
 }
 
+/**
+ * Stable string used for flavor sync hashing (content body only, normalized).
+ * @param {string} content - Full note markdown from characterToMarkdown
+ * @returns {string}
+ */
+function flavorHashInput(content) {
+  return String(content || '').replace(/\r\n/g, '\n').trim();
+}
+
 module.exports = {
   characterToMarkdown,
+  htmlToFlavorText,
+  flavorHashInput,
 };
