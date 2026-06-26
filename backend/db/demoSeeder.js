@@ -861,10 +861,21 @@ Escort Zara from the Free City of Maren to the Borderlands and locate her brothe
     mkEntry(cs1,'c2',A,'Session ended camped in the foothills, one day from the Borderlands. Zara spoke more about Renn in the evening — before the raid, he was studying to be a mapmaker. She carried one of his unfinished maps.',0,'2025-02-05 19:00:00');
 
     // Sample DM-only campaign folder notes (visible to all DMs; demo is read-only for non-admins in API).
-    const dmFolderBlurb = `## DM eyes only
-Use this space for clocks, fronts, and encounter math. Players only see the **party** tab of this folder — this **DM** tab is for your session prep.`;
-    db.prepare('UPDATE notes SET folder_dm_content = ? WHERE id = ?').run(dmFolderBlurb, noteId['c1']);
-    db.prepare('UPDATE notes SET folder_dm_content = ? WHERE id = ?').run(dmFolderBlurb, noteId['c2']);
+    const dmFolderTabs = JSON.stringify([
+      {
+        id: 'demo-prep',
+        title: 'Session prep',
+        content: `## DM eyes only
+Use tabs to organize clocks, fronts, and encounter math. Players only see the **party** column — these **DM** tabs are hidden from them.`,
+      },
+      {
+        id: 'demo-secrets',
+        title: 'Secrets',
+        content: '- Veldrath may betray the party in Act II\n- The sunken vale holds an older god',
+      },
+    ]);
+    db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL WHERE id = ?').run(dmFolderTabs, noteId['c1']);
+    db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL WHERE id = ?').run(dmFolderTabs, noteId['c2']);
 
     patchDemoNoteLinks();
 

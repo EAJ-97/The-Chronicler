@@ -14,6 +14,11 @@ const {
 } = require('../utils/access');
 const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
+const {
+  normalizeFolderDmTabs,
+  serializeFolderDmTabs,
+  validateFolderDmTabsInput,
+} = require('../utils/folderDmTabs');
 
 const router = express.Router();
 
@@ -460,14 +465,13 @@ router.get('/:id', authenticateToken, (req, res) => {
   if (!canSee(note.id, req.user.id, admin)) return res.status(403).json({ error: 'Access denied' });
   const under_completed_archive = !!isNoteUnderCompletedArchive(note.id);
   const row = { ...withPermissions(withTags(note)), under_completed_archive };
-  if (
-    row.folder_dm_content != null &&
-    String(row.folder_dm_content).length > 0 &&
-    note.is_folder &&
-    isWorldOrCampaignRootFolder(note.id)
-  ) {
-    if (!admin && !isDMOf(note.id, req.user.id)) {
+  if (note.is_folder && isWorldOrCampaignRootFolder(note.id)) {
+    const hasDmData =
+      (row.folder_dm_content != null && String(row.folder_dm_content).length > 0) ||
+      (row.folder_dm_tabs != null && String(row.folder_dm_tabs).length > 0);
+    if (hasDmData && !admin && !isDMOf(note.id, req.user.id)) {
       row.folder_dm_content = null;
+      row.folder_dm_tabs = null;
     }
   }
   res.json(row);
@@ -666,22 +670,25 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
   const canAppend    = isDM && !canFullEdit;           // DM on another user's note
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs } = req.body;
 
   // Conflict detection — only for content/title/DM-folder edits, not structural ops
   if (client_updated_at && (
     content !== undefined ||
     folder_dm_content !== undefined ||
+    folder_dm_tabs !== undefined ||
     (title !== undefined && title !== note.title)
   )) {
     const serverTs = new Date(note.updated_at).getTime();
     const clientTs = new Date(client_updated_at).getTime();
     if (serverTs > clientTs) {
+      const serverTabs = normalizeFolderDmTabs(note);
       return res.status(409).json({
         error: 'conflict',
         server_title:      note.title,
         server_content:    note.content,
         server_folder_dm_content: note.folder_dm_content ?? '',
+        server_folder_dm_tabs: JSON.stringify(serverTabs),
         server_updated_at: note.updated_at,
         server_updated_by: db.prepare('SELECT username FROM users WHERE id = ?').get(note.user_id)?.username,
       });
@@ -917,10 +924,15 @@ router.put('/:id', authenticateToken, (req, res) => {
   }
 
   /**
-   * DM-only markdown for world/campaign root folders (party sees `content` only). Editable by DM/admin
-   * when the row is a playable campaign or world root (not nested subfolders).
+   * DM-only markdown tabs for world/campaign root folders (party sees `content` only).
+   * Preferred field: `folder_dm_tabs` (JSON array). Legacy `folder_dm_content` still accepted.
    */
-  if (folder_dm_content !== undefined && note.is_folder && canFullEdit && isWorldOrCampaignRootFolder(note.id)) {
+  if (
+    (folder_dm_tabs !== undefined || folder_dm_content !== undefined) &&
+    note.is_folder &&
+    canFullEdit &&
+    isWorldOrCampaignRootFolder(note.id)
+  ) {
     if (archived && !admin) {
       return res.status(403).json({
         error: 'This campaign or world is marked completed; content is read-only. A DM can clear completion on the root folder.',
@@ -929,8 +941,19 @@ router.put('/:id', authenticateToken, (req, res) => {
     if (!admin && !isDMOf(note.id, req.user.id)) {
       return res.status(403).json({ error: 'Not authorised to edit DM folder notes' });
     }
-    const v = folder_dm_content === null || folder_dm_content === '' ? null : String(folder_dm_content);
-    db.prepare('UPDATE notes SET folder_dm_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(v, req.params.id);
+    if (folder_dm_tabs !== undefined) {
+      const tabs = validateFolderDmTabsInput(folder_dm_tabs);
+      const serialized = serializeFolderDmTabs(tabs);
+      db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(serialized, req.params.id);
+    } else {
+      const v = folder_dm_content === null || folder_dm_content === '' ? null : String(folder_dm_content);
+      const tabsJson = v
+        ? JSON.stringify([{ id: 'legacy-1', title: 'Notes', content: v }])
+        : null;
+      db.prepare('UPDATE notes SET folder_dm_content = ?, folder_dm_tabs = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(v, tabsJson, req.params.id);
+    }
   }
 
   if (is_completed !== undefined && canManage && isCompletionScopeRoot(note) && (isDMOfFolder(note.id, req.user.id) || admin)) {

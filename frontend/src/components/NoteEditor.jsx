@@ -24,6 +24,13 @@ import {
   isManagedSidebarIconUrl,
 } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
+import FolderDmTabsPane from './FolderDmTabsPane.jsx';
+import {
+  folderDmTabsFromNote,
+  serializeFolderDmTabsForSave,
+  formatDmTabsForConflict,
+  parseFolderDmTabsJson,
+} from '../utils/folderDmTabs.js';
 
 /**
  * If the cursor is in an active @mention segment on the current line, returns the query text (may
@@ -296,8 +303,20 @@ export default function NoteEditor({
   /** Optional emoji + short blurb for sidebar tree (saved to display_icon / display_summary) */
   const [displayIcon, setDisplayIcon] = useState(note?.display_icon || '');
   const [displaySummary, setDisplaySummary] = useState(note?.display_summary || '');
-  /** DM-only body for world/campaign root folders (server: `folder_dm_content`); omitted for players. */
-  const [folderDmContent, setFolderDmContent] = useState(note?.folder_dm_content || '');
+  /** DM-only tabbed notes for world/campaign root folders (`folder_dm_tabs` JSON); omitted for players. */
+  const [folderDmTabs, setFolderDmTabs] = useState(() => folderDmTabsFromNote(note));
+  const [activeDmTabId, setActiveDmTabId] = useState(() => {
+    const tabs = folderDmTabsFromNote(note);
+    if (note?.id) {
+      try {
+        const saved = localStorage.getItem(`chronicler_dmTab_${note.id}`);
+        if (saved && tabs.some((t) => t.id === saved)) return saved;
+      } catch {
+        /* ignore */
+      }
+    }
+    return tabs[0]?.id ?? '';
+  });
   /** Tab under toolbar: icons / AI tools / continuity (root campaign & world folders). */
   const [rootToolsTab, setRootToolsTab] = useState(() => localStorage.getItem('chronicler_rootFolderToolsTab') || 'icons');
   // Tutorial spotlight refs (optional)
@@ -359,7 +378,7 @@ export default function NoteEditor({
   const serverUpdatedAt = useRef(note?.updated_at || null);
   // Conflict state
   const [conflict, setConflict] = useState(null);
-  /** @type {null | { serverTitle: string, serverContent: string, serverFolderDmContent?: string, serverUpdatedAt: string, serverUpdatedBy?: string, myTitle: string, myContent: string, myFolderDmContent?: string, hasFolderDmSplit?: boolean }} */
+  /** @type {null | { serverTitle: string, serverContent: string, serverFolderDmContent?: string, serverFolderDmTabs?: string, serverUpdatedAt: string, serverUpdatedBy?: string, myTitle: string, myContent: string, myFolderDmContent?: string, myFolderDmTabs?: string, hasFolderDmSplit?: boolean }} */
   /** @mention dropdown: items from API, replace range, highlight index; `field` is body or DM AI prompt key. */
   const [mentionPopup, setMentionPopup] = useState(null);
   const mentionPopupRef = useRef(null);
@@ -740,7 +759,7 @@ export default function NoteEditor({
   // Refs for beforeunload (need current values without stale closures)
   const titleRef = useRef(title);
   const contentRef = useRef(content);
-  const folderDmContentRef = useRef(folderDmContent);
+  const folderDmTabsRef = useRef(folderDmTabs);
   const displayIconRef = useRef(displayIcon);
   const displaySummaryRef = useRef(displaySummary);
   const categoryRef = useRef(category);
@@ -750,7 +769,7 @@ export default function NoteEditor({
   const noteIdRef = useRef(note?.id);
   titleRef.current = title;
   contentRef.current = content;
-  folderDmContentRef.current = folderDmContent;
+  folderDmTabsRef.current = folderDmTabs;
   displayIconRef.current = displayIcon;
   displaySummaryRef.current = displaySummary;
   categoryRef.current = category;
@@ -779,7 +798,18 @@ export default function NoteEditor({
     setDisplayIcon(note?.display_icon || '');
     setDisplaySummary(note?.display_summary || '');
     setSidebarIconUploadErr(null);
-    setFolderDmContent(note?.folder_dm_content || '');
+    setFolderDmTabs(folderDmTabsFromNote(note));
+    const tabs = folderDmTabsFromNote(note);
+    let nextActive = tabs[0]?.id ?? '';
+    if (note?.id) {
+      try {
+        const saved = localStorage.getItem(`chronicler_dmTab_${note.id}`);
+        if (saved && tabs.some((t) => t.id === saved)) nextActive = saved;
+      } catch {
+        /* ignore */
+      }
+    }
+    setActiveDmTabId(nextActive);
     setTagInput('');
     setDirty(false);
     setSavedAt(null);
@@ -828,11 +858,11 @@ export default function NoteEditor({
     if (dirty) return;
     if (note?.title != null) setTitle(note.title);
     if (note?.content != null) setContent(note.content);
-    if (showCampaignRootSplit && note?.folder_dm_content !== undefined) {
-      setFolderDmContent(note.folder_dm_content || '');
+    if (showCampaignRootSplit && (note?.folder_dm_tabs !== undefined || note?.folder_dm_content !== undefined)) {
+      setFolderDmTabs(folderDmTabsFromNote(note));
     }
     serverUpdatedAt.current = note?.updated_at || serverUpdatedAt.current;
-  }, [note?.title, note?.content, note?.folder_dm_content, showCampaignRootSplit, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.title, note?.content, note?.folder_dm_tabs, note?.folder_dm_content, showCampaignRootSplit, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load images for this note
   useEffect(() => {
@@ -895,7 +925,7 @@ export default function NoteEditor({
         title: titleRef.current,
         content: contentRef.current,
         category: categoryRef.current,
-        ...(showCampaignRootSplit ? { folder_dm_content: folderDmContentRef.current } : {}),
+        ...(showCampaignRootSplit ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) } : {}),
       });
       navigator.sendBeacon
         ? navigator.sendBeacon(`/api/notes/${noteIdRef.current}`, new Blob([body], { type: 'application/json' }))
@@ -904,6 +934,21 @@ export default function NoteEditor({
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
   }, [isOwner, showCampaignRootSplit]);
+
+  /**
+   * Persists the active DM tab id per note in localStorage.
+   * @param {string} tabId
+   */
+  const persistActiveDmTab = (tabId) => {
+    setActiveDmTabId(tabId);
+    if (note?.id) {
+      try {
+        localStorage.setItem(`chronicler_dmTab_${note.id}`, tabId);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
   const doSave = useCallback(async (overrides = {}) => {
     if (!noteIdRef.current || !canEdit) return;
@@ -917,7 +962,7 @@ export default function NoteEditor({
       display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
       client_updated_at: serverUpdatedAt.current,
       ...(showCampaignRootSplit
-        ? { folder_dm_content: folderDmContentRef.current === '' ? null : folderDmContentRef.current }
+        ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) }
         : {}),
       ...overrides,
     };
@@ -937,11 +982,13 @@ export default function NoteEditor({
           serverTitle:      d.server_title,
           serverContent:    d.server_content,
           serverFolderDmContent: d.server_folder_dm_content ?? '',
+          serverFolderDmTabs: d.server_folder_dm_tabs ?? '',
           serverUpdatedAt:  d.server_updated_at,
           serverUpdatedBy:  d.server_updated_by,
           myTitle:          titleRef.current,
           myContent:        contentRef.current,
-          myFolderDmContent: folderDmContentRef.current,
+          myFolderDmContent: formatDmTabsForConflict(folderDmTabsRef.current),
+          myFolderDmTabs: JSON.stringify(folderDmTabsRef.current),
           hasFolderDmSplit: showCampaignRootSplit && !!note?.is_folder,
         });
       } else {
@@ -2996,34 +3043,19 @@ export default function NoteEditor({
                   background: 'rgba(200,148,58,0.03)',
                 }}
               >
-                <div
-                  style={{
-                    fontFamily: 'var(--ch-font-display)',
-                    fontSize: '8px',
-                    letterSpacing: '0.14em',
-                    color: 'rgba(200,148,58,0.65)',
-                    padding: '10px 24px 6px',
-                    flexShrink: 0,
-                  }}
-                >
-                  DM notes (hidden from players)
-                </div>
-                <textarea
-                  style={{
-                    ...S.editor,
-                    flex: 1,
-                    minHeight: '180px',
-                    paddingTop: '8px',
-                    background: 'transparent',
-                  }}
-                  value={folderDmContent}
-                  onChange={(e) => {
-                    setFolderDmContent(e.target.value);
-                    markDirty();
-                  }}
-                  placeholder={canEdit ? 'Plans, secrets, reminders for DMs only…' : ''}
-                  readOnly={!canEdit}
-                  spellCheck={false}
+                <FolderDmTabsPane
+                  tabs={folderDmTabs}
+                  activeTabId={activeDmTabId}
+                  onTabsChange={setFolderDmTabs}
+                  onActiveTabChange={persistActiveDmTab}
+                  onDirty={markDirty}
+                  canEdit={canEdit}
+                  viewMode="edit"
+                  editorStyle={S.editor}
+                  previewStyle={S.preview}
+                  markdownComponents={markdownComponents}
+                  markdownCss={<style>{buildMarkdownCss(theme)}</style>}
+                  noteId={note?.id}
                 />
               </div>
             {mentionPopup && (!mentionPopup.field || mentionPopup.field === 'body') && mentionPopup.items && mentionPopup.items.length > 0 && (
@@ -3232,29 +3264,26 @@ export default function NoteEditor({
                   flex: 1,
                   minWidth: 0,
                   background: 'rgba(200,148,58,0.03)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
                 }}
-                className="md-content md-dm"
               >
-                <div
-                  style={{
-                    fontFamily: 'var(--ch-font-display)',
-                    fontSize: '8px',
-                    letterSpacing: '0.14em',
-                    color: 'rgba(200,148,58,0.65)',
-                    marginBottom: '10px',
-                  }}
-                >
-                  DM notes (hidden from players)
-                </div>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  urlTransform={chroniclerUrlTransform}
-                  components={markdownComponents}
-                >
-                  {folderDmContent || '*No DM notes yet.*'}
-                </ReactMarkdown>
+                <FolderDmTabsPane
+                  tabs={folderDmTabs}
+                  activeTabId={activeDmTabId}
+                  onTabsChange={setFolderDmTabs}
+                  onActiveTabChange={persistActiveDmTab}
+                  onDirty={markDirty}
+                  canEdit={canEdit}
+                  viewMode="view"
+                  editorStyle={S.editor}
+                  previewStyle={{ ...S.preview, flex: 1, overflow: 'auto' }}
+                  markdownComponents={markdownComponents}
+                  markdownCss={<style>{buildMarkdownCss(theme)}</style>}
+                  noteId={note?.id}
+                />
               </div>
-            <style>{buildMarkdownCss(theme)}</style>
             </div>
           ) : (
           <div style={S.preview} className="md-content">
@@ -3935,7 +3964,10 @@ export default function NoteEditor({
             setTitle(conflict.serverTitle);
             setContent(conflict.serverContent);
             if (conflict.hasFolderDmSplit) {
-              setFolderDmContent(conflict.serverFolderDmContent || '');
+              const serverTabs = parseFolderDmTabsJson(conflict.serverFolderDmTabs)
+                || folderDmTabsFromNote({ folder_dm_content: conflict.serverFolderDmContent });
+              setFolderDmTabs(serverTabs);
+              persistActiveDmTab(serverTabs[0]?.id ?? '');
             }
             serverUpdatedAt.current = conflict.serverUpdatedAt;
             setConflict(null);
@@ -3946,8 +3978,25 @@ export default function NoteEditor({
             const merged = conflict.serverContent + divider + conflict.myContent;
             setContent(merged);
             if (conflict.hasFolderDmSplit) {
-              const dmDivider = `\n\n---\n*✏ My DM edits — ${new Date().toLocaleString()}:*\n`;
-              setFolderDmContent((conflict.serverFolderDmContent || '') + dmDivider + (conflict.myFolderDmContent || ''));
+              const serverTabs = parseFolderDmTabsJson(conflict.serverFolderDmTabs)
+                || folderDmTabsFromNote({ folder_dm_content: conflict.serverFolderDmContent });
+              const myTabs = parseFolderDmTabsJson(conflict.myFolderDmTabs)
+                || folderDmTabsFromNote({ folder_dm_content: conflict.myFolderDmContent });
+              const mergeTab = {
+                id: `merge-${Date.now()}`,
+                title: `My edits — ${new Date().toLocaleDateString()}`,
+                content: '',
+              };
+              const mergedTabs = [
+                ...serverTabs,
+                mergeTab,
+                ...myTabs.map((t) => ({
+                  ...t,
+                  title: myTabs.length > 1 ? `${t.title} (mine)` : mergeTab.title,
+                })),
+              ];
+              setFolderDmTabs(mergedTabs);
+              persistActiveDmTab(mergedTabs[0]?.id ?? '');
             }
             serverUpdatedAt.current = conflict.serverUpdatedAt;
             setConflict(null);
@@ -4068,11 +4117,19 @@ function ConflictModal({ conflict, onKeepMine, onKeepTheirs, onKeepBoth }) {
             <>
               <div>
                 <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(139,196,226,0.6)', marginBottom: '6px' }}>THEIR VERSION — DM NOTES (server)</div>
-                <div style={pane}>{conflict.serverFolderDmContent || ''}</div>
+                <div style={pane}>
+                  {conflict.serverFolderDmTabs
+                    ? formatDmTabsForConflict(parseFolderDmTabsJson(conflict.serverFolderDmTabs) || [])
+                    : (conflict.serverFolderDmContent || '')}
+                </div>
               </div>
               <div>
                 <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.6)', marginBottom: '6px' }}>YOUR VERSION — DM NOTES (unsaved)</div>
-                <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>{conflict.myFolderDmContent || ''}</div>
+                <div style={{ ...pane, borderColor: 'rgba(200,148,58,0.15)' }}>
+                  {conflict.myFolderDmTabs
+                    ? formatDmTabsForConflict(parseFolderDmTabsJson(conflict.myFolderDmTabs) || [])
+                    : (conflict.myFolderDmContent || '')}
+                </div>
               </div>
             </>
           )}

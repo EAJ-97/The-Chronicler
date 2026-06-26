@@ -101,6 +101,7 @@ db.exec(`
     display_icon       TEXT     DEFAULT NULL,
     display_summary    TEXT     DEFAULT NULL,
     folder_dm_content  TEXT     DEFAULT NULL,
+    folder_dm_tabs     TEXT     DEFAULT NULL,
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -660,6 +661,28 @@ migrate('046_notes_ddb_link', () => {
   for (const row of rows) {
     const m = String(row.content || '').match(re);
     if (m) update.run(parseInt(m[1], 10), row.id);
+  }
+});
+
+// DM folder notes: renameable tabs (JSON array) on world/campaign roots
+migrate('047_notes_folder_dm_tabs', () => {
+  try {
+    db.exec('ALTER TABLE notes ADD COLUMN folder_dm_tabs TEXT DEFAULT NULL');
+  } catch {
+    /* column may already exist on fresh installs */
+  }
+  const rows = db.prepare(`
+    SELECT id, folder_dm_content FROM notes
+    WHERE folder_dm_tabs IS NULL
+      AND folder_dm_content IS NOT NULL
+      AND TRIM(folder_dm_content) != ''
+  `).all();
+  const update = db.prepare('UPDATE notes SET folder_dm_tabs = ? WHERE id = ?');
+  for (const row of rows) {
+    const tabs = JSON.stringify([
+      { id: 'legacy-1', title: 'Notes', content: String(row.folder_dm_content) },
+    ]);
+    update.run(tabs, row.id);
   }
 });
 
