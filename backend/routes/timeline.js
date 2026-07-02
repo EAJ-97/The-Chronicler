@@ -101,13 +101,40 @@ function timelineDemoReadonlyOr403(req, res, folderId) {
 }
 
 /**
- * Whether the user may edit the campaign timeline (DM or admin).
+ * Whether the user may add new timeline points (campaign member with folder access).
  * @param {number} uid
  * @param {number} folderId
  * @param {boolean} admin
  * @returns {boolean}
  */
-function canEditTimeline(uid, folderId, admin) {
+function canCreateTimeline(uid, folderId, admin) {
+  if (admin) return true;
+  return canAccessFolder(uid, folderId, admin);
+}
+
+/**
+ * Whether the user may edit or delete one timeline point (DM/admin, creator, or linked-note access).
+ * @param {number} uid
+ * @param {object} point - timeline_points row
+ * @param {boolean} admin
+ * @returns {boolean}
+ */
+function canEditTimelinePoint(uid, point, admin) {
+  if (admin) return true;
+  if (isDMOfFolder(point.folder_id, uid)) return true;
+  if (point.created_by === uid) return true;
+  if (point.note_id != null && canSeeNote(point.note_id, uid, admin)) return true;
+  return false;
+}
+
+/**
+ * Whether the user may edit all timeline points and axis controls (DM or admin).
+ * @param {number} uid
+ * @param {number} folderId
+ * @param {boolean} admin
+ * @returns {boolean}
+ */
+function canManageTimeline(uid, folderId, admin) {
   if (admin) return true;
   return isDMOfFolder(folderId, uid);
 }
@@ -152,6 +179,7 @@ function enrichBox(point, uid, admin) {
     anchor_x: point.anchor_x ?? 0,
     end_x: point.end_x ?? 0,
     end_y: point.end_y ?? -100,
+    can_edit: canEditTimelinePoint(uid, point, admin),
   };
 
   if (point.note_id == null) {
@@ -209,9 +237,12 @@ router.get('/', authenticateToken, (req, res) => {
 
   const points = rawPoints.map((p) => enrichBox(p, uid, admin)).filter(Boolean);
 
+  const archived = isNoteUnderCompletedArchive(fid);
   res.json({
     points,
-    can_edit: canEditTimeline(uid, fid, admin) && !isNoteUnderCompletedArchive(fid),
+    can_edit: canCreateTimeline(uid, fid, admin) && !archived,
+    can_create: canCreateTimeline(uid, fid, admin) && !archived,
+    can_manage: canManageTimeline(uid, fid, admin) && !archived,
   });
 });
 
@@ -226,7 +257,7 @@ router.post('/blocks', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, fid, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canManageTimeline(uid, fid, admin)) return res.status(403).json({ error: 'Only DMs can edit timeline blocks' });
   if (timelineArchivedOr403(req, res, fid)) return;
   if (timelineDemoReadonlyOr403(req, res, fid)) return;
 
@@ -254,7 +285,7 @@ router.put('/blocks/:id', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, block.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canManageTimeline(uid, block.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit timeline blocks' });
   if (timelineArchivedOr403(req, res, block.folder_id)) return;
   if (timelineDemoReadonlyOr403(req, res, block.folder_id)) return;
 
@@ -287,7 +318,7 @@ router.delete('/blocks/:id', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, block.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canManageTimeline(uid, block.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit timeline blocks' });
   if (timelineArchivedOr403(req, res, block.folder_id)) return;
   if (timelineDemoReadonlyOr403(req, res, block.folder_id)) return;
 
@@ -323,7 +354,9 @@ router.post('/points', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, fid, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canCreateTimeline(uid, fid, admin)) {
+    return res.status(403).json({ error: 'You do not have permission to add timeline events' });
+  }
   if (timelineArchivedOr403(req, res, fid)) return;
   if (timelineDemoReadonlyOr403(req, res, fid)) return;
 
@@ -337,6 +370,9 @@ router.post('/points', authenticateToken, (req, res) => {
     }
     const existing = db.prepare('SELECT id FROM timeline_points WHERE folder_id = ? AND note_id = ?').get(fid, nid);
     if (existing) return res.status(409).json({ error: 'Note is already on this timeline' });
+    if (!canSeeNote(nid, uid, admin)) {
+      return res.status(403).json({ error: 'You do not have access to that note' });
+    }
   }
 
   const pathStr = path_json != null ? String(path_json) : null;
@@ -366,7 +402,9 @@ router.put('/points/:id', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, point.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canEditTimelinePoint(uid, point, admin)) {
+    return res.status(403).json({ error: 'You do not have permission to edit this timeline event' });
+  }
   if (timelineArchivedOr403(req, res, point.folder_id)) return;
   if (timelineDemoReadonlyOr403(req, res, point.folder_id)) return;
 
@@ -399,6 +437,9 @@ router.put('/points/:id', authenticateToken, (req, res) => {
         'SELECT id FROM timeline_points WHERE folder_id = ? AND note_id = ? AND id != ?'
       ).get(point.folder_id, nid, id);
       if (existing) return res.status(409).json({ error: 'Note is already on this timeline' });
+      if (!canSeeNote(nid, uid, admin)) {
+        return res.status(403).json({ error: 'You do not have access to that note' });
+      }
       updates.push('note_id = ?');
       params.push(nid);
     }
@@ -452,7 +493,9 @@ router.delete('/points/:id', authenticateToken, (req, res) => {
 
   const uid = req.user.id;
   const admin = isAdmin(uid);
-  if (!canEditTimeline(uid, point.folder_id, admin)) return res.status(403).json({ error: 'Only DMs can edit the timeline' });
+  if (!canEditTimelinePoint(uid, point, admin)) {
+    return res.status(403).json({ error: 'You do not have permission to edit this timeline event' });
+  }
   if (timelineArchivedOr403(req, res, point.folder_id)) return;
   if (timelineDemoReadonlyOr403(req, res, point.folder_id)) return;
 

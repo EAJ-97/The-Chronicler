@@ -29,6 +29,13 @@ import {
   timelineGeometryChanged,
   resolveTimelineCanvasMetrics,
 } from '../utils/timelineGeometry.js';
+import {
+  DEFAULT_TICK_SETTINGS,
+  timelineTickStorageKey,
+  parseTickSettings,
+  serializeTickSettings,
+  computeTimelineTicks,
+} from '../utils/timelineTicks.js';
 
 /** Hit area (px) above/below the axis for starting a new branch. */
 const LINE_HIT = 22;
@@ -124,7 +131,8 @@ function groupNotesByCategory(notes, search) {
  */
 export default function TimelineView({ notes, currentUser, dmCampaignIds = [], tutorialRefs = null, onSelectNote, tutorialCampaignId = null }) {
   const [entries, setEntries] = useState([]);
-  const [canEdit, setCanEdit] = useState(false);
+  const [canCreate, setCanCreate] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -138,6 +146,8 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
   const [shiftHeld, setShiftHeld] = useState(false);
   /** Axis hover position for the “click and drag to add point” hint (SVG x), or null. */
   const [axisHover, setAxisHover] = useState(null);
+  const [tickSettings, setTickSettings] = useState({ ...DEFAULT_TICK_SETTINGS });
+  const [showTickSettings, setShowTickSettings] = useState(false);
 
   const scrollRef = useRef(null);
   const svgRef = useRef(null);
@@ -241,6 +251,29 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     } catch { /* ignore */ }
   }, [axisExtend, extendKey, resolvedFolderId]);
 
+  const tickSettingsKey = timelineTickStorageKey(currentUser?.id, resolvedFolderId);
+
+  useEffect(() => {
+    if (!resolvedFolderId) return;
+    try {
+      const raw = localStorage.getItem(tickSettingsKey);
+      setTickSettings(parseTickSettings(raw));
+    } catch {
+      setTickSettings({ ...DEFAULT_TICK_SETTINGS });
+    }
+  }, [tickSettingsKey, resolvedFolderId]);
+
+  /**
+   * Persists axis tick scale settings for the active campaign (visual only, per user).
+   * @param {typeof DEFAULT_TICK_SETTINGS} next
+   */
+  const saveTickSettings = useCallback((next) => {
+    setTickSettings(next);
+    try {
+      localStorage.setItem(tickSettingsKey, serializeTickSettings(next));
+    } catch { /* ignore */ }
+  }, [tickSettingsKey]);
+
   const contentOffsetX = axisExtend.left;
 
   /**
@@ -265,7 +298,8 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
       const res = await api.get('/timeline', { params: { folder_id: resolvedFolderId } });
       const points = res.data.points || [];
       setEntries(points);
-      setCanEdit(!!res.data.can_edit);
+      setCanCreate(!!(res.data.can_create ?? res.data.can_edit));
+      setCanManage(!!res.data.can_manage);
       if (!contentFitDoneRef.current) {
         const vw = scrollRef.current?.clientWidth || windowWidth || 720;
         setAxisExtend((prev) => ensureAxisExtendFitsContent(points, vw, prev));
@@ -367,7 +401,16 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     [notes, resolvedFolderId]
   );
 
-  const showEditTools = canEdit && !timelineLocked;
+  const showCreateTools = canCreate && !timelineLocked;
+  const showManageTools = canManage && !timelineLocked;
+
+  const axisTicks = useMemo(() => (
+    computeTimelineTicks({
+      settings: tickSettings,
+      canvasWidth,
+      contentOffsetX,
+    })
+  ), [tickSettings, canvasWidth, contentOffsetX]);
 
   const campaignNotes = useMemo(() => {
     if (!resolvedFolderId) return [];
@@ -639,7 +682,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
     const pt = eventToSvg(e);
     if (!pt) return;
 
-    if (showEditTools && isOnTimelineAxis(pt)) {
+    if (showCreateTools && isOnTimelineAxis(pt)) {
       e.preventDefault();
       setInteraction({
         mode: 'create',
@@ -666,7 +709,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
    * @param {object} entry
    */
   const handleAnchorMouseDown = (e, entry) => {
-    if (!showEditTools || busy || e.button !== 0) return;
+    if (!entry.can_edit || busy || e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
     setInteraction({
@@ -685,7 +728,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
    * @param {object} entry
    */
   const handleBoxMouseDown = (e, entry, sourceRect) => {
-    if (!showEditTools || busy || e.button !== 0) return;
+    if (!entry.can_edit || busy || e.button !== 0) return;
     e.stopPropagation();
     const pt = eventToSvg(e);
     if (!pt) return;
@@ -712,7 +755,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
   const handleSvgMouseMove = (e) => {
     const pt = eventToSvg(e);
     if (pt) {
-      if (!interaction && showEditTools && isOnTimelineAxis(pt)) {
+      if (!interaction && showCreateTools && isOnTimelineAxis(pt)) {
         setAxisHover({ x: pt.x });
       } else if (!interaction) {
         setAxisHover(null);
@@ -938,28 +981,41 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
   return (
     <div ref={tutorialRefs?.shell || null} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--ch-shell-bg)', overflow: 'hidden' }}>
       <div style={headerStyle}>
-        <span style={headerLabelStyle}>CAMPAIGN</span>
-        <select
-          ref={tutorialRefs?.campaignPicker || null}
-          value={resolvedFolderId ?? ''}
-          onChange={(e) => setActiveFolderId(e.target.value ? parseInt(e.target.value, 10) : null)}
-          disabled={tutorialCampaignId != null}
-          style={selectStyle}
-        >
-          {campaignRoots.map((f) => (
-            <option key={f.id} value={f.id}>{f.title || 'Untitled'}</option>
-          ))}
-        </select>
-        <span style={hintStyle}>
-          {showEditTools
-            ? 'Drag empty space to pan; Past / Present add space (hold Shift on hover to trim)'
-            : 'Drag empty space to pan along the timeline'}
-        </span>
-        {timelineLocked && (
-          <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'rgba(200,148,58,0.5)' }}>
-            Archived — read only
+        <div style={headerMainStyle}>
+          <span style={headerLabelStyle}>CAMPAIGN</span>
+          <select
+            ref={tutorialRefs?.campaignPicker || null}
+            value={resolvedFolderId ?? ''}
+            onChange={(e) => setActiveFolderId(e.target.value ? parseInt(e.target.value, 10) : null)}
+            disabled={tutorialCampaignId != null}
+            style={selectStyle}
+          >
+            {campaignRoots.map((f) => (
+              <option key={f.id} value={f.id}>{f.title || 'Untitled'}</option>
+            ))}
+          </select>
+          <span style={hintStyle}>
+            {showCreateTools
+              ? 'Drag empty space to pan; add events on the axis; Past / Present add space (Shift+click to trim)'
+              : entries.some((e) => e.can_edit)
+                ? 'Drag events you can edit; drag empty space to pan'
+                : 'Drag empty space to pan along the timeline'}
           </span>
-        )}
+          {timelineLocked && (
+            <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', color: 'rgba(200,148,58,0.5)' }}>
+              Archived — read only
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          title="Timeline axis scale"
+          aria-label="Timeline axis scale settings"
+          onClick={() => setShowTickSettings(true)}
+          style={tickSettingsBtnStyle}
+        >
+          ⚙
+        </button>
       </div>
 
       <div
@@ -1017,7 +1073,31 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
               strokeLinecap="round"
             />
 
-            {axisHover && showEditTools && !interaction && (
+            {axisTicks.map((tick) => (
+              <g key={`tick-${tick.x}-${tick.label}`} pointerEvents="none">
+                <line
+                  x1={tick.x}
+                  y1={timelineLineY - (tick.major ? 10 : 6)}
+                  x2={tick.x}
+                  y2={timelineLineY + (tick.major ? 10 : 6)}
+                  stroke="rgba(200,148,58,0.45)"
+                  strokeWidth={tick.major ? 2 : 1}
+                />
+                <text
+                  x={tick.x}
+                  y={timelineLineY + 24}
+                  textAnchor="middle"
+                  fill="rgba(200,148,58,0.55)"
+                  fontFamily="var(--ch-font-display)"
+                  fontSize={tick.major ? '9' : '8'}
+                  letterSpacing="0.06em"
+                >
+                  {tick.label}
+                </text>
+              </g>
+            ))}
+
+            {axisHover && showCreateTools && !interaction && (
               <g pointerEvents="none">
                 <text
                   x={axisHover.x}
@@ -1041,7 +1121,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
               label="< Past"
               trimLabel="Trim"
               shiftHeld={shiftHeld}
-              onClick={showEditTools ? (e) => (e.shiftKey ? trimTimeline() : extendPast()) : undefined}
+              onClick={showManageTools ? (e) => (e.shiftKey ? trimTimeline() : extendPast()) : undefined}
             />
             <TimelineAxisLabel
               hitX={canvasWidth - TIMELINE_AXIS_PAD - AXIS_LABEL_HIT_W}
@@ -1051,7 +1131,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
               label="Present >"
               trimLabel="Trim"
               shiftHeld={shiftHeld}
-              onClick={showEditTools ? (e) => (e.shiftKey ? trimTimeline() : extendPresent()) : undefined}
+              onClick={showManageTools ? (e) => (e.shiftKey ? trimTimeline() : extendPresent()) : undefined}
             />
 
             {displayEntries.map((entry) => (
@@ -1060,7 +1140,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
                 entry={entry}
                 contentOffsetX={contentOffsetX}
                 categoryColor={entryColor(entry)}
-                canEdit={showEditTools}
+                canEdit={!!entry.can_edit && !timelineLocked}
                 lineY={timelineLineY}
                 onBoxOpen={() => handlePlayerBoxOpen(entry)}
                 onEdit={() => handleEditEntry(entry)}
@@ -1109,7 +1189,7 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
         />
       )}
 
-      {editorEntry && (
+      {editorEntry && editorEntry.can_edit && (
         <TimelineEventEditor
           entry={editorEntry}
           campaignNotes={campaignNotes}
@@ -1119,6 +1199,110 @@ export default function TimelineView({ notes, currentUser, dmCampaignIds = [], t
           onClose={() => !busy && setEditorEntry(null)}
         />
       )}
+
+      {showTickSettings && (
+        <TimelineTickSettingsPanel
+          settings={tickSettings}
+          onSave={(next) => {
+            saveTickSettings(next);
+            setShowTickSettings(false);
+          }}
+          onClose={() => setShowTickSettings(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modal for axis tick scale (visual mapping only; stored per user in localStorage).
+ * @param {{
+ *   settings: import('../utils/timelineTicks.js').DEFAULT_TICK_SETTINGS,
+ *   onSave: (settings: import('../utils/timelineTicks.js').DEFAULT_TICK_SETTINGS) => void,
+ *   onClose: () => void,
+ * }} props
+ */
+function TimelineTickSettingsPanel({ settings, onSave, onClose }) {
+  const [draft, setDraft] = useState({ ...settings });
+
+  /**
+   * Applies draft tick settings and closes the panel.
+   * @param {import('react').FormEvent} e
+   */
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(draft);
+  };
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={{ ...modalPanelStyle, maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+        <div style={modalTitleStyle}>Axis scale</div>
+        <p style={tickSettingsHelpStyle}>
+          Optional tick marks along the timeline help map positions to numbers or dates.
+          This is visual only and does not change saved events.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <label style={tickToggleRowStyle}>
+            <input
+              type="checkbox"
+              checked={!!draft.enabled}
+              onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))}
+            />
+            <span>Show tick marks</span>
+          </label>
+
+          <label style={{ ...fieldLabelStyle, marginTop: '14px' }}>
+            Scale type
+            <select
+              value={draft.mode}
+              onChange={(e) => setDraft((d) => ({ ...d, mode: e.target.value === 'date' ? 'date' : 'number' }))}
+              style={{ ...inputStyle, marginTop: '6px' }}
+            >
+              <option value="number">Numbers</option>
+              <option value="date">Dates</option>
+            </select>
+          </label>
+
+          <label style={{ ...fieldLabelStyle, marginTop: '14px' }}>
+            Start {draft.mode === 'date' ? '(date)' : '(number)'}
+            <input
+              type="text"
+              value={draft.start}
+              onChange={(e) => setDraft((d) => ({ ...d, start: e.target.value }))}
+              placeholder={draft.mode === 'date' ? '2020-01-01' : '0'}
+              style={inputStyle}
+            />
+          </label>
+
+          <label style={{ ...fieldLabelStyle, marginTop: '14px' }}>
+            End {draft.mode === 'date' ? '(date)' : '(number)'}
+            <input
+              type="text"
+              value={draft.end}
+              onChange={(e) => setDraft((d) => ({ ...d, end: e.target.value }))}
+              placeholder={draft.mode === 'date' ? '2024-12-31' : '100'}
+              style={inputStyle}
+            />
+          </label>
+
+          <label style={{ ...fieldLabelStyle, marginTop: '14px' }}>
+            Interval {draft.mode === 'date' ? '(days)' : '(step)'}
+            <input
+              type="text"
+              value={draft.interval}
+              onChange={(e) => setDraft((d) => ({ ...d, interval: e.target.value }))}
+              placeholder={draft.mode === 'date' ? '30' : '10'}
+              style={inputStyle}
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
+            <button type="submit" style={toolbarBtnStyle}>Apply</button>
+            <button type="button" onClick={onClose} style={toolbarBtnStyle}>Cancel</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1558,9 +1742,48 @@ const headerStyle = {
   padding: '12px 20px',
   borderBottom: '1px solid var(--ch-border)',
   display: 'flex',
+  alignItems: 'flex-start',
+  gap: '12px',
+};
+
+const headerMainStyle = {
+  flex: 1,
+  minWidth: 0,
+  display: 'flex',
   alignItems: 'center',
   gap: '12px',
   flexWrap: 'wrap',
+};
+
+const tickSettingsBtnStyle = {
+  background: 'rgba(200,148,58,0.1)',
+  border: '1px solid rgba(200,148,58,0.3)',
+  borderRadius: '4px',
+  color: 'var(--ch-text-primary-65)',
+  fontFamily: 'var(--ch-font-display)',
+  fontSize: '14px',
+  width: '34px',
+  height: '34px',
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const tickSettingsHelpStyle = {
+  fontFamily: 'var(--ch-font-body)',
+  fontSize: '13px',
+  lineHeight: 1.45,
+  color: 'var(--ch-text-primary-55)',
+  margin: '0 0 12px',
+};
+
+const tickToggleRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  fontFamily: 'var(--ch-font-body)',
+  fontSize: '14px',
+  color: 'var(--ch-text-primary)',
+  cursor: 'pointer',
 };
 
 const headerLabelStyle = {
