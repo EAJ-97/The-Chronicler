@@ -461,7 +461,6 @@ Use this note when players ask why everyone wants Veldrath. The Sunken Vale camp
     noteId['c1_items']     = mkFolder('Items & Artifacts', A, 'c1');
     noteId['c1_quests']    = mkFolder('Quests & Events',  A, 'c1');
     noteId['c1_lore']      = mkFolder('Lore & History',   A, 'c1');
-    noteId['c1_journal']   = mkFolder('Session Journal',  A, 'c1');
 
     // ── NPCs ────────────────────────────────────────────────────────────────
     mkNote('castor', 'Lord Castor Mourne', A, 'c1_npcs', 'npc', `## Lord Castor Mourne

@@ -38,43 +38,6 @@ const {
 
 const router = express.Router();
 
-/**
- * Ensures a campaign folder has a Session Journal subfolder (party sessions / journal tab).
- * Copies roster grants from the campaign root. No-op when one already exists.
- * @param {number} campaignFolderId
- * @param {number} ownerUserId
- * @returns {number|null} Journal folder id or null on failure
- */
-function ensureSessionJournalFolder(campaignFolderId, ownerUserId) {
-  const campaign = db.prepare(
-    'SELECT id, visibility FROM notes WHERE id = ? AND is_folder = 1 AND deleted_at IS NULL'
-  ).get(campaignFolderId);
-  if (!campaign) return null;
-
-  const existing = db.prepare(`
-    SELECT id FROM notes
-    WHERE parent_id = ? AND is_folder = 1 AND deleted_at IS NULL
-      AND LOWER(TRIM(title)) = 'session journal'
-    LIMIT 1
-  `).get(campaignFolderId);
-  if (existing) return existing.id;
-
-  const result = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, content, is_folder, visibility, is_campaign)
-    VALUES (?, ?, 'Session Journal', '', 1, ?, 0)
-  `).run(ownerUserId, campaignFolderId, campaign.visibility || 'hidden');
-
-  const journalId = result.lastInsertRowid;
-  const grantees = db.prepare(
-    'SELECT user_id FROM note_permissions WHERE note_id = ?'
-  ).all(campaignFolderId);
-  const grantStmt = db.prepare(
-    'INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)'
-  );
-  grantees.forEach((r) => grantStmt.run(journalId, r.user_id));
-  return journalId;
-}
-
 // Helper: can this user see this note?
 function canSee(noteId, userId, isAdminUser) {
   if (isAdminUser) return true;
@@ -782,10 +745,6 @@ router.post('/', authenticateToken, (req, res) => {
     } else {
       db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
     }
-  }
-
-  if (isCampaignFolder) {
-    ensureSessionJournalFolder(noteId, req.user.id);
   }
 
   res.status(201).json(withPermissions(withTags(note)));

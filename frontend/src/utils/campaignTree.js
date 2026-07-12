@@ -46,8 +46,7 @@ export function isWorldRootSelected(notes, selectedId) {
 }
 
 /**
- * True when a folder is a campaign scope root (standalone or under a world).
- * Uses `is_campaign` from the API when set; falls back to Session Journal heuristic.
+ * True when a folder is a campaign scope root (`is_campaign` or legacy standalone root).
  * @param {Array<object>} allNotes
  * @param {object} folder
  * @returns {boolean}
@@ -56,19 +55,7 @@ export function isPlayableCampaignRootFolder(allNotes, folder) {
   if (!folder?.is_folder) return false;
   if (folder.is_world && !folder.parent_id) return false;
   if (folder.is_campaign === 1 || folder.is_campaign === true) return true;
-  if (!folder.parent_id && !folder.is_world) return true;
-
-  const hasSessionJournal = (allNotes || []).some(
-    (n) => n.parent_id === folder.id
-      && n.is_folder
-      && String(n.title || '').trim().toLowerCase() === 'session journal',
-  );
-  if (!hasSessionJournal) return false;
-
-  const map = notesByIdMap(allNotes || []);
-  const parent = map.get(folder.parent_id);
-  if (!parent) return true;
-  return !!(parent.is_world && parent.parent_id == null);
+  return !folder.parent_id && !folder.is_world;
 }
 
 /**
