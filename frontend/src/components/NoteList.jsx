@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getCategoryColor } from './NoteEditor.jsx';
 import api from '../api.js';
-import { getCampaignFolderIdForSelection, isWorldRootSelected, notesByIdMap } from '../utils/campaignTree.js';
-import { resolveSidebarIcon, isManagedSidebarIconUrl, getFolderTreeKind, getScopeFolderKindLabel } from '../utils/displayIcons.js';
+import { getCampaignFolderIdForSelection, isWorldRootSelected } from '../utils/campaignTree.js';
+import { resolveSidebarIcon, isManagedSidebarIconUrl } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
 
 /** @typedef {{ nodeId: number, edge: 'before'|'after'|'into' }} DropIndicator */
@@ -90,8 +90,6 @@ function TreeNode({
 
   const isRootFolder = isFolder && depth === 0;
   const isWorldRootFolder = isFolder && !node.parent_id && !!node.is_world;
-  const folderTreeKind = isFolder ? getFolderTreeKind(node, notesByIdMap(allNotes || [])) : null;
-  const scopeKindLabel = getScopeFolderKindLabel(folderTreeKind);
   const forceShowActions = isRootFolder && tutorialForceHoverNodeId === node.id;
   /** World root or standalone campaign root or a campaign folder whose parent is a world (export root). */
   const parentNote = node.parent_id && allNotes ? allNotes.find((n) => n.id === node.parent_id) : null;
@@ -273,24 +271,6 @@ function TreeNode({
             }}
             onMouseLeave={() => { clearTimeout(tooltipTimer.current); setTooltip(null); }}
           >
-            {scopeKindLabel && (
-              <span
-                title={folderTreeKind === 'world' ? 'World folder' : 'Campaign folder'}
-                style={{
-                  marginRight: '6px',
-                  fontFamily: 'var(--ch-font-display)',
-                  fontSize: '7px',
-                  letterSpacing: '0.1em',
-                  color: folderTreeKind === 'world' ? 'rgba(139,196,226,0.55)' : 'rgba(200,148,58,0.55)',
-                  border: `1px solid ${folderTreeKind === 'world' ? 'rgba(139,196,226,0.25)' : 'rgba(200,148,58,0.25)'}`,
-                  borderRadius: '2px',
-                  padding: '1px 4px',
-                  verticalAlign: 'middle',
-                }}
-              >
-                {scopeKindLabel}
-              </span>
-            )}
             {node.title}
             {tooltip && (
               <div style={{

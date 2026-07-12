@@ -18,6 +18,7 @@ import {
 } from '../utils/campaignTree.js';
 import {
   getFolderTreeKind,
+  getScopeFolderKindLabel,
   iconChoicesForFolderKind,
   NOTE_ICON_CATEGORIES,
   allUniqueNotePresetIcons,
@@ -417,6 +418,7 @@ export default function NoteEditor({
   }, [note, notes]);
   const isWorldRoot = folderTreeKind === 'world';
   const isCampaignScopeRoot = folderTreeKind === 'campaign';
+  const scopeKindLabel = getScopeFolderKindLabel(folderTreeKind);
   const inWorldLayerOnly = useMemo(
     () => (note?.id != null ? isNoteInWorldOnlyScope(notes, note.id) : false),
     [note?.id, notes],
@@ -2044,6 +2046,25 @@ export default function NoteEditor({
           </div>
         )}
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' } : S.titleRow}>
+          {scopeKindLabel && note?.is_folder && (
+            <span
+              title={isWorldRoot ? 'World folder — shared setting layer' : 'Campaign folder — adventure scope'}
+              style={{
+                flexShrink: 0,
+                alignSelf: isMobile ? 'flex-start' : 'center',
+                fontFamily: 'var(--ch-font-display)',
+                fontSize: '9px',
+                letterSpacing: '0.14em',
+                color: isWorldRoot ? 'rgba(139,196,226,0.65)' : 'rgba(200,148,58,0.7)',
+                border: `1px solid ${isWorldRoot ? 'rgba(139,196,226,0.3)' : 'rgba(200,148,58,0.35)'}`,
+                borderRadius: '3px',
+                padding: '5px 10px',
+                background: isWorldRoot ? 'rgba(139,196,226,0.06)' : 'rgba(200,148,58,0.06)',
+              }}
+            >
+              {scopeKindLabel}
+            </span>
+          )}
           <input
             ref={titleInputRef}
             style={S.titleInput}

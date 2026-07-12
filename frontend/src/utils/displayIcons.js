@@ -38,11 +38,11 @@ export function getFolderTreeKind(folder, map) {
 /**
  * Short sidebar label for world or campaign scope roots; null for other rows.
  * @param {TreeKind} kind
- * @returns {'WORLD'|'CAMP'|null}
+ * @returns {'WORLD'|'CAMPAIGN'|null}
  */
 export function getScopeFolderKindLabel(kind) {
   if (kind === 'world') return 'WORLD';
-  if (kind === 'campaign') return 'CAMP';
+  if (kind === 'campaign') return 'CAMPAIGN';
   return null;
 }
 
