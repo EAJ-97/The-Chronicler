@@ -519,7 +519,7 @@ export default function NoteEditor({
   const showAiToolsTab = !!(
     isCampaignScopeRoot &&
     note?.is_folder &&
-    isDM &&
+    (isDM || isAdminUser) &&
     continuityFolderId &&
     (!underArchive || isAdminUser)
   );

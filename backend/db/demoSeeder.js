@@ -126,17 +126,18 @@ function collectWorldLayerNoteIds(worldRootId) {
  * @param {string} title - Folder title
  * @param {number} ownerUserId - Admin user id
  * @param {string|null} parentKey - Key into noteId for parent, or null for root
- * @param {object} [opts] - is_world, visibility
+ * @param {object} [opts] - is_world, is_campaign, visibility
  * @returns {number} New note id
  */
 function mkFolder(title, ownerUserId, parentKey, opts = {}) {
   const parentId = parentKey ? noteId[parentKey] : null;
   const visibility = opts.visibility || 'hidden';
   const isWorld = opts.is_world ? 1 : 0;
+  const isCampaign = opts.is_campaign ? 1 : 0;
   const r = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, is_folder, is_shared, visibility, category, narrative_weight, is_demo, is_world)
-    VALUES (?, ?, ?, 1, 0, ?, 'general', 'node', 1, ?)
-  `).run(ownerUserId, parentId, title, visibility, isWorld);
+    INSERT INTO notes (user_id, parent_id, title, is_folder, is_shared, visibility, category, narrative_weight, is_demo, is_world, is_campaign)
+    VALUES (?, ?, ?, 1, 0, ?, 'general', 'node', 1, ?, ?)
+  `).run(ownerUserId, parentId, title, visibility, isWorld, isCampaign);
   return r.lastInsertRowid;
 }
 
@@ -451,7 +452,7 @@ Use this note when players ask why everyone wants Veldrath. The Sunken Vale camp
 `, { significance: 'standard', weight: 'node', tags: ['world', 'trade', 'covenant'] }),
 
     // ── CAMPAIGN: THE SUNKEN VALE (nested under world) ─────────────────────
-    noteId.c1 = mkFolder('The Sunken Vale', A, 'world');
+    noteId.c1 = mkFolder('The Sunken Vale', A, 'world', { is_campaign: 1 });
 
     // Sub-folders
     noteId['c1_npcs']      = mkFolder('NPCs',             A, 'c1');

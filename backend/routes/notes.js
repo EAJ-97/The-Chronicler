@@ -38,6 +38,43 @@ const {
 
 const router = express.Router();
 
+/**
+ * Ensures a campaign folder has a Session Journal subfolder (party sessions / journal tab).
+ * Copies roster grants from the campaign root. No-op when one already exists.
+ * @param {number} campaignFolderId
+ * @param {number} ownerUserId
+ * @returns {number|null} Journal folder id or null on failure
+ */
+function ensureSessionJournalFolder(campaignFolderId, ownerUserId) {
+  const campaign = db.prepare(
+    'SELECT id, visibility FROM notes WHERE id = ? AND is_folder = 1 AND deleted_at IS NULL'
+  ).get(campaignFolderId);
+  if (!campaign) return null;
+
+  const existing = db.prepare(`
+    SELECT id FROM notes
+    WHERE parent_id = ? AND is_folder = 1 AND deleted_at IS NULL
+      AND LOWER(TRIM(title)) = 'session journal'
+    LIMIT 1
+  `).get(campaignFolderId);
+  if (existing) return existing.id;
+
+  const result = db.prepare(`
+    INSERT INTO notes (user_id, parent_id, title, content, is_folder, visibility, is_campaign)
+    VALUES (?, ?, 'Session Journal', '', 1, ?, 0)
+  `).run(ownerUserId, campaignFolderId, campaign.visibility || 'hidden');
+
+  const journalId = result.lastInsertRowid;
+  const grantees = db.prepare(
+    'SELECT user_id FROM note_permissions WHERE note_id = ?'
+  ).all(campaignFolderId);
+  const grantStmt = db.prepare(
+    'INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)'
+  );
+  grantees.forEach((r) => grantStmt.run(journalId, r.user_id));
+  return journalId;
+}
+
 // Helper: can this user see this note?
 function canSee(noteId, userId, isAdminUser) {
   if (isAdminUser) return true;
@@ -165,7 +202,7 @@ router.get('/', authenticateToken, (req, res) => {
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
-    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.source_note_id,
+    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.is_campaign, n.source_note_id,
     n.display_icon, n.display_summary, n.is_completed, n.ddb_character_id, u.username AS author`;
 
   let notes;
@@ -668,21 +705,33 @@ router.post('/', authenticateToken, (req, res) => {
   // Determine visibility: inherit from parent if exists
   let visibility = 'hidden';
   let inheritedGrants = [];
+  let parentRow = null;
   if (parent_id) {
-    const parent = db.prepare('SELECT id, user_id, visibility FROM notes WHERE id = ?').get(parent_id);
-    if (!parent) return res.status(404).json({ error: 'Parent folder not found' });
+    parentRow = db.prepare('SELECT id, user_id, visibility, is_world, parent_id FROM notes WHERE id = ?').get(parent_id);
+    if (!parentRow) return res.status(404).json({ error: 'Parent folder not found' });
     if (isNoteUnderCompletedArchive(parent_id) && !isAdmin(req.user.id)) {
       return res.status(403).json({ error: 'This campaign or world is marked completed; creating notes is disabled.' });
     }
-    visibility = parent.visibility;
+    visibility = parentRow.visibility;
     // Inherit parent's permission grants
     inheritedGrants = db.prepare('SELECT user_id FROM note_permissions WHERE note_id = ?').all(parent_id).map(r => r.user_id);
   }
 
+  const isCampaignFolder = !!(
+    is_folder &&
+    (
+      (!parent_id && !is_world) ||
+      (parentRow?.is_world && parentRow.parent_id == null && members && members.length > 0)
+    )
+  );
+
   const result = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility, is_world)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.user.id, parent_id, title.trim(), content, is_shared ? 1 : 0, is_folder ? 1 : 0, category, color, sort_order, visibility, is_world ? 1 : 0);
+    INSERT INTO notes (user_id, parent_id, title, content, is_shared, is_folder, category, color, sort_order, visibility, is_world, is_campaign)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    req.user.id, parent_id, title.trim(), content, is_shared ? 1 : 0, is_folder ? 1 : 0,
+    category, color, sort_order, visibility, is_world ? 1 : 0, isCampaignFolder ? 1 : 0
+  );
 
   const noteId = result.lastInsertRowid;
   saveTags(noteId, tags);
@@ -733,6 +782,10 @@ router.post('/', authenticateToken, (req, res) => {
     } else {
       db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(noteId, req.user.id);
     }
+  }
+
+  if (isCampaignFolder) {
+    ensureSessionJournalFolder(noteId, req.user.id);
   }
 
   res.status(201).json(withPermissions(withTags(note)));

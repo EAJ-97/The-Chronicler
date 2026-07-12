@@ -18,17 +18,19 @@ function getRootFolderId(noteId) {
 }
 
 /**
- * True when a folder is a playable campaign root (standalone or under a world with Session Journal).
- * World-layer organizer folders under a world (e.g. "World Lore") are not campaigns.
+ * True when a folder is a campaign scope root (standalone or nested under a world).
+ * World-layer organizer folders (e.g. World Lore) are not campaigns.
  * @param {number} folderId
  * @returns {boolean}
  */
 function isPlayableCampaignRoot(folderId) {
   const row = db.prepare(
-    'SELECT id, parent_id, is_folder, is_world FROM notes WHERE id = ? AND deleted_at IS NULL'
+    'SELECT id, parent_id, is_folder, is_world, is_campaign FROM notes WHERE id = ? AND deleted_at IS NULL'
   ).get(folderId);
   if (!row?.is_folder) return false;
   if (row.is_world && !row.parent_id) return false;
+  if (row.is_campaign) return true;
+  // Legacy fallback for rows not yet backfilled
   if (!row.parent_id && !row.is_world) return true;
   const parent = db.prepare(
     'SELECT id, is_world, parent_id FROM notes WHERE id = ? AND deleted_at IS NULL'

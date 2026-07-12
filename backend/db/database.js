@@ -97,6 +97,7 @@ db.exec(`
     is_demo            INTEGER  DEFAULT 0,
     status             TEXT     DEFAULT NULL,
     is_world           INTEGER  DEFAULT 0,
+    is_campaign        INTEGER  DEFAULT 0,
     source_note_id     INTEGER  DEFAULT NULL,
     display_icon       TEXT     DEFAULT NULL,
     display_summary    TEXT     DEFAULT NULL,
@@ -701,6 +702,44 @@ migrate('048_world_member_grant_snapshots', () => {
     CREATE INDEX IF NOT EXISTS idx_world_grant_snapshots_user
       ON world_member_grant_snapshots(world_folder_id, user_id);
   `);
+});
+
+// Campaign scope flag — distinguishes campaigns from world-layer folders (e.g. World Lore)
+migrate('049_notes_is_campaign', () => {
+  try { db.exec('ALTER TABLE notes ADD COLUMN is_campaign INTEGER DEFAULT 0'); } catch { /* fresh install */ }
+
+  // Standalone campaign roots (not world layers)
+  db.prepare(`
+    UPDATE notes SET is_campaign = 1
+    WHERE is_folder = 1 AND deleted_at IS NULL AND COALESCE(is_campaign, 0) = 0
+      AND parent_id IS NULL AND COALESCE(is_world, 0) = 0
+  `).run();
+
+  // Campaigns under a world that have a DM role (created via New Campaign modal)
+  db.prepare(`
+    UPDATE notes SET is_campaign = 1
+    WHERE is_folder = 1 AND deleted_at IS NULL AND COALESCE(is_campaign, 0) = 0
+      AND parent_id IN (
+        SELECT id FROM notes WHERE is_world = 1 AND parent_id IS NULL AND deleted_at IS NULL
+      )
+      AND EXISTS (
+        SELECT 1 FROM folder_roles fr WHERE fr.folder_id = notes.id AND fr.role = 'dm'
+      )
+  `).run();
+
+  // Campaigns under a world that already have a Session Journal child
+  db.prepare(`
+    UPDATE notes SET is_campaign = 1
+    WHERE is_folder = 1 AND deleted_at IS NULL AND COALESCE(is_campaign, 0) = 0
+      AND parent_id IN (
+        SELECT id FROM notes WHERE is_world = 1 AND parent_id IS NULL AND deleted_at IS NULL
+      )
+      AND EXISTS (
+        SELECT 1 FROM notes j
+        WHERE j.parent_id = notes.id AND j.is_folder = 1 AND j.deleted_at IS NULL
+          AND LOWER(TRIM(j.title)) = 'session journal'
+      )
+  `).run();
 });
 
 // ─── Default admin account (created once on first boot) ───────────────────────
