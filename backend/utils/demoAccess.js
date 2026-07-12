@@ -1,12 +1,15 @@
 'use strict';
 
 /**
- * Demo tenancy helpers: sync DM roles on demo roots for all users, and enforce
- * read-only demo trees for non-admins. Used by demoSeeder, auth, admin, and API routes.
+ * Demo tenancy helpers: targeted DM role sync on demo roots, outsider exclusion,
+ * and read-only demo trees for non-admins. Used by demoSeeder, auth, admin, and API routes.
  */
 
 const db = require('../db/database');
 const { getRootFolderId, isAdmin } = require('./access');
+
+/** Username with no world/campaign demo access (permission negative control). */
+const DEMO_OUTSIDER_USERNAME = 'demo_outsider';
 
 /**
  * Returns whether the Chronicler demo dataset flag is set in settings.
@@ -18,45 +21,81 @@ function isDemoSeeded() {
 }
 
 /**
- * Lists top-level folder note ids that belong to the demo dataset (campaign roots).
+ * True when the user is the designated demo outsider account.
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function isDemoOutsider(userId) {
+  if (!userId) return false;
+  const row = db.prepare('SELECT username, is_demo FROM users WHERE id = ?').get(userId);
+  return !!(row && row.is_demo && row.username === DEMO_OUTSIDER_USERNAME);
+}
+
+/**
+ * Lists demo campaign folder roots that need DM sync (Sunken Vale only — not world layer).
  * @returns {number[]}
  */
 function getDemoRootFolderIds() {
   const rows = db.prepare(`
     SELECT id FROM notes
-    WHERE parent_id IS NULL AND is_folder = 1 AND is_demo = 1 AND deleted_at IS NULL
+    WHERE is_folder = 1 AND is_demo = 1 AND deleted_at IS NULL
+      AND LOWER(TRIM(title)) = 'the sunken vale'
     ORDER BY id ASC
   `).all();
   return rows.map((r) => r.id);
 }
 
 /**
- * Ensures the given user has folder_roles DM on every demo root folder (idempotent).
- * @param {number} userId - User to grant DM on demo roots
+ * Ensures admins and existing demo DMs keep folder_roles on demo roots (idempotent).
+ * Does not grant DM to all users — demo_outsider is always skipped.
+ * @param {number} userId - User to sync
  * @returns {void}
  */
 function syncDemoDmRolesForUser(userId) {
   if (!userId || !Number.isFinite(Number(userId))) return;
+  if (isDemoOutsider(userId)) return;
+
   const uid = Number(userId);
   const roots = getDemoRootFolderIds();
   const ins = db.prepare(
     "INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')"
   );
+
+  if (isAdmin(uid)) {
+    for (const folderId of roots) {
+      ins.run(folderId, uid);
+    }
+    return;
+  }
+
   for (const folderId of roots) {
-    ins.run(folderId, uid);
+    const alreadyDm = db.prepare(
+      "SELECT 1 FROM folder_roles WHERE folder_id = ? AND user_id = ? AND role = 'dm'"
+    ).get(folderId, uid);
+    if (alreadyDm) {
+      ins.run(folderId, uid);
+    }
   }
 }
 
 /**
- * Grants every existing user DM on all demo root folders (idempotent). Call after
- * demo generate and optionally on login/repair.
+ * Syncs DM roles for the seeding admin and demo_dm after generate (idempotent repair).
+ * @param {number} adminUserId
+ * @returns {void}
+ */
+function syncDemoDmRolesAfterSeed(adminUserId) {
+  syncDemoDmRolesForUser(adminUserId);
+  const demoDm = db.prepare('SELECT id FROM users WHERE username = ?').get('demo_dm');
+  if (demoDm) syncDemoDmRolesForUser(demoDm.id);
+}
+
+/**
+ * @deprecated Use syncDemoDmRolesAfterSeed — kept for callers that still import the name.
  * @returns {void}
  */
 function syncDemoDmRolesForAllUsers() {
-  const users = db.prepare('SELECT id FROM users').all();
-  for (const { id } of users) {
-    syncDemoDmRolesForUser(id);
-  }
+  const admin = db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1').get();
+  if (admin) syncDemoDmRolesAfterSeed(admin.id);
 }
 
 /**
@@ -120,9 +159,12 @@ function demoMutateForbiddenForAny(userId, noteIds) {
 }
 
 module.exports = {
+  DEMO_OUTSIDER_USERNAME,
   isDemoSeeded,
+  isDemoOutsider,
   getDemoRootFolderIds,
   syncDemoDmRolesForUser,
+  syncDemoDmRolesAfterSeed,
   syncDemoDmRolesForAllUsers,
   isUnderDemoCampaign,
   demoMutateForbiddenMessage,

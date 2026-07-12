@@ -48,9 +48,12 @@ function filterNotesHideDemoRoots(allNotes, hideDemo) {
 }
 
 function findSunkenValeRootId(allNotes) {
-  const roots = (allNotes || []).filter((n) => n.is_folder && !n.parent_id && Number(n.is_demo) === 1);
-  const byTitle = roots.find((n) => String(n.title || '').trim().toLowerCase() === 'the sunken vale');
-  return (byTitle || roots[0] || null)?.id ?? null;
+  const match = (allNotes || []).find(
+    (n) => n.is_folder
+      && Number(n.is_demo) === 1
+      && String(n.title || '').trim().toLowerCase() === 'the sunken vale',
+  );
+  return match?.id ?? null;
 }
 
 const S = {

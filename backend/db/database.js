@@ -686,6 +686,23 @@ migrate('047_notes_folder_dm_tabs', () => {
   }
 });
 
+// World member grant snapshots — restore world-layer permissions on re-add after removal
+migrate('048_world_member_grant_snapshots', () => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS world_member_grant_snapshots (
+      world_folder_id INTEGER NOT NULL,
+      user_id         INTEGER NOT NULL,
+      note_id         INTEGER NOT NULL,
+      PRIMARY KEY (world_folder_id, user_id, note_id),
+      FOREIGN KEY (world_folder_id) REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id)         REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (note_id)         REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_grant_snapshots_user
+      ON world_member_grant_snapshots(world_folder_id, user_id);
+  `);
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

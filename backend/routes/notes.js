@@ -5,13 +5,29 @@ const {
   isAdmin,
   getRootFolderId,
   getCampaignFolderId,
+  getWorldParentForCampaign,
   isDMOf,
   isDMOfFolder,
   isGrantedUser,
   isCompletionScopeRoot,
   isNoteUnderCompletedArchive,
   isWorldOrCampaignRootFolder,
+  isNoteInWorldOnlyScope,
+  isNoteInPlayableCampaignScope,
+  isPlayableCampaignRoot,
+  isWorldMember,
+  isCampaignMember,
+  canAccessCampaignScope,
+  canCollaborateOnWorldLayer,
 } = require('../utils/access');
+const {
+  getScopeFolder,
+  getScopeMode,
+  grantMemberSelective,
+  revokeMemberScoped,
+  canManageWorldMembers,
+  getRosterUserIds,
+} = require('../utils/campaignMembers');
 const { isManagedSidebarIconUrl, unlinkManagedSidebarIconFile } = require('../utils/sidebarIcon');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const {
@@ -27,6 +43,15 @@ function canSee(noteId, userId, isAdminUser) {
   if (isAdminUser) return true;
   const note = db.prepare('SELECT user_id, visibility FROM notes WHERE id = ?').get(noteId);
   if (!note) return false;
+
+  if (isNoteInWorldOnlyScope(noteId)) {
+    const worldId = getRootFolderId(noteId);
+    if (!worldId || !isWorldMember(worldId, userId)) return false;
+  } else if (isNoteInPlayableCampaignScope(noteId)) {
+    const campaignId = getCampaignFolderId(noteId);
+    if (!campaignId || !canAccessCampaignScope(campaignId, userId)) return false;
+  }
+
   if (note.user_id === userId) return true;
   if (note.visibility === 'shared') return true;
   // Check note_permissions on this note OR any ancestor folder
@@ -204,13 +229,45 @@ router.get('/', authenticateToken, (req, res) => {
 
     notes = notes.filter(n => canAccessAncestors(n));
 
-    // DM visibility: include ALL notes from campaigns where user is DM
-    // When simulating DM, treat all root campaigns as DM campaigns
+    // World-layer notes require world roster membership (campaign subtrees use campaign roster).
+    if (!listingAdminAll && simulate !== 'dm') {
+      notes = notes.filter((n) => {
+        if (isNoteInWorldOnlyScope(n.id)) {
+          const worldId = getRootFolderId(n.id);
+          return worldId != null && isWorldMember(worldId, listingUserId);
+        }
+        if (isNoteInPlayableCampaignScope(n.id)) {
+          const campaignId = getCampaignFolderId(n.id);
+          return campaignId != null && canAccessCampaignScope(campaignId, listingUserId);
+        }
+        if (n.is_folder && isPlayableCampaignRoot(n.id)) {
+          return canAccessCampaignScope(n.id, listingUserId);
+        }
+        return true;
+      });
+    }
+
+    // DM visibility: include notes from campaigns where user is DM (world roots excluded — party-shared).
     const dmCampaigns = (simulate === 'dm')
-      ? db.prepare('SELECT id AS folder_id FROM notes WHERE parent_id IS NULL AND is_folder = 1 AND deleted_at IS NULL').all()
+      ? db.prepare(`
+          SELECT id AS folder_id FROM notes
+          WHERE is_folder = 1 AND deleted_at IS NULL
+            AND (
+              (parent_id IS NULL AND (is_world IS NULL OR is_world = 0))
+              OR EXISTS (
+                SELECT 1 FROM notes p
+                WHERE p.id = notes.parent_id AND p.is_world = 1 AND p.deleted_at IS NULL
+              )
+            )
+        `).all()
       : (!simulate)
-        ? db.prepare("SELECT folder_id FROM folder_roles WHERE user_id = ? AND role = 'dm'").all(listingUserId)
-        : []; // owner/granted/default — no DM boost
+        ? db.prepare(`
+            SELECT fr.folder_id FROM folder_roles fr
+            JOIN notes n ON n.id = fr.folder_id AND n.deleted_at IS NULL
+            WHERE fr.user_id = ? AND fr.role = 'dm'
+              AND NOT (n.is_world = 1 AND n.parent_id IS NULL)
+          `).all(listingUserId)
+        : [];
     if (dmCampaigns.length > 0) {
       const dmNoteIds = new Set();
       const q2 = dmCampaigns.map(r => r.folder_id);
@@ -239,12 +296,24 @@ router.get('/', authenticateToken, (req, res) => {
       while (parentId && !visibleIds.has(parentId) && !ancestorsToAdd.has(parentId)) {
         const ancestor = db.prepare(`SELECT ${LIST_COLS} FROM notes n JOIN users u ON n.user_id = u.id WHERE n.id = ?`).get(parentId);
         if (!ancestor) break;
+        if (ancestor.is_world && !ancestor.parent_id && !isWorldMember(ancestor.id, listingUserId)) {
+          break;
+        }
         ancestorsToAdd.set(ancestor.id, ancestor);
         visibleIds.add(ancestor.id);
         parentId = ancestor.parent_id;
       }
     });
     if (ancestorsToAdd.size > 0) notes = [...notes, ...ancestorsToAdd.values()];
+
+    if (!listingAdminAll) {
+      notes = notes.filter((n) => {
+        if (n.is_folder && n.is_world && !n.parent_id) {
+          return isWorldMember(n.id, listingUserId);
+        }
+        return true;
+      });
+    }
   }
 
   if (tag) {
@@ -309,15 +378,16 @@ router.get('/meta/my-dm-campaigns', authenticateToken, (req, res) => {
   res.json(rows.map(r => r.folder_id));
 });
 
-// GET world layer folders where current user is a DM (for campaign creation picker)
+// GET world layer folders where current user is a member (for campaign creation picker)
 router.get('/meta/worlds', authenticateToken, (req, res) => {
+  const admin = isAdmin(req.user.id);
   const worlds = db.prepare(`
     SELECT id, title, user_id FROM notes
     WHERE is_world = 1 AND parent_id IS NULL AND deleted_at IS NULL
-      AND EXISTS (SELECT 1 FROM folder_roles WHERE folder_id = notes.id AND user_id = ? AND role = 'dm')
     ORDER BY title ASC
-  `).all(req.user.id);
-  res.json(worlds);
+  `).all();
+  const visible = worlds.filter((w) => admin || isWorldMember(w.id, req.user.id));
+  res.json(visible);
 });
 
 // GET all tags (must be before /:id)
@@ -337,9 +407,58 @@ router.get('/meta/tags', authenticateToken, (req, res) => {
 
 // GET all users (for permission grants — available to all logged-in users)
 router.get('/meta/users', authenticateToken, (req, res) => {
-  const { campaign_id } = req.query;
+  const { campaign_id, world_id, candidate_pool } = req.query;
   let users;
-  if (campaign_id) {
+
+  if (world_id && candidate_pool === 'world_roster') {
+    const worldFolderId = parseInt(world_id, 10);
+    if (!Number.isFinite(worldFolderId)) {
+      return res.status(400).json({ error: 'Invalid world_id' });
+    }
+    const folder = getScopeFolder(worldFolderId);
+    if (!folder || getScopeMode(folder) !== 'world') {
+      return res.status(400).json({ error: 'world_id must be a world folder' });
+    }
+    users = db.prepare(`
+      SELECT DISTINCT u.id, u.username, u.is_admin, 0 as is_dm
+      FROM users u
+      WHERE EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = ? AND np.user_id = u.id)
+        OR EXISTS (SELECT 1 FROM notes w WHERE w.id = ? AND w.user_id = u.id)
+      ORDER BY u.username ASC
+    `).all(worldFolderId, worldFolderId);
+  } else if (campaign_id && candidate_pool === 'add') {
+    const scopeId = parseInt(campaign_id, 10);
+    if (!Number.isFinite(scopeId)) {
+      return res.status(400).json({ error: 'Invalid campaign_id' });
+    }
+    const folder = getScopeFolder(scopeId);
+    if (!folder || getScopeMode(folder) !== 'campaign') {
+      return res.status(400).json({ error: 'campaign_id must be a campaign folder' });
+    }
+
+    const rosterIds = new Set(getRosterUserIds(scopeId));
+    const worldId = getWorldParentForCampaign(scopeId);
+
+    if (worldId) {
+      users = db.prepare(`
+        SELECT DISTINCT u.id, u.username, u.is_admin, 0 as is_dm
+        FROM users u
+        WHERE u.id != ?
+          AND (
+            EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = ? AND np.user_id = u.id)
+            OR EXISTS (SELECT 1 FROM notes w WHERE w.id = ? AND w.user_id = u.id)
+          )
+        ORDER BY u.username ASC
+      `).all(req.user.id, worldId, worldId);
+    } else {
+      users = db.prepare(`
+        SELECT id, username, is_admin, 0 as is_dm FROM users
+        WHERE id != ?
+        ORDER BY username ASC
+      `).all(req.user.id);
+    }
+    users = users.filter((u) => !rosterIds.has(u.id));
+  } else if (campaign_id) {
     // Return only members of this campaign with is_dm flag
     users = db.prepare(`
       SELECT DISTINCT u.id, u.username, u.is_admin,
@@ -663,12 +782,14 @@ router.put('/:id', authenticateToken, (req, res) => {
 
   const isOwner   = note.user_id === req.user.id;
   const isGranted = !isOwner && isGrantedUser(note.id, req.user.id);
-  const isDM      = !isOwner && isDMOf(note.id, req.user.id);
+  const inWorldLayer = isNoteInWorldOnlyScope(note.id);
+  const worldCollaborator = inWorldLayer && canCollaborateOnWorldLayer(note.id, req.user.id, admin);
+  const isDM      = !inWorldLayer && !isOwner && isDMOf(note.id, req.user.id);
 
-  // Permission tiers
-  const canFullEdit  = admin || isOwner || isGranted; // full content edit
-  const canManage    = admin || isOwner || isDM;       // rename, move, perms, delete
-  const canAppend    = isDM && !canFullEdit;           // DM on another user's note
+  // Permission tiers — world layer is party-collaborative; campaigns keep DM tools/secrets.
+  const canFullEdit  = admin || isOwner || isGranted || worldCollaborator;
+  const canManage    = admin || isOwner || (inWorldLayer ? worldCollaborator : isDM);
+  const canAppend    = isDM && !canFullEdit;
 
   const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs } = req.body;
 
@@ -781,10 +902,12 @@ router.put('/:id', authenticateToken, (req, res) => {
 
   if (tags !== undefined && canFullEdit) saveTags(req.params.id, tags);
 
-  // DM Only cascade — when flag changes, propagate to subtree and fix permissions
+  // DM Only cascade — campaigns only (world layer is party-shared).
   const prevDmOnly = note.is_dm_only;
-  const newDmOnly  = (canManage && is_dm_only !== undefined) ? (is_dm_only ? 1 : 0) : prevDmOnly;
-  if (canManage && is_dm_only !== undefined && newDmOnly !== prevDmOnly) {
+  const newDmOnly  = (canManage && is_dm_only !== undefined && !inWorldLayer)
+    ? (is_dm_only ? 1 : 0)
+    : prevDmOnly;
+  if (canManage && is_dm_only !== undefined && !inWorldLayer && newDmOnly !== prevDmOnly) {
     // Build subtree (this note + all descendants)
     const subtree = [];
     const bfsQ = [parseInt(req.params.id)];
@@ -794,13 +917,19 @@ router.put('/:id', authenticateToken, (req, res) => {
       db.prepare('SELECT id FROM notes WHERE parent_id = ? AND deleted_at IS NULL').all(pid).forEach(c => bfsQ.push(c.id));
     }
 
-    // Find root campaign folder and its party members
-    const rootId = getRootFolderId(parseInt(req.params.id));
-    const partyMembers = rootId
-      ? db.prepare('SELECT user_id FROM note_permissions WHERE note_id = ?').all(rootId).map(r => r.user_id)
+    // Resolve party roster folder: campaign under a world uses campaign id, world-layer uses world root.
+    const noteId = parseInt(req.params.id, 10);
+    let rosterFolderId;
+    if (isNoteInWorldOnlyScope(noteId)) {
+      rosterFolderId = getRootFolderId(noteId);
+    } else {
+      rosterFolderId = getCampaignFolderId(noteId) || getRootFolderId(noteId);
+    }
+    const partyMembers = rosterFolderId
+      ? db.prepare('SELECT user_id FROM note_permissions WHERE note_id = ?').all(rosterFolderId).map(r => r.user_id)
       : [];
-    const dmUserIds = rootId
-      ? new Set(db.prepare("SELECT user_id FROM folder_roles WHERE folder_id = ? AND role = 'dm'").all(rootId).map(r => r.user_id))
+    const dmUserIds = rosterFolderId
+      ? new Set(db.prepare("SELECT user_id FROM folder_roles WHERE folder_id = ? AND role = 'dm'").all(rosterFolderId).map(r => r.user_id))
       : new Set();
     // Non-DM party members — their access is managed by the DM Only flag
     const regularMembers = partyMembers.filter(uid => !dmUserIds.has(uid));
@@ -813,7 +942,7 @@ router.put('/:id', authenticateToken, (req, res) => {
           if (nid !== parseInt(req.params.id)) {
             db.prepare('UPDATE notes SET is_dm_only = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nid);
           }
-          if (nid !== rootId) {
+          if (nid !== rosterFolderId) {
             regularMembers.forEach(uid => {
               db.prepare('DELETE FROM note_permissions WHERE note_id = ? AND user_id = ?').run(nid, uid);
             });
@@ -830,7 +959,7 @@ router.put('/:id', authenticateToken, (req, res) => {
           if (nid !== parseInt(req.params.id)) {
             db.prepare('UPDATE notes SET is_dm_only = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nid);
           }
-          if (nid !== rootId) {
+          if (nid !== rosterFolderId) {
             regularMembers.forEach(uid => grantStmt.run(nid, uid));
           }
         });
@@ -1031,53 +1160,60 @@ router.post('/:id/restore', authenticateToken, (req, res) => {
   if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
 
-// PUT campaign member management — DM or admin only, root folders only
+// PUT campaign / world member management — scope roots only
 router.put('/:id/members', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
-  const folder = db.prepare('SELECT * FROM notes WHERE id = ? AND is_folder = 1 AND parent_id IS NULL').get(req.params.id);
-  if (!folder) return res.status(404).json({ error: 'Campaign folder not found' });
+  const folderId = parseInt(req.params.id, 10);
+  const folder = getScopeFolder(folderId);
+  if (!folder || !folder.is_folder || !isWorldOrCampaignRootFolder(folderId)) {
+    return res.status(404).json({ error: 'World or campaign folder not found' });
+  }
 
   const dmMem = demoMutateForbiddenMessage(req.user.id, folder.id);
   if (dmMem) return res.status(403).json({ error: dmMem });
 
+  const mode = getScopeMode(folder);
   const isDM = isDMOf(folder.id, req.user.id);
-  if (!admin && !isDM) return res.status(403).json({ error: 'DM or admin only' });
+
+  if (mode === 'campaign') {
+    if (!admin && !isDM) return res.status(403).json({ error: 'DM or admin only' });
+  } else if (!canManageWorldMembers(folder.id, req.user.id, admin)) {
+    return res.status(403).json({ error: 'World member or admin only' });
+  }
 
   const { add_user_id, remove_user_id, set_dm } = req.body;
 
+  if (set_dm && mode === 'world') {
+    return res.status(400).json({ error: 'World layers do not use DM roles' });
+  }
+
   if (add_user_id) {
-    // Build the full campaign subtree
-    const toGrant = [];
-    const q = [folder.id];
-    while (q.length) {
-      const pid = q.shift();
-      toGrant.push(pid);
-      db.prepare('SELECT id FROM notes WHERE parent_id = ? AND deleted_at IS NULL').all(pid).forEach(c => q.push(c.id));
+    const newUserId = parseInt(add_user_id, 10);
+    if (!Number.isFinite(newUserId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
     }
-    // Grant access to all non-dm_only notes in the subtree
-    const grantStmt = db.prepare('INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)');
-    const grantAll = db.transaction(() => {
-      toGrant.forEach(noteId => {
-        const n = db.prepare('SELECT is_dm_only FROM notes WHERE id = ?').get(noteId);
-        if (n && !n.is_dm_only) grantStmt.run(noteId, add_user_id);
-      });
-    });
-    grantAll();
+    if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(newUserId)) {
+      return res.status(400).json({ error: 'User not found' });
+    }
+    try {
+      grantMemberSelective(folder.id, newUserId, mode);
+    } catch (err) {
+      if (err.code === 'WORLD_MEMBER_REQUIRED') {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
   }
 
   if (remove_user_id) {
-    // Remove from root note_permissions, folder_roles, AND all child notes in this campaign
-    const toClean = [folder.id];
-    const queue = [folder.id];
-    while (queue.length) {
-      const pid = queue.shift();
-      const children = db.prepare('SELECT id FROM notes WHERE parent_id = ? AND deleted_at IS NULL').all(pid);
-      children.forEach(c => { toClean.push(c.id); queue.push(c.id); });
+    const remUserId = parseInt(remove_user_id, 10);
+    if (!Number.isFinite(remUserId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
     }
-    const delPerm = db.prepare('DELETE FROM note_permissions WHERE note_id = ? AND user_id = ?');
-    const cleanAll = db.transaction(() => toClean.forEach(id => delPerm.run(id, remove_user_id)));
-    cleanAll();
-    db.prepare("DELETE FROM folder_roles WHERE folder_id = ? AND user_id = ?").run(folder.id, remove_user_id);
+    if (remUserId === folder.user_id) {
+      return res.status(400).json({ error: 'Cannot remove the folder owner' });
+    }
+    revokeMemberScoped(folder.id, remUserId, mode);
   }
 
   if (set_dm) {
@@ -1085,7 +1221,7 @@ router.put('/:id/members', authenticateToken, (req, res) => {
     // User must be a member to be set as DM
     const isMember = !!db.prepare('SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?').get(folder.id, user_id)
       || user_id === folder.user_id;
-    if (!isMember) return res.status(400).json({ error: 'User must be a campaign member to be assigned as DM' });
+    if (!isMember) return res.status(400).json({ error: 'User must be a member to be assigned as DM' });
     if (is_dm) {
       db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(folder.id, user_id);
     } else {

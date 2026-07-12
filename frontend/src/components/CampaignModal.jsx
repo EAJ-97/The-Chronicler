@@ -197,9 +197,18 @@ export default function CampaignModal({ currentUser, onConfirm, onClose, initial
   const inputRef = useRef(null);
 
   useEffect(() => {
-    api.get('/notes/meta/users').then(r => {
-      setAllUsers(r.data);
-      const nonMembers = r.data.filter(u => u.id !== currentUser.id);
+    const loadUsers = () => {
+      if (creationType === 'campaign' && selectedWorld !== 'none') {
+        return api.get('/notes/meta/users', {
+          params: { world_id: selectedWorld, candidate_pool: 'world_roster' },
+        }).then(r => r.data);
+      }
+      return api.get('/notes/meta/users').then(r => r.data);
+    };
+
+    loadUsers().then((data) => {
+      setAllUsers(data);
+      const nonMembers = data.filter(u => u.id !== currentUser.id);
       if (nonMembers.length > 0) setSelectedAdd(String(nonMembers[0].id));
     }).catch(() => {});
 
@@ -208,7 +217,7 @@ export default function CampaignModal({ currentUser, onConfirm, onClose, initial
     }).catch(() => {});
 
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
+  }, [creationType, selectedWorld, currentUser.id]);
 
   useEffect(() => {
     if (initialCreationType === 'world' || initialCreationType === 'campaign') {

@@ -89,6 +89,7 @@ function TreeNode({
   const isDM = isAdmin || isDmOfNote(node, dmCampaignIds, allNotes);
 
   const isRootFolder = isFolder && depth === 0;
+  const isWorldRootFolder = isFolder && !node.parent_id && !!node.is_world;
   const forceShowActions = isRootFolder && tutorialForceHoverNodeId === node.id;
   /** World root or standalone campaign root or a campaign folder whose parent is a world (export root). */
   const parentNote = node.parent_id && allNotes ? allNotes.find((n) => n.id === node.parent_id) : null;
@@ -320,7 +321,7 @@ function TreeNode({
             {canExportBackup && onExport && (
               <span ref={forceShowActions ? tutorialActionRefs?.export : null} title="Downloads JSON (admin import) + HTML (double-click to browse read-only)" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onExport(node.id, node.title); }}>💾</span>
             )}
-            {isFolder && canManage && (
+            {isFolder && canManage && !isWorldRootFolder && (
               <span ref={forceShowActions ? tutorialActionRefs?.sync : null} title="Sync visibility to all children" style={isMobile ? mobileActionBtn : actionBtn} onClick={e => { e.stopPropagation(); onSync(node.id, node.title); }}>⟳</span>
             )}
             {canManage && !isMobile && <span ref={forceShowActions ? tutorialActionRefs?.rename : null} title="Rename" style={actionBtn} onClick={startRename}>✎</span>}

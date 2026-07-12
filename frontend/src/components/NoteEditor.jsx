@@ -14,6 +14,7 @@ import {
   getSubtreeIds,
   isCompletionScopeRootNote,
   isUnderCompletedArchive,
+  isNoteInWorldOnlyScope,
 } from '../utils/campaignTree.js';
 import {
   getFolderTreeKind,
@@ -410,8 +411,38 @@ export default function NoteEditor({
   const isDM = isAdminUser || isDmOfNote(note, dmCampaignIds, notes);
 
   const isRootFolder = !!note?.is_folder && !note?.parent_id;
-  const canFullEdit = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isGranted);
-  const canManage   = isRootFolder ? (isAdminUser || isDM) : (isAdminUser || isOwner || isDM); // rename, delete, move, perms
+  const folderTreeKind = useMemo(() => {
+    if (!note?.is_folder) return 'note';
+    return getFolderTreeKind(note, notesByIdMap(notes || []));
+  }, [note, notes]);
+  const isWorldRoot = folderTreeKind === 'world';
+  const isCampaignScopeRoot = folderTreeKind === 'campaign';
+  const inWorldLayerOnly = useMemo(
+    () => (note?.id != null ? isNoteInWorldOnlyScope(notes, note.id) : false),
+    [note?.id, notes],
+  );
+  const worldCollaborator = isWorldRoot && (isOwner || isGranted);
+
+  /** World or campaign scope root — party / world member management. */
+  const showMemberPanel = isWorldRoot || isCampaignScopeRoot;
+  const canManageMembers = showMemberPanel && (
+    isWorldRoot
+      ? (isAdminUser || worldCollaborator)
+      : (isAdminUser || isDM)
+  );
+
+  const canFullEdit = !note ? false
+    : isWorldRoot || inWorldLayerOnly
+      ? (isAdminUser || isOwner || isGranted)
+      : isCampaignScopeRoot
+        ? (isAdminUser || isDM || isOwner || isGranted)
+        : (isAdminUser || isOwner || isGranted);
+  const canManage = !note ? false
+    : isWorldRoot || inWorldLayerOnly
+      ? (isAdminUser || isOwner || isGranted)
+      : isCampaignScopeRoot
+        ? (isAdminUser || isDM || isOwner)
+        : (isAdminUser || isOwner || isDM);
   const canAppend   = isDM && !isOwner && !isGranted && !isAdminUser; // DM on someone else's note
   const notesByIdForArchive = useMemo(() => notesByIdMap(notes || []), [notes]);
   const underArchive =
@@ -447,47 +478,47 @@ export default function NoteEditor({
 
   /** Folders: icon + description when user can manage or fully edit the folder */
   const canFolderStyle = !!(note?.is_folder && (canManage || canFullEdit));
-  const folderTreeKind = useMemo(() => {
-    if (!note?.is_folder) return 'note';
-    return getFolderTreeKind(note, notesByIdMap(notes || []));
-  }, [note, notes]);
 
-  /** DM AI Tools (NPC / location / item / continuity) only on world or campaign roots — not nested subfolders. */
-  const dmAiRootOnly = folderTreeKind === 'world' || folderTreeKind === 'campaign';
+  /** DM AI Tools (NPC / location / item / continuity) on campaign roots only — not world layer. */
+  const scopeRootForTools = isWorldRoot || isCampaignScopeRoot;
 
   /** Only world/campaign scope roots may store `is_completed` (matches backend). */
   const scopeRootForCompletion = !!(note?.is_folder && isCompletionScopeRootNote(note, notesByIdForArchive));
-  /** Owner, DM (folder_roles), or admin may flip completion — matches backend `canManage` + scope rules. */
+  /** Owner, DM (campaign), or admin may flip completion on campaigns; world uses party edit rules. */
   const canToggleCompletion =
     scopeRootForCompletion &&
+    !isWorldRoot &&
     (isAdminUser || isOwner || (dmCampaignIds || []).includes(note.id));
 
   /**
-   * Root folder for AI corpus: world root, or playable campaign folder for descendants.
-   * Used for DM-only continuity + NPC folder listing.
+   * Root folder for AI corpus: campaign folder only (world layer has no AI generators).
    */
   const continuityFolderId = useMemo(() => {
-    if (!note?.is_folder) return null;
-    if (note.is_world && !note.parent_id) return note.id;
+    if (!note?.is_folder || isWorldRoot) return null;
     const cid = getCampaignFolderIdForSelection(notes, note.id);
-    return cid ?? note.id;
-  }, [note, notes]);
+    return cid ?? (folderTreeKind === 'campaign' ? note.id : null);
+  }, [note, notes, isWorldRoot, folderTreeKind]);
 
   /**
-   * World/campaign root folders show a two-column editor for DMs/admins: party-visible `content` vs DM-only notes.
-   * Players see a single column (`content` only).
+   * Campaign root folders show a two-column editor for DMs/admins: party-visible `content` vs DM-only notes.
+   * World layer is single-column party content for all world members.
    */
   const showCampaignRootSplit =
-    dmAiRootOnly && !!note?.is_folder && (isDM || isAdminUser);
+    isCampaignScopeRoot && !!note?.is_folder && (isDM || isAdminUser);
 
-  /** Show root “Icons” tab for DMs/admins on world/campaign roots; demo users keep the tab but controls are read-only (`demoReadOnly`). */
-  const showIconsTab = !!(canFolderStyle && dmAiRootOnly && (canEditContent || demoReadOnly));
-  /** Same surfaces as a normal DM, including on demo showcase; generators stay disabled when `demoReadOnly`. */
+  /** Show root Icons tab — world: all collaborators; campaign: DMs/admins. */
+  const showIconsTab = !!(
+    canFolderStyle &&
+    scopeRootForTools &&
+    (isWorldRoot
+      ? (canEditContent || demoReadOnly)
+      : ((isDM || isAdminUser) && (canEditContent || demoReadOnly)))
+  );
   const showAiToolsTab = !!(
+    isCampaignScopeRoot &&
     note?.is_folder &&
     isDM &&
     continuityFolderId &&
-    dmAiRootOnly &&
     (!underArchive || isAdminUser)
   );
   const showContinuityTab = showAiToolsTab;
@@ -875,28 +906,38 @@ export default function NoteEditor({
     api.get('/notes/meta/tags').then(r => setAllTags(r.data.map(t => t.tag))).catch(() => {});
   }, []);
 
-  // Load users for permissions panel — scoped to campaign members if inside a campaign
+  // Load users for permissions panel — scoped to campaign/world members when inside a scope tree
   useEffect(() => {
-    if (!canManage) return;
-    if (isRootFolder) {
-      // We ARE the root — fetch this campaign's members directly
+    if (!note?.id || !canManage) return;
+    if (showMemberPanel) {
       api.get('/notes/meta/users', { params: { campaign_id: note.id } }).then(r => setAllUsers(r.data)).catch(() => {});
-    } else {
-      // Walk up to find root campaign folder id
-      const notesById = new Map((notes || []).map(n => [n.id, n]));
-      let current = note;
-      while (current?.parent_id) current = notesById.get(current.parent_id);
-      const rootId = current?.id;
-      const params = rootId ? { campaign_id: rootId } : {};
-      api.get('/notes/meta/users', { params }).then(r => setAllUsers(r.data)).catch(() => {});
+      return;
     }
-  }, [note?.id, isRootFolder]); // eslint-disable-line react-hooks/exhaustive-deps
+    const rosterId = getCampaignFolderIdForSelection(notes, note.id);
+    const notesById = notesByIdMap(notes || []);
+    let root = note;
+    while (root?.parent_id) {
+      const parent = notesById.get(root.parent_id);
+      if (!parent) break;
+      root = parent;
+    }
+    const scopeId = rosterId ?? root?.id;
+    const params = scopeId ? { campaign_id: scopeId } : {};
+    api.get('/notes/meta/users', { params }).then(r => setAllUsers(r.data)).catch(() => {});
+  }, [note?.id, canManage, showMemberPanel, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load all system users for add-member dropdown (root folders only)
+  // Load users eligible for add-member dropdown (world: all users; campaign: world roster when nested)
   useEffect(() => {
-    if (!isRootFolder || !canManage) return;
-    api.get('/notes/meta/users').then(r => setAllSystemUsers(r.data)).catch(() => {});
-  }, [isRootFolder, note?.id]);
+    if (!showMemberPanel || !canManageMembers) return;
+    if (isWorldRoot) {
+      api.get('/notes/meta/users').then(r => setAllSystemUsers(r.data)).catch(() => {});
+      return;
+    }
+    if (isCampaignScopeRoot && note?.id) {
+      api.get('/notes/meta/users', { params: { campaign_id: note.id, candidate_pool: 'add' } })
+        .then(r => setAllSystemUsers(r.data)).catch(() => {});
+    }
+  }, [showMemberPanel, canManageMembers, note?.id, isWorldRoot, isCampaignScopeRoot]);
 
 
   // Keyboard undo/redo (Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y)
@@ -2335,7 +2376,7 @@ export default function NoteEditor({
                 }}
               >
                 <strong style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', color: 'var(--ch-accent)' }}>DEMO SHOWCASE</strong>
-                {' — '}You can browse Icons, AI tools, and Continuity like a DM, but only admins may change demo data or run generators here.
+                {' — '}You can browse Icons{isCampaignScopeRoot ? ', AI tools, and Continuity' : ''} like a DM, but only admins may change demo data or run generators here.
               </div>
             )}
             <div
@@ -2863,7 +2904,7 @@ export default function NoteEditor({
         )}
 
         {/* Nested subfolders: Chronicle appearance (world/campaign roots use tabbed Icons above). */}
-        {canFolderStyle && canEditContent && !dmAiRootOnly && (
+        {canFolderStyle && canEditContent && !scopeRootForTools && (
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
@@ -3504,7 +3545,8 @@ export default function NoteEditor({
           {/* Permissions tab */}
           {drawerTab === 'permissions' && canManage && (
             <div>
-              {/* DM Only toggle — available on any note/folder for DMs and admins */}
+              {/* DM Only toggle — campaigns only (world layer is party-shared). */}
+              {!inWorldLayerOnly && !isWorldRoot && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px', marginBottom: '14px', borderRadius: '3px', background: isDmOnly ? 'rgba(200,148,58,0.08)' : 'rgba(255,255,255,0.02)', border: `1px solid ${isDmOnly ? 'rgba(200,148,58,0.25)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}
                 onClick={handleDmOnlyToggle}
               >
@@ -3526,10 +3568,13 @@ export default function NoteEditor({
                   </div>
                 </div>
               </div>
-              {/* Root folder: campaign member + DM management */}
-              {isRootFolder ? (
+              )}
+              {/* Scope root: world or campaign member management */}
+              {showMemberPanel && canManageMembers ? (
                 <div>
-                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '10px' }}>PARTY MEMBERS</div>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.4)', marginBottom: '10px' }}>
+                    {folderTreeKind === 'world' ? 'WORLD MEMBERS' : 'PARTY MEMBERS'}
+                  </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' }}>
                     {allUsers.map(u => (
                       <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 10px', borderRadius: '3px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -3537,7 +3582,8 @@ export default function NoteEditor({
                           {u.username}
                           {!!u.is_admin && <span style={{ marginLeft: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '7px', color: 'rgba(200,148,58,0.5)', letterSpacing: '0.1em' }}>ADMIN</span>}
                         </span>
-                        {/* DM label + toggle */}
+                        {!isWorldRoot && (
+                        <>
                         <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.08em', color: u.is_dm ? 'rgba(200,148,58,0.8)' : 'rgba(226,213,187,0.18)' }}>DM</span>
                         <button
                           onClick={() => handleToggleDM(u.id, !!u.is_dm)}
@@ -3551,6 +3597,8 @@ export default function NoteEditor({
                         >
                           <span style={{ position: 'absolute', top: '2px', width: '12px', height: '12px', borderRadius: '50%', background: '#e2d5bb', transition: 'left 0.15s', left: u.is_dm ? '16px' : '2px' }} />
                         </button>
+                        </>
+                        )}
                         {/* Remove from party */}
                         <button
                           onClick={() => handleRemoveMember(u.id)}
@@ -3606,7 +3654,9 @@ export default function NoteEditor({
                           <div style={{ overflowY: 'auto', flex: 1 }}>
                             {available.length === 0 ? (
                               <div style={{ padding: '10px 12px', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.3)', fontStyle: 'italic' }}>
-                                {allSystemUsers.length === 0 ? 'No other users in system.' : 'All users already in party.'}
+                                {allSystemUsers.length === 0
+                                  ? (isCampaignScopeRoot ? 'No eligible world members to add.' : 'No other users in system.')
+                                  : 'All eligible users already in party.'}
                               </div>
                             ) : available.map(u => (
                               <div key={u.id}

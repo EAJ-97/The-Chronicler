@@ -50,6 +50,55 @@ export function isWorldRootSelected(notes, selectedId) {
 }
 
 /**
+ * True when a folder is a playable campaign (standalone or under a world with Session Journal).
+ * @param {Array<object>} allNotes
+ * @param {object} folder
+ * @returns {boolean}
+ */
+export function isPlayableCampaignRootFolder(allNotes, folder) {
+  if (!folder?.is_folder) return false;
+  if (folder.is_world && !folder.parent_id) return false;
+  if (!folder.parent_id && !folder.is_world) return true;
+  const map = notesByIdMap(allNotes || []);
+  const parent = map.get(folder.parent_id);
+  if (!parent?.is_world || parent.parent_id != null) return false;
+  return (allNotes || []).some(
+    (n) => n.parent_id === folder.id
+      && n.is_folder
+      && String(n.title || '').trim().toLowerCase() === 'session journal',
+  );
+}
+
+/**
+ * True when a note lives in world-layer scope only (not inside a campaign under a world).
+ * Mirrors backend `isNoteInWorldOnlyScope`.
+ * @param {Array<object>} allNotes
+ * @param {number|null|undefined} noteId
+ * @returns {boolean}
+ */
+export function isNoteInWorldOnlyScope(allNotes, noteId) {
+  if (noteId == null) return false;
+  const map = notesByIdMap(allNotes || []);
+  let cur = map.get(noteId);
+  if (!cur) return false;
+  let root = cur;
+  while (root.parent_id != null) {
+    const p = map.get(root.parent_id);
+    if (!p) return false;
+    root = p;
+  }
+  if (!root.is_world) return false;
+  let walk = map.get(noteId);
+  while (walk) {
+    if (isPlayableCampaignRootFolder(allNotes, walk)) return false;
+    if (walk.id === root.id) return true;
+    if (!walk.parent_id) return false;
+    walk = map.get(walk.parent_id);
+  }
+  return false;
+}
+
+/**
  * Folders the Web graph and Journal should scope by: excludes world roots; includes
  * standalone campaigns and campaign folders directly under a world.
  * @param {Array<object>} allNotes
@@ -57,13 +106,7 @@ export function isWorldRootSelected(notes, selectedId) {
  */
 export function getGraphCampaignRoots(allNotes) {
   const notes = allNotes || [];
-  const map = notesByIdMap(notes);
-  return notes.filter((n) => {
-    if (!n.is_folder) return false;
-    if (!n.parent_id) return !n.is_world;
-    const p = map.get(n.parent_id);
-    return !!(p && p.is_world);
-  });
+  return notes.filter((n) => n.is_folder && isPlayableCampaignRootFolder(notes, n));
 }
 
 /**

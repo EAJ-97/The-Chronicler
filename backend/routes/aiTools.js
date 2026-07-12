@@ -452,8 +452,11 @@ router.post('/continuity/:folderId/generate', authenticateToken, async (req, res
   if (!isAiGloballyEnabled()) return res.status(503).json({ error: 'AI features are not enabled.' });
   if (!getAnthropicApiKey()) return res.status(503).json({ error: 'No Anthropic API key configured.' });
 
-  const folder = db.prepare('SELECT id, title, is_folder FROM notes WHERE id = ? AND deleted_at IS NULL').get(folderId);
+  const folder = db.prepare('SELECT id, title, is_folder, is_world, parent_id FROM notes WHERE id = ? AND deleted_at IS NULL').get(folderId);
   if (!folder || !folder.is_folder) return res.status(400).json({ error: 'Folder not found' });
+  if (folder.is_world && !folder.parent_id) {
+    return res.status(400).json({ error: 'Continuity is available on campaigns, not world layer folders.' });
+  }
 
   if (!isWorldOrCampaignRootFolder(folderId)) {
     return res.status(400).json({ error: 'Continuity runs only on a world or campaign root folder, not a nested subfolder.' });

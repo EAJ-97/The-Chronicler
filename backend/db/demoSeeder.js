@@ -1,24 +1,142 @@
 'use strict';
+const bcrypt = require('bcryptjs');
 const db = require('./database');
+
+/** Generic demo account usernames created by ensureDemoUsers. */
+const DEMO_USERNAMES = [
+  'demo_dm',
+  'demo_player1',
+  'demo_player2',
+  'demo_player3',
+  'demo_player4',
+  'demo_outsider',
+];
+
+/** Demo accounts excluded from world/campaign rosters (permission negative control). */
+const DEMO_OUTSIDER_USERNAME = 'demo_outsider';
 
 // ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
-const noteId  = {};  // name → db id, populated as we insert
+const noteId = {}; // name → db id, populated as we insert
 
 /**
- * Creates a demo folder row owned by the seeding admin (all demo content shares one owner).
+ * Resolves the demo seed password from env with a local-dev fallback.
+ * @returns {string}
+ */
+function getDemoSeedPassword() {
+  return process.env.DEMO_SEED_PASSWORD || 'demo1234';
+}
+
+/**
+ * Creates or reuses generic demo users flagged users.is_demo = 1.
+ * @returns {Promise<{ ids: Record<string, number>, password_hint: string }>}
+ */
+async function ensureDemoUsers() {
+  const password = getDemoSeedPassword();
+  const hash = await bcrypt.hash(password, 12);
+  const ids = {};
+  const insert = db.prepare(
+    'INSERT INTO users (username, password_hash, is_admin, is_demo) VALUES (?, ?, 0, 1)'
+  );
+  const find = db.prepare('SELECT id FROM users WHERE username = ?');
+
+  for (const username of DEMO_USERNAMES) {
+    const existing = find.get(username);
+    if (existing) {
+      ids[username] = existing.id;
+    } else {
+      const r = insert.run(username, hash);
+      ids[username] = r.lastInsertRowid;
+    }
+  }
+
+  return { ids, password_hint: password };
+}
+
+/**
+ * Inserts note_permissions for a user on a note (idempotent).
+ * @param {number} userId
+ * @param {number} noteId
+ * @returns {void}
+ */
+function grantNote(userId, noteId) {
+  db.prepare('INSERT OR IGNORE INTO note_permissions (note_id, user_id) VALUES (?, ?)').run(noteId, userId);
+}
+
+/**
+ * Assigns DM folder role on a campaign/world root (idempotent).
+ * @param {number} userId
+ * @param {number} folderId
+ * @returns {void}
+ */
+function grantDm(userId, folderId) {
+  db.prepare("INSERT OR IGNORE INTO folder_roles (folder_id, user_id, role) VALUES (?, ?, 'dm')").run(folderId, userId);
+}
+
+/**
+ * Grants a user access to every note id in a list (skips dm-only unless includeDmOnly).
+ * @param {number} userId
+ * @param {number[]} noteIds
+ * @param {boolean} [includeDmOnly=false]
+ * @returns {void}
+ */
+function grantNotes(userId, noteIds, includeDmOnly = false) {
+  for (const nid of noteIds) {
+    if (!includeDmOnly) {
+      const row = db.prepare('SELECT is_dm_only FROM notes WHERE id = ?').get(nid);
+      if (row?.is_dm_only) continue;
+    }
+    grantNote(userId, nid);
+  }
+}
+
+/**
+ * Collects all note ids in a folder subtree (inclusive).
+ * @param {number} rootId
+ * @returns {number[]}
+ */
+function collectSubtreeNoteIds(rootId) {
+  const ids = [];
+  const queue = [rootId];
+  while (queue.length) {
+    const pid = queue.shift();
+    ids.push(pid);
+    const children = db.prepare(
+      'SELECT id FROM notes WHERE parent_id = ? AND deleted_at IS NULL'
+    ).all(pid);
+    for (const c of children) queue.push(c.id);
+  }
+  return ids;
+}
+
+/**
+ * Collects note ids directly under a world root (world layer only, not nested campaigns).
+ * Delegates to campaignMembers.collectScopedNoteIds so campaign folders are excluded.
+ * @param {number} worldRootId
+ * @returns {number[]}
+ */
+function collectWorldLayerNoteIds(worldRootId) {
+  const { collectScopedNoteIds } = require('../utils/campaignMembers');
+  return collectScopedNoteIds(worldRootId, 'world');
+}
+
+/**
+ * Creates a demo folder row owned by the seeding admin (party-shared hidden visibility).
  * @param {string} title - Folder title
  * @param {number} ownerUserId - Admin user id
  * @param {string|null} parentKey - Key into noteId for parent, or null for root
+ * @param {object} [opts] - is_world, visibility
  * @returns {number} New note id
  */
-function mkFolder(title, ownerUserId, parentKey) {
+function mkFolder(title, ownerUserId, parentKey, opts = {}) {
   const parentId = parentKey ? noteId[parentKey] : null;
+  const visibility = opts.visibility || 'hidden';
+  const isWorld = opts.is_world ? 1 : 0;
   const r = db.prepare(`
-    INSERT INTO notes (user_id, parent_id, title, is_folder, is_shared, visibility, category, narrative_weight, is_demo)
-    VALUES (?, ?, ?, 1, 1, 'shared', 'general', 'node', 1)
-  `).run(ownerUserId, parentId, title);
+    INSERT INTO notes (user_id, parent_id, title, is_folder, is_shared, visibility, category, narrative_weight, is_demo, is_world)
+    VALUES (?, ?, ?, 1, 0, ?, 'general', 'node', 1, ?)
+  `).run(ownerUserId, parentId, title, visibility, isWorld);
   return r.lastInsertRowid;
 }
 
@@ -36,11 +154,13 @@ function mkFolder(title, ownerUserId, parentKey) {
 function mkNote(key, title, ownerUserId, parentKey, category, content, opts = {}) {
   const parentId = parentKey ? noteId[parentKey] : null;
   const dmOnly = opts.is_dm_only ? 1 : 0;
+  const visibility = opts.visibility || 'hidden';
   const r = db.prepare(`
     INSERT INTO notes (user_id, parent_id, title, content, is_folder, is_shared, visibility, category, significance, narrative_weight, is_demo, is_dm_only)
-    VALUES (?, ?, ?, ?, 0, 1, 'shared', ?, ?, ?, 1, ?)
+    VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, 1, ?)
   `).run(
     ownerUserId, parentId, title, content,
+    visibility,
     category,
     opts.significance || 'standard',
     opts.weight || 'node',
@@ -86,6 +206,129 @@ function mkEntry(sessionId, folderKey, authorUserId, content, indent = 0, ts) {
     INSERT INTO journal_entries (user_id, folder_id, session_id, content, indent_level, sort_order, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(authorUserId, noteId[folderKey], sessionId, content, indent, maxOrder + 1, ts);
+}
+
+/**
+ * Places a timeline event box on the Sunken Vale campaign axis.
+ * @param {string} campaignKey - noteId key for campaign root (c1)
+ * @param {string|null} noteKey - linked note key, or null for empty box
+ * @param {number} createdByUserId
+ * @param {number} anchor_x
+ * @param {number} end_x
+ * @param {number} end_y
+ * @param {string} time_label
+ * @returns {void}
+ */
+function mkTimelinePoint(campaignKey, noteKey, createdByUserId, anchor_x, end_x, end_y, time_label) {
+  const folderId = noteId[campaignKey];
+  const noteIdVal = noteKey ? noteId[noteKey] : null;
+  db.prepare(`
+    INSERT INTO timeline_points (
+      folder_id, block_id, note_id, anchor_x, end_x, end_y, path_json,
+      sort_order, time_label, label_override, created_by
+    )
+    VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)
+  `).run(folderId, noteIdVal, anchor_x, end_x, end_y, anchor_x, time_label, createdByUserId);
+}
+
+/**
+ * Removes all non-demo notes owned by demo accounts (legacy welcome folders, etc.).
+ * @returns {void}
+ */
+function cleanupDemoUserPersonalNotes() {
+  db.prepare('DELETE FROM notes WHERE user_id IN (SELECT id FROM users WHERE is_demo = 1) AND is_demo = 0').run();
+}
+/**
+ * Applies world/campaign roster grants and partial-grant scenarios for permission testing.
+ * @param {number} adminUserId - Seeding admin
+ * @param {Record<string, number>} demoIds - Username → user id from ensureDemoUsers
+ * @returns {void}
+ */
+function applyDemoPermissions(adminUserId, demoIds) {
+  const worldRoot = noteId.world;
+  const campaignRoot = noteId.c1;
+  const worldLayerIds = collectWorldLayerNoteIds(worldRoot);
+  const campaignSubtreeIds = collectSubtreeNoteIds(campaignRoot);
+
+  const worldMembers = [
+    demoIds.demo_dm,
+    demoIds.demo_player1,
+    demoIds.demo_player2,
+    demoIds.demo_player3,
+  ];
+  const campaignMembers = [
+    demoIds.demo_dm,
+    demoIds.demo_player1,
+    demoIds.demo_player2,
+    demoIds.demo_player3,
+  ];
+  const fullPartyPlayers = [
+    demoIds.demo_player1,
+    demoIds.demo_player2,
+    demoIds.demo_player3,
+  ];
+  const partialPlayer3Exclude = new Set([noteId.castor, noteId.pale_hand].filter(Boolean));
+
+  grantDm(adminUserId, campaignRoot);
+  grantDm(demoIds.demo_dm, campaignRoot);
+
+  for (const uid of worldMembers) {
+    grantNotes(uid, worldLayerIds);
+  }
+  for (const uid of campaignMembers) {
+    grantNote(uid, campaignRoot);
+  }
+  for (const uid of fullPartyPlayers) {
+    for (const nid of campaignSubtreeIds) {
+      if (partialPlayer3Exclude.has(nid) && uid === demoIds.demo_player3) continue;
+      grantNotes(uid, [nid]);
+    }
+  }
+
+  // Demo accounts are login-only test identities; no personal welcome folders.
+}
+
+/**
+ * Backfills Sunken Vale timeline points when missing (idempotent).
+ * @param {number} createdByUserId
+ * @returns {void}
+ */
+function patchDemoTimeline(createdByUserId) {
+  const campaign = db.prepare(
+    "SELECT id FROM notes WHERE is_demo = 1 AND is_folder = 1 AND title = 'The Sunken Vale' AND deleted_at IS NULL LIMIT 1"
+  ).get();
+  if (!campaign) return;
+
+  const count = db.prepare('SELECT COUNT(*) AS c FROM timeline_points WHERE folder_id = ?').get(campaign.id);
+  if (count.c > 0) return;
+
+  const noteByTitle = (title) => db.prepare(
+    "SELECT id FROM notes WHERE is_demo = 1 AND title = ? AND deleted_at IS NULL AND is_folder = 0 LIMIT 1"
+  ).get(title)?.id;
+
+  const points = [
+    { title: 'Veldrath City', anchor_x: 120, end_x: 40, end_y: -80, time_label: 'Year 0 — Founding' },
+    { title: 'The Iron Covenant', anchor_x: 280, end_x: 200, end_y: 100, time_label: '60 years ago' },
+    { title: 'The Gilded Anchor', anchor_x: 440, end_x: 360, end_y: -90, time_label: 'Session 1' },
+    { title: 'The Ashwood', anchor_x: 600, end_x: 520, end_y: 110, time_label: 'Session 2' },
+    { title: 'The Undercroft', anchor_x: 760, end_x: 680, end_y: -100, time_label: 'Session 3' },
+    { title: 'Find the Source of the Corruption', anchor_x: 920, end_x: 840, end_y: 90, time_label: 'Present' },
+    { title: 'The Sunken Vale', anchor_x: 1080, end_x: 1000, end_y: -110, time_label: 'Awakening' },
+  ];
+
+  const ins = db.prepare(`
+    INSERT INTO timeline_points (
+      folder_id, block_id, note_id, anchor_x, end_x, end_y, path_json,
+      sort_order, time_label, label_override, created_by
+    )
+    VALUES (?, NULL, ?, ?, ?, ?, NULL, ?, ?, NULL, ?)
+  `);
+
+  for (const p of points) {
+    const nid = noteByTitle(p.title);
+    if (!nid) continue;
+    ins.run(campaign.id, nid, p.anchor_x, p.end_x, p.end_y, p.anchor_x, p.time_label, createdByUserId);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -136,20 +379,26 @@ function patchDemoNoteLinks() {
       db.prepare('UPDATE notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, qMain.id);
     }
   }
+
+  const admin = db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1').get();
+  if (admin) patchDemoTimeline(admin.id);
 }
 
 /**
- * Inserts the full demo dataset owned by the given admin user. Does not create users.
- * Caller must run syncDemoDmRolesForAllUsers() after a successful seed.
+ * Inserts the full demo dataset owned by the given admin user.
+ * Creates generic demo accounts, world + nested Sunken Vale, permissions, and timeline.
  * @param {number} adminUserId - Authenticated admin performing generate
- * @returns {{ skipped?: boolean, seeded?: boolean, patched?: boolean }}
+ * @returns {Promise<{ skipped?: boolean, seeded?: boolean, patched?: boolean, demo_users?: object[] }>}
  */
-function seed(adminUserId) {
+async function seed(adminUserId) {
   const already = db.prepare("SELECT value FROM settings WHERE key = 'demo_seeded'").get();
   if (already?.value === 'true') {
+    cleanupDemoUserPersonalNotes();
     patchDemoNoteLinks();
     return { skipped: true, patched: true };
   }
+
+  const { ids: demoIds, password_hint } = await ensureDemoUsers();
 
   const run = db.transaction(() => {
     if (!adminUserId || !Number.isFinite(Number(adminUserId))) {
@@ -157,8 +406,52 @@ function seed(adminUserId) {
     }
     const A = Number(adminUserId);
 
-    // ── CAMPAIGN 1: THE SUNKEN VALE ────────────────────────────────────────
-    noteId['c1'] = mkFolder('The Sunken Vale', A, null);
+    cleanupDemoUserPersonalNotes();
+
+    // ── WORLD: THE VELDRATH SETTING ───────────────────────────────────────
+    noteId.world = mkFolder('The Veldrath Setting', A, null, { is_world: 1 });
+    noteId.world_lore = mkFolder('World Lore', A, 'world');
+
+    mkNote('world_overview', 'Veldrath Regional Overview', A, 'world_lore', 'lore', `## Veldrath Regional Overview
+*World layer — shared setting bible*
+
+The Veldrath coast is where trade routes from the eastern kingdoms meet the Vale River. Nobles in Highward preach stability while the Lows absorb every shock from cartel debt and cult whispers.
+
+### Why This Matters
+Campaigns set here inherit regional politics, the Iron Covenant's chokehold on shipping, and the Ashwood's slow awakening. DMs can run multiple tables in the same world without merging party secrets.
+
+### Current Era
+Lord Castor Mourne chairs the Trade Council. The Circle of the Root maintains ancient wards. Something older stirs beneath the Sunken Vale ruins east of the city.
+`, { significance: 'major', weight: 'landmark', tags: ['world', 'veldrath', 'overview'] }),
+
+    mkNote('world_founding', 'The Founding of Veldrath', A, 'world_lore', 'lore', `## The Founding of Veldrath
+*World layer — historical primer*
+
+Veldrath began as a fortress town guarding the Vale mouth. Merchants settled the lower terraces; the keep on the summit became Ironhold when the first lord sealed a pact with river pilots and smith guilds.
+
+### The Vale Taboo
+City records avoid discussing pre-Founding structures in the eastern valley. Archivists who pressed the question were reassigned — or vanished. The phrase **"the gate must not be fed"** appears in fragments predating the city's own ledgers.
+
+### Modern Tensions
+The Iron Covenant treats the river as an asset to acquire. Cult activity in the Lows is denied in council sessions. The Circle of the Root knows more than it shares with outsiders.
+`, { significance: 'standard', weight: 'node', tags: ['world', 'history', 'veldrath'] }),
+
+    mkNote('world_trade', 'Eastern Trade Routes', A, 'world_lore', 'lore', `## Eastern Trade Routes
+*World layer — economic context*
+
+Veldrath sits on the shortest saltwater path to the Borderlands and the Free Cities. Covenant factors have spent twelve years buying warehouses, pilots, and debt.
+
+### Choke Points
+- Vale River mouth (Veldrath docks)
+- Ashwood northern passes (Circle-controlled, increasingly dangerous)
+- Overland caravans through the Ironhold District toll gates
+
+### For DMs
+Use this note when players ask why everyone wants Veldrath. The Sunken Vale campaign assumes Covenant pressure is already acute.
+`, { significance: 'standard', weight: 'node', tags: ['world', 'trade', 'covenant'] }),
+
+    // ── CAMPAIGN: THE SUNKEN VALE (nested under world) ─────────────────────
+    noteId.c1 = mkFolder('The Sunken Vale', A, 'world');
 
     // Sub-folders
     noteId['c1_npcs']      = mkFolder('NPCs',             A, 'c1');
@@ -677,73 +970,6 @@ Guildmaster Vask made the decision personally. If the ritual succeeds and causes
 Factor Dray was not informed of the Pale Hand arrangement. She is operating in good faith on the Veldrath takeover and would be horrified by the ritual. She is a potential lever if the party finds this out.
 `, { significance: 'major', weight: 'node', tags: ['lore', 'iron covenant', 'dm only'], is_dm_only: true }),
 
-    // ── CAMPAIGN 2: WHISPERS OF THE ASHBORN ───────────────────────────────
-    noteId['c2'] = mkFolder('Whispers of the Ashborn', A, null);
-    noteId['c2_npcs']    = mkFolder('NPCs',           A, 'c2');
-    noteId['c2_locs']    = mkFolder('Locations',      A, 'c2');
-    noteId['c2_quests']  = mkFolder('Quests',         A, 'c2');
-    noteId['c2_journal'] = mkFolder('Session Journal', A, 'c2');
-
-    mkNote('c2_zara', 'Zara of the Ashborn', A, 'c2_npcs', 'npc', `## Zara of the Ashborn
-*Protagonist — Tiefling, 24*
-
-Former member of a nomadic clan that was scattered by an imperial conscription raid. She is searching for surviving clan members and increasingly suspicious that the "accident" was not an accident.
-
-### Party Role
-This is the one-shot campaign's main contact. The party has been hired to escort her to the Borderlands, where the last known survivor — her younger brother Renn — was reportedly seen.
-
-### Her Abilities
-Knows the Old Roads by memory. Has minor divination magic she calls "reading the ash" — inherited from her grandmother.
-
-### The Complication
-Renn may not be the person she remembers. Reports suggest he has joined the Ironsworn, the same military force that destroyed their clan.
-`, { significance: 'major', weight: 'landmark', tags: ['npc', 'tiefling', 'main contact'] }),
-
-    mkNote('c2_borderlands', 'The Borderlands', A, 'c2_locs', 'location', `## The Borderlands
-*Region — Frontier Territory*
-
-A contested region between the Empire and the Free Cities. No single authority governs it. The Ashborn nomads have lived here for generations precisely because nobody else wanted it.
-
-### Current State
-The Ironsworn have established three outposts. Technically they claim it's for "protection of trade routes." The nomadic clans that remain say it's occupation with better branding.
-
-### Travel Notes
-- The Old Roads are faster but increasingly patrolled
-- The Ashroads (Zara's route) are slower but almost invisible to outsiders
-- Weather turns hard fast in the plateau sections — be prepared
-`, { significance: 'standard', weight: 'node', tags: ['location', 'borderlands', 'frontier'] }),
-
-    mkNote('c2_renn', 'Renn (Zara\'s Brother)', A, 'c2_npcs', 'npc', `## Renn
-*Complex NPC — Tiefling, 19*
-
-Zara's younger brother. Currently a probationary soldier in the Ironsworn 3rd Company. He was not conscripted — he enlisted willingly, two months after the clan was scattered.
-
-### The Question
-Does he know what the Ironsworn did? Does he know it wasn't an accident? Did he join because he was scared and it was safety — or because something else is going on?
-
-### DM Answer
-He knows. He joined because an Ironsworn officer promised him information about which clan members survived in exchange for service. He has been paying that price for eight months. He is not okay.
-
-### The Meeting
-Will be difficult. He does not want to be found by Zara specifically — he's ashamed. The party will need to decide whether to bring him home or respect that he's made a different choice.
-`, { significance: 'major', weight: 'node', tags: ['npc', 'tiefling', 'family'] }),
-
-    mkNote('c2_q1', 'Find Renn', A, 'c2_quests', 'event', `## QUEST: Find Renn
-*Status: Active — Session 1*
-
-Escort Zara from the Free City of Maren to the Borderlands and locate her brother Renn, last reported near Ironsworn Outpost 3.
-
-### Complications
-- The Old Roads are watched
-- Zara doesn't know Renn joined the Ironsworn willingly
-- A bounty hunter named Griss has been following Zara — unknown who hired him
-
-### Session 1 Progress
-- Party met Zara at the Salt Market in Maren
-- Griss made contact and backed off when Brennan called his bluff
-- Currently two days travel from the Borderlands on the Ashroads
-`, { significance: 'major', weight: 'landmark', tags: ['main quest', 'escort', 'family'] }),
-
     // ── CONNECTIONS ─────────────────────────────────────────────────────────
     mkConn('castor',       'iron_covenant',  'financed by',       A);
     mkConn('castor',       'pale_hand',      'secret financier',  A);
@@ -774,9 +1000,15 @@ Escort Zara from the Free City of Maren to the Borderlands and locate her brothe
     mkConn('veldrath',     'ironhold',       'dominated by',      A);
     mkConn('veldrath',     'undercroft',     'underlies',         A);
     mkConn('boldwin',      'gilded_anchor',  'owns',              A);
-    mkConn('c2_zara',      'c2_renn',        'searching for',     A);
-    mkConn('c2_zara',      'c2_borderlands', 'traveling to',      A);
-    mkConn('c2_renn',      'c2_q1',          'subject of',        A);
+
+    // ── TIMELINE: SUNKEN VALE ─────────────────────────────────────────────
+    mkTimelinePoint('c1', 'veldrath', A, 120, 40, -80, 'Year 0 — Founding');
+    mkTimelinePoint('c1', 'iron_covenant', A, 280, 200, 100, '60 years ago');
+    mkTimelinePoint('c1', 'gilded_anchor', A, 440, 360, -90, 'Session 1');
+    mkTimelinePoint('c1', 'ashwood', A, 600, 520, 110, 'Session 2');
+    mkTimelinePoint('c1', 'undercroft', A, 760, 680, -100, 'Session 3');
+    mkTimelinePoint('c1', 'q_main', A, 920, 840, 90, 'Present');
+    mkTimelinePoint('c1', 'sunken_vale', A, 1080, 1000, -110, 'Awakening');
 
     // ── JOURNAL: CAMPAIGN 1 ──────────────────────────────────────────────
     const s1 = mkSession('c1', '2025-01-15 18:00:00');
@@ -823,9 +1055,14 @@ Escort Zara from the Free City of Maren to the Borderlands and locate her brothe
     mkEntry(s3,'c1',A,'Session ended with party back at the Gilded Anchor. 10 days until dark moon. Halveth sent a message via Boldwin — wants to meet privately.',0,'2025-01-29 19:00:00');
 
     // ── SESSION ATTENDANCE: CAMPAIGN 1 ──────────────────────────────────
-    // Mark all existing server users as attended for sample sessions (IDs resolved at seed time).
-    const attendeeIds = db.prepare('SELECT id FROM users').all().map((r) => r.id);
-    for (const uid of attendeeIds) {
+    const partyAttendeeIds = [
+      A,
+      demoIds.demo_dm,
+      demoIds.demo_player1,
+      demoIds.demo_player2,
+      demoIds.demo_player3,
+    ];
+    for (const uid of partyAttendeeIds) {
       db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s1, uid);
       db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s2, uid);
       db.prepare("INSERT OR IGNORE INTO session_attendance (session_id, user_id, attended) VALUES (?, ?, 1)").run(s3, uid);
@@ -849,18 +1086,13 @@ Escort Zara from the Free City of Maren to the Borderlands and locate her brothe
       `).run(s4, item.content, item.checked, i + 1, A);
     });
 
-    // ── JOURNAL: CAMPAIGN 2 ──────────────────────────────────────────────
-    const cs1 = mkSession('c2', '2025-02-05 18:00:00');
-    mkEntry(cs1,'c2',A,'Session 1 — "Salt Market" — Feb 5',0,'2025-02-05 18:00:00');
-    mkEntry(cs1,'c2',A,'Party hired at the Salt Market in Maren. The job: escort Zara to the Borderlands. She was vague about why she needed protection specifically. Sable noticed the bounty hunter Griss watching from across the square.',0,'2025-02-05 18:05:00');
-    mkEntry(cs1,'c2',A,'Griss is Thornfield Guild. Mid-range contract work. Whoever hired him didn\'t want to spend much, or they wanted deniability.',1,'2025-02-05 18:06:00');
-    mkEntry(cs1,'c2',A,'Brennan confronted Griss directly. Griss backed down when he realized the party was more prepared than his briefing suggested. He left the market. Zara thanked Brennan with visible relief.',0,'2025-02-05 18:20:00');
-    mkEntry(cs1,'c2',A,'He\'ll be back. People like Griss don\'t give up the contract, they just reassess the approach.',1,'2025-02-05 18:21:00');
-    mkEntry(cs1,'c2',A,'Departed Maren on the Ashroads. Zara knows these paths intuitively — she barely has to think about direction. She was quieter as they got further from the city.',0,'2025-02-05 18:35:00');
-    mkEntry(cs1,'c2',A,'She\'s reading the ash — literally. She stops occasionally and stirs a small patch of soil or ash with her fingers, then adjusts course slightly. I asked her about it. She said her grandmother called it listening to where the land has been.',1,'2025-02-05 18:36:00');
-    mkEntry(cs1,'c2',A,'Session ended camped in the foothills, one day from the Borderlands. Zara spoke more about Renn in the evening — before the raid, he was studying to be a mapmaker. She carried one of his unfinished maps.',0,'2025-02-05 19:00:00');
+    mkEntry(s4, 'c1', A, 'Session 4 — "Halveth\'s Gambit" — Feb 5', 0, '2025-02-05 18:00:00');
+    mkEntry(s4, 'c1', A, 'Private meeting with Captain Halveth at the east dock safe house. He confirmed Mourne funds the Pale Hand but lacks proof the council would accept.', 0, '2025-02-05 18:10:00');
+    mkEntry(s4, 'c1', A, 'Halveth will open the aqueduct route for one night if the party can move Sera to the Circle\'s Grove first.', 0, '2025-02-05 18:15:00');
+    mkEntry(s4, 'c1', A, 'Sable spotted Griss-style surveillance on the docks — unrelated bounty work or Hand watchers?', 1, '2025-02-05 18:16:00');
+    mkEntry(s4, 'c1', A, 'Party voted to prioritize the Shard retrieval before the dark moon. Lira requested time to compare the binding diagram with Sylvaine\'s maps.', 0, '2025-02-05 18:30:00');
 
-    // Sample DM-only campaign folder notes (visible to all DMs; demo is read-only for non-admins in API).
+    // Sample DM-only campaign folder tabs on Sunken Vale root.
     const dmFolderTabs = JSON.stringify([
       {
         id: 'demo-prep',
@@ -874,8 +1106,9 @@ Use tabs to organize clocks, fronts, and encounter math. Players only see the **
         content: '- Veldrath may betray the party in Act II\n- The sunken vale holds an older god',
       },
     ]);
-    db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL WHERE id = ?').run(dmFolderTabs, noteId['c1']);
-    db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL WHERE id = ?').run(dmFolderTabs, noteId['c2']);
+    db.prepare('UPDATE notes SET folder_dm_tabs = ?, folder_dm_content = NULL WHERE id = ?').run(dmFolderTabs, noteId.c1);
+
+    applyDemoPermissions(A, demoIds);
 
     patchDemoNoteLinks();
 
@@ -884,7 +1117,22 @@ Use tabs to organize clocks, fronts, and encounter math. Players only see the **
   });
 
   run();
-  return { seeded: true };
+
+  const demo_users = DEMO_USERNAMES.map((username) => ({
+    username,
+    password_hint,
+    role: username === DEMO_OUTSIDER_USERNAME
+      ? 'no world/campaign access (permission test)'
+      : username === 'demo_dm'
+        ? 'DM on world + Sunken Vale'
+        : username === 'demo_player4'
+          ? 'no access — not on world roster (invite to world first)'
+          : username === 'demo_player3'
+            ? 'partial note grants (missing Castor + Pale Hand)'
+            : 'full party visibility',
+  }));
+
+  return { seeded: true, demo_users };
 }
 
 /**
@@ -899,7 +1147,17 @@ function wipe() {
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('demo_seeded', 'false')").run();
   });
   wipeRun();
+  cleanupDemoUserPersonalNotes();
   return { wiped: true };
 }
 
-module.exports = { seed, wipe, patchDemoNoteLinks };
+module.exports = {
+  seed,
+  wipe,
+  patchDemoNoteLinks,
+  cleanupDemoUserPersonalNotes,
+  ensureDemoUsers,
+  DEMO_USERNAMES,
+  DEMO_OUTSIDER_USERNAME,
+  getDemoSeedPassword,
+};

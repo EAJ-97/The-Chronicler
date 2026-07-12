@@ -2,7 +2,7 @@
  * Tree / sidebar display icons: optional per-row emoji plus defaults by folder kind (world,
  * campaign, subfolder) or note category. Used by NoteList and NoteEditor appearance panels.
  */
-import { notesByIdMap } from './campaignTree.js';
+import { notesByIdMap, isPlayableCampaignRootFolder } from './campaignTree.js';
 
 /**
  * Matches server-generated paths under /api/images/files (hex basename + image ext).
@@ -30,10 +30,8 @@ export function isManagedSidebarIconUrl(s) {
 export function getFolderTreeKind(folder, map) {
   if (!folder?.is_folder) return 'note';
   if (folder.is_world && !folder.parent_id) return 'world';
-  const parent = folder.parent_id != null ? map.get(folder.parent_id) : null;
-  if (parent?.is_world) return 'campaign';
-  // Standalone campaign: root folder that is not a world layer
-  if (!folder.parent_id && !folder.is_world) return 'campaign';
+  const allNotes = [...map.values()];
+  if (isPlayableCampaignRootFolder(allNotes, folder)) return 'campaign';
   return 'subfolder';
 }
 

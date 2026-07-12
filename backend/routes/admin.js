@@ -61,8 +61,8 @@ router.post('/users', authenticateToken, adminOnly, async (req, res) => {
 
     const newId = result.lastInsertRowid;
     try {
-      const { isDemoSeeded, syncDemoDmRolesForUser } = require('../utils/demoAccess');
-      if (isDemoSeeded()) syncDemoDmRolesForUser(newId);
+      const { isDemoSeeded, syncDemoDmRolesForUser, isDemoOutsider } = require('../utils/demoAccess');
+      if (isDemoSeeded() && !isDemoOutsider(newId)) syncDemoDmRolesForUser(newId);
     } catch (syncErr) {
       console.error('[admin/users demo sync]', syncErr);
     }
@@ -132,13 +132,13 @@ router.get('/demo/status', authenticateToken, adminOnly, (req, res) => {
   res.json({ demo_seeded: seeded?.value === 'true' });
 });
 
-// POST generate demo data (owned by requesting admin; all users receive DM on demo roots after seed)
-router.post('/demo/generate', authenticateToken, adminOnly, (req, res) => {
+// POST generate demo data (owned by requesting admin; demo_dm + admin receive DM on demo roots)
+router.post('/demo/generate', authenticateToken, adminOnly, async (req, res) => {
   try {
     const { seed } = require('../db/demoSeeder');
-    const { syncDemoDmRolesForAllUsers } = require('../utils/demoAccess');
-    const result = seed(req.user.id);
-    if (result.seeded) syncDemoDmRolesForAllUsers();
+    const { syncDemoDmRolesAfterSeed } = require('../utils/demoAccess');
+    const result = await seed(req.user.id);
+    if (result.seeded) syncDemoDmRolesAfterSeed(req.user.id);
     res.json(result);
   } catch (err) {
     console.error('[demo/generate]', err);

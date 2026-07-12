@@ -173,6 +173,8 @@ const AdminPanel = forwardRef(function AdminPanel(
   const [restoring, setRestoring] = useState(null);
   const [demoSeeded, setDemoSeeded] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  /** Demo login table returned from POST /admin/demo/generate. */
+  const [demoUsers, setDemoUsers] = useState([]);
   // Backup
   const [backupInfo, setBackupInfo]       = useState(null);
   const [backupLoading, setBackupLoading] = useState(false);
@@ -294,22 +296,26 @@ const AdminPanel = forwardRef(function AdminPanel(
   };
 
   const handleGenerateDemo = async () => {
-    if (!window.confirm('Generate demo data? This creates 2 sample campaigns (~40 notes, journal sessions) owned by you. All current users become DMs on those campaigns; only admins can edit demo content. Refresh the page after generating.')) return;
+    if (!window.confirm(
+      'Generate demo data? This creates the Veldrath world, The Sunken Vale campaign (notes, web, journal, timeline), and six generic demo accounts. Only admins and demo_dm can edit demo content. Refresh after generating.',
+    )) return;
     setDemoLoading(true); setError(''); setSuccess('');
     try {
-      await api.post('/admin/demo/generate');
+      const res = await api.post('/admin/demo/generate');
       setDemoSeeded(true);
-      setSuccess('Demo data generated! Refresh the page to see it.');
+      if (res.data?.demo_users?.length) setDemoUsers(res.data.demo_users);
+      setSuccess('Demo data generated! Refresh the page to see it in the sidebar.');
     } catch (err) { setError(err.response?.data?.error || 'Failed to generate demo'); }
     setDemoLoading(false);
   };
 
   const handleWipeDemo = async () => {
-    if (!window.confirm('Wipe all demo data? This permanently deletes demo campaigns, notes, and journal sessions. Your real user accounts are not removed.')) return;
+    if (!window.confirm('Wipe all demo data? This permanently deletes demo campaigns, notes, and journal sessions. Demo user accounts are kept; demo content is removed.')) return;
     setDemoLoading(true); setError(''); setSuccess('');
     try {
       await api.delete('/admin/demo/wipe');
       setDemoSeeded(false);
+      setDemoUsers([]);
       setSuccess('Demo data wiped successfully.');
     } catch (err) { setError(err.response?.data?.error || 'Failed to wipe demo'); }
     setDemoLoading(false);
@@ -581,7 +587,7 @@ const AdminPanel = forwardRef(function AdminPanel(
             <div style={S.section}>
               <div style={S.sectionTitle}>Demo Environment</div>
               <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.5)', lineHeight: '1.6', marginBottom: '16px' }}>
-                Inserts two sample campaigns (NPCs, locations, factions, journal sessions, connections, DM-only examples) owned by <strong style={{ color: 'rgba(200,148,58,0.75)' }}>you</strong> — no separate “demo” logins. Every existing user is granted DM on those roots so they see the full tree; new sign-ups are synced the same way. <strong style={{ color: 'rgba(200,148,58,0.75)' }}>Only admins</strong> can edit demo content; everyone else gets a read-only showcase. Wipe removes only flagged demo notes and sessions, not real users.
+                Inserts <strong style={{ color: 'rgba(200,148,58,0.75)' }}>The Veldrath Setting</strong> world layer with nested campaign <strong style={{ color: 'rgba(200,148,58,0.75)' }}>The Sunken Vale</strong> — NPCs, locations, factions, connections, journal sessions, timeline events, and a permission test matrix. Content is owned by you; generic <code style={{ color: 'rgba(200,148,58,0.65)' }}>demo_*</code> accounts can log in to test party vs world access. <strong style={{ color: 'rgba(200,148,58,0.75)' }}>Only admins</strong> and <strong style={{ color: 'rgba(200,148,58,0.75)' }}>demo_dm</strong> can edit demo content.
               </div>
               <div style={{ padding: '14px', background: 'rgba(255,255,255,0.02)', border: `1px solid ${demoSeeded ? 'rgba(58,196,139,0.2)' : 'rgba(255,255,255,0.07)'}`, borderRadius: '3px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: demoSeeded ? 'rgba(58,196,139,0.8)' : 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
@@ -590,7 +596,7 @@ const AdminPanel = forwardRef(function AdminPanel(
                     {demoSeeded ? 'DEMO DATA ACTIVE' : 'NO DEMO DATA'}
                   </div>
                   <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)' }}>
-                    {demoSeeded ? 'Shared demo campaigns are loaded; players can open Tutorial or hide demo folders from the user (⋯) menu.' : 'No demo content has been generated yet.'}
+                    {demoSeeded ? 'Tutorial targets The Sunken Vale. Use demo_outsider to test inviting members with selective grants.' : 'No demo content has been generated yet.'}
                   </div>
                 </div>
               </div>
@@ -608,12 +614,38 @@ const AdminPanel = forwardRef(function AdminPanel(
                   </button>
                 )}
               </div>
+              {demoUsers.length > 0 && (
+                <div style={{ marginTop: '16px', padding: '12px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid rgba(200,148,58,0.15)', borderRadius: '3px' }}>
+                  <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.55)', marginBottom: '10px' }}>DEMO LOGINS</div>
+                  <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.45)', marginBottom: '10px' }}>
+                    Password for all demo accounts: <strong style={{ color: 'rgba(200,148,58,0.75)' }}>{demoUsers[0]?.password_hint || 'demo1234'}</strong>
+                    {demoUsers[0]?.password_hint === 'demo1234' && ' (default — set DEMO_SEED_PASSWORD in .env for production)'}
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.5)' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: 'rgba(200,148,58,0.5)' }}>
+                        <th style={{ padding: '4px 8px 4px 0', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em' }}>USER</th>
+                        <th style={{ padding: '4px 0', fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em' }}>ROLE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demoUsers.map((u) => (
+                        <tr key={u.username}>
+                          <td style={{ padding: '3px 8px 3px 0', color: 'rgba(226,213,187,0.65)' }}>{u.username}</td>
+                          <td style={{ padding: '3px 0' }}>{u.role}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <div style={{ marginTop: '16px', padding: '10px 14px', background: 'rgba(200,148,58,0.04)', border: '1px solid rgba(200,148,58,0.1)', borderRadius: '3px' }}>
                 <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', marginBottom: '8px' }}>HOW DEMO WORKS</div>
                 <ul style={{ margin: 0, paddingLeft: '18px', fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.45)', lineHeight: 1.55 }}>
-                  <li>Party members sign in with their <strong style={{ color: 'rgba(200,148,58,0.65)' }}>normal</strong> accounts — there are no extra demo passwords.</li>
-                  <li>After you generate, ask users to refresh once so the sidebar and <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_seeded</strong> menu items appear.</li>
-                  <li>If someone still cannot see a demo root, have them log out and back in (sync runs on login / session check).</li>
+                  <li>Generate once, then refresh so <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_seeded</strong> and the sidebar update.</li>
+                  <li><strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_outsider</strong> has no world or campaign access — use Party Members to invite them and verify selective grants.</li>
+                  <li><strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_player4</strong> is not on the world roster — empty sidebar until invited to the world (then campaigns separately). <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_player3</strong> lacks grants on Lord Castor Mourne and The Pale Hand.</li>
+                  <li>Run the Tutorial as admin or <strong style={{ color: 'rgba(200,148,58,0.65)' }}>demo_dm</strong> for full DM surfaces on The Sunken Vale.</li>
                 </ul>
               </div>
             </div>

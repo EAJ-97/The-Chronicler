@@ -17,6 +17,32 @@ function getRootFolderId(noteId) {
   return current.id;
 }
 
+/**
+ * True when a folder is a playable campaign root (standalone or under a world with Session Journal).
+ * World-layer organizer folders under a world (e.g. "World Lore") are not campaigns.
+ * @param {number} folderId
+ * @returns {boolean}
+ */
+function isPlayableCampaignRoot(folderId) {
+  const row = db.prepare(
+    'SELECT id, parent_id, is_folder, is_world FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(folderId);
+  if (!row?.is_folder) return false;
+  if (row.is_world && !row.parent_id) return false;
+  if (!row.parent_id && !row.is_world) return true;
+  const parent = db.prepare(
+    'SELECT id, is_world, parent_id FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(row.parent_id);
+  if (!parent?.is_world || parent.parent_id != null) return false;
+  const journal = db.prepare(`
+    SELECT 1 FROM notes
+    WHERE parent_id = ? AND is_folder = 1 AND deleted_at IS NULL
+      AND LOWER(TRIM(title)) = 'session journal'
+    LIMIT 1
+  `).get(row.id);
+  return !!journal;
+}
+
 // Get the "campaign ownership context" folder for a note.
 // In a 3-tier model (world -> campaigns -> notes):
 //   - Note inside a campaign under a world -> returns the campaign folder (depth 1)
@@ -46,14 +72,10 @@ function getCampaignFolderId(noteId) {
   }
   
   // Root IS a world layer (is_world=1)
-  // If chain length is 2 (note -> campaign), return the campaign (depth 1)
-  // If chain length is 1 (note IS the world root), return the world root
-  // If chain length > 2 (note -> subfolder -> campaign), return the campaign folder (depth 1 from world)
-  if (chain.length >= 2) {
-    return chain[chain.length - 2]; // Return the folder at depth 1 from world
+  for (let i = 0; i < chain.length; i++) {
+    if (isPlayableCampaignRoot(chain[i])) return chain[i];
   }
-  
-  return root; // Note is directly under the world layer
+  return root;
 }
 
 // Is this user a DM of the campaign containing noteId?
@@ -144,22 +166,142 @@ function isWorldOrCampaignRootFolder(folderId) {
     .get(folderId);
   if (!row?.is_folder) return false;
   if (row.is_world && !row.parent_id) return true;
-  if (!row.parent_id && !row.is_world) return true;
-  if (row.parent_id) {
-    const p = db.prepare('SELECT is_world FROM notes WHERE id = ? AND deleted_at IS NULL').get(row.parent_id);
-    if (p?.is_world) return true;
-  }
-  return false;
+  return isPlayableCampaignRoot(folderId);
+}
+
+/**
+ * True when a note lives in world-layer scope (not inside a campaign folder under a world).
+ * @param {number} noteId
+ * @returns {boolean}
+ */
+function isNoteInWorldOnlyScope(noteId) {
+  const rootId = getRootFolderId(noteId);
+  if (!rootId) return false;
+  const root = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(rootId);
+  if (!root || !root.is_world) return false;
+  const campaignCtx = getCampaignFolderId(noteId);
+  return campaignCtx === rootId;
+}
+
+/**
+ * World root folder id when a campaign lives directly under a world layer; else null.
+ * @param {number} campaignFolderId
+ * @returns {number|null}
+ */
+function getWorldParentForCampaign(campaignFolderId) {
+  const folder = db.prepare(
+    'SELECT parent_id FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(campaignFolderId);
+  if (!folder?.parent_id) return null;
+  const parent = db.prepare(
+    'SELECT id, is_world, parent_id FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(folder.parent_id);
+  if (parent?.is_world && parent.parent_id == null) return parent.id;
+  return null;
+}
+
+/**
+ * True when the user is on a playable campaign roster (owner, granted, or campaign DM).
+ * @param {number} campaignFolderId
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function isCampaignMember(campaignFolderId, userId) {
+  if (!campaignFolderId || !userId) return false;
+  if (!isPlayableCampaignRoot(campaignFolderId)) return false;
+  const folder = db.prepare(
+    'SELECT user_id FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(campaignFolderId);
+  if (!folder) return false;
+  if (folder.user_id === userId) return true;
+  if (db.prepare(
+    'SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?'
+  ).get(campaignFolderId, userId)) return true;
+  return !!db.prepare(
+    "SELECT 1 FROM folder_roles WHERE folder_id = ? AND user_id = ? AND role = 'dm'"
+  ).get(campaignFolderId, userId);
+}
+
+/**
+ * True when the user may access a campaign folder and its subtree.
+ * Campaigns nested under a world require world roster membership first; standalone campaigns do not.
+ * @param {number} campaignFolderId
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function canAccessCampaignScope(campaignFolderId, userId) {
+  if (!campaignFolderId || !userId) return false;
+  if (!isCampaignMember(campaignFolderId, userId)) return false;
+  const worldId = getWorldParentForCampaign(campaignFolderId);
+  if (worldId && !isWorldMember(worldId, userId)) return false;
+  return true;
+}
+
+/**
+ * True when a note lives inside a playable campaign subtree (standalone or under a world).
+ * @param {number} noteId
+ * @returns {boolean}
+ */
+function isNoteInPlayableCampaignScope(noteId) {
+  const campaignId = getCampaignFolderId(noteId);
+  if (!campaignId || !isPlayableCampaignRoot(campaignId)) return false;
+  const rootId = getRootFolderId(noteId);
+  if (!rootId) return false;
+  const root = db.prepare('SELECT is_world FROM notes WHERE id = ?').get(rootId);
+  if (!root?.is_world) return true;
+  return campaignId !== rootId;
+}
+
+/**
+ * True when the user is on the world roster (owner, granted, or world DM).
+ * @param {number} worldFolderId
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function isWorldMember(worldFolderId, userId) {
+  const folder = db.prepare(
+    'SELECT id, user_id, is_world, deleted_at FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(worldFolderId);
+  if (!folder || !folder.is_world) return false;
+  if (folder.user_id === userId) return true;
+  return !!db.prepare(
+    'SELECT 1 FROM note_permissions WHERE note_id = ? AND user_id = ?'
+  ).get(worldFolderId, userId);
+}
+
+/**
+ * True when the user may edit or manage notes in world-layer scope (collaborative, not DM-gated).
+ * @param {number} noteId
+ * @param {number} userId
+ * @param {boolean} [admin=false]
+ * @returns {boolean}
+ */
+function canCollaborateOnWorldLayer(noteId, userId, admin = false) {
+  if (admin || isAdmin(userId)) return true;
+  if (!isNoteInWorldOnlyScope(noteId)) return false;
+  const worldId = getRootFolderId(noteId);
+  if (!worldId) return false;
+  const note = db.prepare('SELECT user_id FROM notes WHERE id = ?').get(noteId);
+  if (note?.user_id === userId) return true;
+  return isWorldMember(worldId, userId);
 }
 
 module.exports = {
   isAdmin,
   getRootFolderId,
   getCampaignFolderId,
+  getWorldParentForCampaign,
   isDMOf,
   isDMOfFolder,
   isGrantedUser,
   isCompletionScopeRoot,
   isNoteUnderCompletedArchive,
   isWorldOrCampaignRootFolder,
+  isPlayableCampaignRoot,
+  isNoteInWorldOnlyScope,
+  isNoteInPlayableCampaignScope,
+  isWorldMember,
+  isCampaignMember,
+  canAccessCampaignScope,
+  canCollaborateOnWorldLayer,
 };

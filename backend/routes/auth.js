@@ -4,7 +4,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db/database');
 const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
-const { seedDemoForAdmin, seedDemoForUser } = require('../utils/demoSeed');
 
 const router = express.Router();
 
@@ -61,21 +60,10 @@ router.post('/register', async (req, res) => {
       'INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)'
     ).run(username, passwordHash, isFirstUser ? 1 : 0);
 
-    // Seed demo data
-    try {
-      if (isFirstUser) {
-        seedDemoForAdmin(result.lastInsertRowid);
-      } else {
-        seedDemoForUser(result.lastInsertRowid);
-      }
-    } catch (seedErr) {
-      console.error('Demo seed failed (non-fatal):', seedErr.message);
-    }
-
     const newUserId = result.lastInsertRowid;
     try {
-      const { isDemoSeeded, syncDemoDmRolesForUser } = require('../utils/demoAccess');
-      if (isDemoSeeded()) syncDemoDmRolesForUser(newUserId);
+      const { isDemoSeeded, syncDemoDmRolesForUser, isDemoOutsider } = require('../utils/demoAccess');
+      if (isDemoSeeded() && !isDemoOutsider(newUserId)) syncDemoDmRolesForUser(newUserId);
     } catch (e) {
       console.error('[register demo sync]', e.message);
     }
@@ -136,8 +124,8 @@ router.get('/me', authenticateToken, (req, res) => {
   const demo_seeded = getDemoSeededFlag();
   if (demo_seeded) {
     try {
-      const { syncDemoDmRolesForUser } = require('../utils/demoAccess');
-      syncDemoDmRolesForUser(req.user.id);
+      const { syncDemoDmRolesForUser, isDemoOutsider } = require('../utils/demoAccess');
+      if (!isDemoOutsider(req.user.id)) syncDemoDmRolesForUser(req.user.id);
     } catch (e) {
       console.error('[auth/me demo sync]', e.message);
     }
