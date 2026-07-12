@@ -21,6 +21,7 @@ import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
 import { useWindowWidth } from '../hooks/useWindowWidth.js';
 import { buildTutorialSteps } from '../tutorial/tutorialSteps.js';
 import { findDemoNoteByTitle, buildNoteLinkTutorialExample } from '../tutorial/tutorialExample.js';
+import { PEEK_PANEL_MS, PEEK_SPLIT_TRANSITION } from '../utils/panelAnimation.js';
 
 /** Campaign timeline tab — horizontal note pins curated by the DM. */
 const SHOW_TIMELINE_TAB = true;
@@ -286,6 +287,11 @@ export default function Dashboard({ user, onLogout }) {
   const [graphPanelNoteId, setGraphPanelNoteId] = useState(null);
   /** Stacked note ids opened from `note:` links in preview (right-hand peek panel). */
   const [refStack, setRefStack] = useState([]);
+  /** Drives slide-in/out on the peek panel (300ms, matches image lightbox). */
+  const [peekPanelOpen, setPeekPanelOpen] = useState(false);
+  const refStackRef = useRef(refStack);
+  const peekCloseTimerRef = useRef(null);
+  const prevRefStackLenRef = useRef(0);
   const [undoToast, setUndoToast] = useState(null); // { id, title, timer }
   const [simulatedRole, setSimulatedRole] = useState(null); // null=admin, 'dm','owner','granted','hidden'
   const [viewAsUserId, setViewAsUserId] = useState(null); // admin: full visibility as another user (exclusive with simulatedRole)
@@ -325,22 +331,62 @@ export default function Dashboard({ user, onLogout }) {
     if (!SHOW_TIMELINE_TAB && view === 'timeline') setView('notes');
   }, [view]);
 
+  useEffect(() => { refStackRef.current = refStack; }, [refStack]);
+
+  /** Slide peek panel in when the stack goes from empty to open; keep open when pushing deeper links. */
+  useEffect(() => {
+    const len = refStack.length;
+    if (len === 0) {
+      setPeekPanelOpen(false);
+      prevRefStackLenRef.current = 0;
+      return;
+    }
+    if (prevRefStackLenRef.current === 0) {
+      setPeekPanelOpen(false);
+      const id = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setPeekPanelOpen(true));
+      });
+      prevRefStackLenRef.current = len;
+      return () => cancelAnimationFrame(id);
+    }
+    setPeekPanelOpen(true);
+    prevRefStackLenRef.current = len;
+  }, [refStack]);
+
+  /**
+   * Animates the peek panel closed, then clears the stack after PEEK_PANEL_MS.
+   * No-op when the stack is already empty.
+   */
+  const closePeekPanel = useCallback(() => {
+    if (!refStackRef.current.length) return;
+    setPeekPanelOpen(false);
+    if (peekCloseTimerRef.current) clearTimeout(peekCloseTimerRef.current);
+    peekCloseTimerRef.current = setTimeout(() => {
+      setRefStack([]);
+      peekCloseTimerRef.current = null;
+    }, PEEK_PANEL_MS);
+  }, []);
+
+  useEffect(() => () => {
+    if (peekCloseTimerRef.current) clearTimeout(peekCloseTimerRef.current);
+  }, []);
+
   /** Closing the peek stack when switching the main editor note avoids stale “layers”. */
   useEffect(() => {
-    setRefStack([]);
-  }, [selectedNoteId]);
+    closePeekPanel();
+  }, [selectedNoteId, closePeekPanel]);
 
   useEffect(() => {
     if (!user?.is_admin) return;
     api.get('/notes/meta/users').then((r) => setViewAsUserList(r.data || [])).catch(() => {});
   }, [user?.is_admin]);
 
-  /** Clear selection when the selected note is hidden with demo folders toggle. */
+  /** Clear selection when the selected note is no longer visible (demo toggle, view-as, etc.). */
   useEffect(() => {
     if (tutorialOpen) return;
-    if (!hideDemoFolders || selectedNoteId == null || !notes.length) return;
+    if (selectedNoteId == null || !notes.length) return;
     if (!notesForList.some((n) => n.id === selectedNoteId)) setSelectedNoteId(null);
-  }, [tutorialOpen, hideDemoFolders, selectedNoteId, notes, notesForList]);
+  }, [tutorialOpen, selectedNoteId, notes, notesForList]);
 
   const tutorialModel = useMemo(() => {
     return buildTutorialSteps({ isAdmin: !!user?.is_admin, demoSeeded: !!user?.demo_seeded });
@@ -593,9 +639,8 @@ export default function Dashboard({ user, onLogout }) {
     }
   }, [user?.is_admin]);
 
-  // Initial load and whenever simulation / impersonation / loader deps change
+  // Initial load and whenever simulation / impersonation / loader deps change — keep selection when still visible
   useEffect(() => {
-    setSelectedNoteId(null);
     loadData();
   }, [simulatedRole, viewAsUserId, loadData]);
 
@@ -772,8 +817,9 @@ export default function Dashboard({ user, onLogout }) {
       if (sel) parentId = sel.is_folder ? sel.id : (sel.parent_id || null);
     }
     try {
-      await api.post('/notes', { title: 'New Folder', content: '', is_folder: true, is_shared: false, parent_id: parentId });
+      const res = await api.post('/notes', { title: 'New Folder', content: '', is_folder: true, is_shared: false, parent_id: parentId });
       await loadData();
+      if (res.data?.id != null) setSelectedNoteId(res.data.id);
     } catch (err) { console.error(err); }
   };
 
@@ -1021,6 +1067,7 @@ export default function Dashboard({ user, onLogout }) {
     currentUser: user,
     dmCampaignIds: effectiveDmCampaignIds,
     simulatedRole,
+    viewAsUserId,
     isMobile,
     tutorialRefs: { createBar: noteListCreateBarRef },
     tutorialForceHoverNodeId: tutorialForceHoverNodeId,
@@ -1040,6 +1087,10 @@ export default function Dashboard({ user, onLogout }) {
       </div>
     );
   }
+
+  /** Desktop split: editor and peek each animate to 50% width when the stack is open. */
+  const peekSplitActive = !isMobile && refStack.length > 0;
+  const peekSplitOpen = peekSplitActive && peekPanelOpen;
 
   return (
     <div style={S.shell}>
@@ -1446,11 +1497,12 @@ export default function Dashboard({ user, onLogout }) {
             >
               <div
                 style={{
-                  flex: !isMobile && refStack.length > 0 ? '1 1 50%' : '1 1 100%',
+                  flex: '1 1 auto',
+                  width: !isMobile && peekSplitOpen ? '50%' : '100%',
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  transition: 'flex-basis 0.32s ease',
+                  transition: !isMobile ? PEEK_SPLIT_TRANSITION : undefined,
                 }}
               >
                 <NoteEditor
@@ -1460,6 +1512,7 @@ export default function Dashboard({ user, onLogout }) {
                   currentUser={user}
                   dmCampaignIds={effectiveDmCampaignIds}
                   simulatedRole={simulatedRole}
+                  viewAsUserId={viewAsUserId}
                   onSave={handleSaveNote}
                   onDelete={handleDeleteNote}
                   isMobile={isMobile}
@@ -1490,14 +1543,29 @@ export default function Dashboard({ user, onLogout }) {
                 />
               </div>
               {refStack.length > 0 && (
-                <ReferencePeekPanel
-                  stack={refStack}
-                  notes={notes}
-                  onBack={() => setRefStack((s) => (s.length > 1 ? s.slice(0, -1) : s))}
-                  onClose={() => setRefStack([])}
-                  onOpenReference={openReferenceNote}
-                  isMobile={isMobile}
-                />
+                <div
+                  style={
+                    isMobile
+                      ? { position: 'relative', flex: '0 0 auto' }
+                      : {
+                          flex: '0 0 auto',
+                          width: peekSplitOpen ? '50%' : '0%',
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          transition: PEEK_SPLIT_TRANSITION,
+                        }
+                  }
+                >
+                  <ReferencePeekPanel
+                    stack={refStack}
+                    notes={notes}
+                    onBack={() => setRefStack((s) => (s.length > 1 ? s.slice(0, -1) : s))}
+                    onClose={closePeekPanel}
+                    onOpenReference={openReferenceNote}
+                    isOpen={peekPanelOpen}
+                    isMobile={isMobile}
+                  />
+                </div>
               )}
             </div>
           )}

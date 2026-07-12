@@ -1,10 +1,13 @@
+import { CHRONICLER_DEFAULT } from './chroniclerDefault.js';
+
 /**
  * Builds markdown typography CSS from theme tokens (injected via style tag).
  * @param {import('./schema.js').ChroniclerTheme} theme
  * @returns {string}
  */
 export function buildMarkdownCss(theme) {
-  const { colors, fonts } = theme;
+  const tokens = theme?.fonts ? theme : CHRONICLER_DEFAULT;
+  const { colors, fonts } = tokens;
   const display = `'${fonts.display}', serif`;
   const body = `'${fonts.body}', Georgia, serif`;
   const accent = colors.accent;

@@ -27,6 +27,10 @@ import {
 } from '../utils/displayIcons.js';
 import { isDmOfNote } from '../utils/dmAccess.js';
 import FolderDmTabsPane from './FolderDmTabsPane.jsx';
+import FolderSubfolderBody from './FolderSubfolderBody.jsx';
+import {
+  getFolderPreviewDescendantNotes,
+} from '../utils/folderPreview.js';
 import {
   folderDmTabsFromNote,
   serializeFolderDmTabsForSave,
@@ -234,6 +238,7 @@ export default function NoteEditor({
   currentUser,
   dmCampaignIds,
   simulatedRole,
+  viewAsUserId = null,
   onSave,
   onDelete,
   isMobile,
@@ -277,6 +282,8 @@ export default function NoteEditor({
   const [showMove, setShowMove] = useState(false);
   // Bottom drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** Chronicle appearance / sidebar description — collapsed by default when switching notes or folders. */
+  const [editorExtrasOpen, setEditorExtrasOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState('connections'); // 'connections'|'tags'|'images'|'permissions'
   // Tags
   const [tags, setTags] = useState(note?.tags || []);
@@ -400,13 +407,14 @@ export default function NoteEditor({
   // Refs to always-current handler functions (avoids stale closure in keydown listener)
   const handleUndoRef = useRef(null);
   const handleRedoRef = useRef(null);
-  const isAdminUser = simulatedRole ? false : !!currentUser.is_admin;
+  const effectiveUserId = viewAsUserId ?? currentUser.id;
+  const isAdminUser = !simulatedRole && !viewAsUserId && !!currentUser.is_admin;
   const isOwner     = simulatedRole === 'owner' ? true
     : simulatedRole ? false
-    : (!note || note.user_id === currentUser.id);
+    : (!note || note.user_id === effectiveUserId);
   const isGranted   = simulatedRole === 'granted' ? true
     : simulatedRole ? false
-    : (!isOwner && !isAdminUser && (note?.granted_users || []).includes(currentUser.id));
+    : (!isOwner && !isAdminUser && (note?.granted_users || []).includes(effectiveUserId));
 
   // Check if current user is DM of this note's campaign (any ancestor in dmCampaignIds)
   const isDM = isAdminUser || isDmOfNote(note, dmCampaignIds, notes);
@@ -502,11 +510,34 @@ export default function NoteEditor({
   }, [note, notes, isWorldRoot, folderTreeKind]);
 
   /**
-   * Campaign root folders show a two-column editor for DMs/admins: party-visible `content` vs DM-only notes.
-   * World layer is single-column party content for all world members.
+   * Campaign folders (root or subfolder): DMs/admins get party content + DM-only tabs.
+   * World layer and world-only folders use a single party column.
    */
-  const showCampaignRootSplit =
-    isCampaignScopeRoot && !!note?.is_folder && (isDM || isAdminUser);
+  const campaignContextId = useMemo(
+    () => (note?.id != null ? getCampaignFolderIdForSelection(notes, note.id) : null),
+    [notes, note?.id],
+  );
+  const isInsideCampaign = !!campaignContextId && !isWorldRoot && !inWorldLayerOnly;
+  const showFolderDmSplit =
+    !!(note?.is_folder && isInsideCampaign && (isDM || isAdminUser));
+
+  const isOrganizerSubfolder = !!(note?.is_folder && !isWorldRoot && !isCampaignScopeRoot);
+
+  const folderPreviewNotes = useMemo(
+    () => (
+      isOrganizerSubfolder && note?.id
+        ? getFolderPreviewDescendantNotes(notes, note.id, { isDM, isAdmin: isAdminUser })
+        : []
+    ),
+    [notes, note?.id, isOrganizerSubfolder, isDM, isAdminUser],
+  );
+  const showFolderNoteCards = isOrganizerSubfolder && folderPreviewNotes.length > 0;
+  const useFolderSubfolderBody = isOrganizerSubfolder;
+
+  useEffect(() => {
+    setEditorExtrasOpen(false);
+    if (useFolderSubfolderBody) setDrawerOpen(false);
+  }, [note?.id, useFolderSubfolderBody]);
 
   /** Show root Icons tab — world: all collaborators; campaign: DMs/admins. */
   const showIconsTab = !!(
@@ -848,6 +879,7 @@ export default function NoteEditor({
     setSavedAt(null);
     setViewMode(localStorage.getItem('chronicler_viewMode') || 'view');
     setDrawerOpen(false);
+    setEditorExtrasOpen(false);
     setDrawerTab('connections');
     setAddMemberSearch('');
     undoStack.current = [];
@@ -891,11 +923,11 @@ export default function NoteEditor({
     if (dirty) return;
     if (note?.title != null) setTitle(note.title);
     if (note?.content != null) setContent(note.content);
-    if (showCampaignRootSplit && (note?.folder_dm_tabs !== undefined || note?.folder_dm_content !== undefined)) {
+    if (showFolderDmSplit && (note?.folder_dm_tabs !== undefined || note?.folder_dm_content !== undefined)) {
       setFolderDmTabs(folderDmTabsFromNote(note));
     }
     serverUpdatedAt.current = note?.updated_at || serverUpdatedAt.current;
-  }, [note?.title, note?.content, note?.folder_dm_tabs, note?.folder_dm_content, showCampaignRootSplit, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.title, note?.content, note?.folder_dm_tabs, note?.folder_dm_content, showFolderDmSplit, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load images for this note
   useEffect(() => {
@@ -968,7 +1000,7 @@ export default function NoteEditor({
         title: titleRef.current,
         content: contentRef.current,
         category: categoryRef.current,
-        ...(showCampaignRootSplit ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) } : {}),
+        ...(showFolderDmSplit ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) } : {}),
       });
       navigator.sendBeacon
         ? navigator.sendBeacon(`/api/notes/${noteIdRef.current}`, new Blob([body], { type: 'application/json' }))
@@ -976,7 +1008,7 @@ export default function NoteEditor({
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [isOwner, showCampaignRootSplit]);
+  }, [isOwner, showFolderDmSplit]);
 
   /**
    * Persists the active DM tab id per note in localStorage.
@@ -1004,7 +1036,7 @@ export default function NoteEditor({
       display_icon: displayIconRef.current === '' ? null : displayIconRef.current,
       display_summary: displaySummaryRef.current === '' ? null : displaySummaryRef.current,
       client_updated_at: serverUpdatedAt.current,
-      ...(showCampaignRootSplit
+      ...(showFolderDmSplit
         ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) }
         : {}),
       ...overrides,
@@ -1032,7 +1064,7 @@ export default function NoteEditor({
           myContent:        contentRef.current,
           myFolderDmContent: formatDmTabsForConflict(folderDmTabsRef.current),
           myFolderDmTabs: JSON.stringify(folderDmTabsRef.current),
-          hasFolderDmSplit: showCampaignRootSplit && !!note?.is_folder,
+          hasFolderDmSplit: showFolderDmSplit && !!note?.is_folder,
         });
       } else {
         console.error('Save failed', err);
@@ -1040,7 +1072,7 @@ export default function NoteEditor({
     } finally {
       setSaving(false);
     }
-  }, [canEdit, onSave, showCampaignRootSplit, note?.is_folder]);
+  }, [canEdit, onSave, showFolderDmSplit, note?.is_folder]);
 
   /**
    * Switches root-folder tool tab and persists the choice for the next visit.
@@ -1838,6 +1870,77 @@ export default function NoteEditor({
   const showSourceNoteCallout =
     !!note && !note.is_folder && (note.source_deleted || note.source_note_id);
 
+  const bodyMentionPopup =
+    mentionPopup && (!mentionPopup.field || mentionPopup.field === 'body') && mentionPopup.items?.length > 0 ? (
+      <div
+        style={{
+          position: 'absolute',
+          left: 10,
+          right: 10,
+          bottom: 10,
+          maxHeight: 'min(200px, 40vh)',
+          overflowY: 'auto',
+          background: '#12151c',
+          border: '1px solid rgba(200,148,58,0.35)',
+          borderRadius: '4px',
+          boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+          zIndex: 30,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--ch-font-display)',
+            fontSize: '7px',
+            letterSpacing: '0.12em',
+            color: 'rgba(200,148,58,0.45)',
+            padding: '6px 10px 4px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          @ LINKS (WORLD OR CAMPAIGN SCOPE) — ↑↓ ENTER TAB
+        </div>
+        {mentionPopup.items.map((it, idx) => (
+          <button
+            key={it.id}
+            type="button"
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={() => applyMentionChoice(it)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              textAlign: 'left',
+              padding: '8px 12px',
+              border: 'none',
+              borderLeft: `3px solid ${getCategoryColor(it.category)}`,
+              background:
+                idx === mentionPopup.activeIndex ? 'rgba(200,148,58,0.12)' : 'transparent',
+              color: 'var(--ch-text-primary)',
+              fontFamily: 'Crimson Pro, serif',
+              fontSize: '14px',
+              cursor: 'pointer',
+            }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+              {it.title}
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--ch-font-display)',
+                fontSize: '7px',
+                letterSpacing: '0.06em',
+                color: 'rgba(226,213,187,0.35)',
+                flexShrink: 0,
+              }}
+            >
+              {it.category}
+            </span>
+          </button>
+        ))}
+      </div>
+    ) : null;
+
   return (
     <div style={S.wrap}>
       {showMove && (
@@ -2155,57 +2258,7 @@ export default function NoteEditor({
             <option value="detail">○ Detail</option>
           </select>}
 
-          {/* Note sidebar icon — toolbar button opens modal (all icons + themed suggestions); no preset → category default in tree */}
-          {!note?.is_folder && canEdit && (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }} title="Sidebar icon">
-                <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '7px', letterSpacing: '0.12em', color: 'rgba(200,148,58,0.35)' }}>ICON</span>
-                <button
-                  type="button"
-                  onClick={() => setNoteIconMenuOpen(true)}
-                  title={!displayIcon ? 'Using category default — click to choose an icon' : 'Change sidebar icon'}
-                  style={{
-                    width: '30px', height: '30px', borderRadius: '4px', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    border: `1px ${!displayIcon ? 'dashed' : 'solid'} rgba(200,148,58,${!displayIcon ? '0.35' : '0.2'})`,
-                    background: 'rgba(255,255,255,0.03)',
-                  }}
-                >
-                  {isManagedSidebarIconUrl(displayIcon) ? (
-                    <img src={displayIcon} alt="" style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: 3 }} />
-                  ) : (
-                    <span style={{ fontSize: '17px', lineHeight: 1 }}>{displayIcon || defaultNoteIconEmoji(category)}</span>
-                  )}
-                </button>
-                {canUploadSidebarIcon && (
-                  <>
-                    <input
-                      ref={sidebarIconInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/gif,image/webp"
-                      style={{ display: 'none' }}
-                      onChange={handleSidebarIconFile}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => sidebarIconInputRef.current?.click()}
-                      disabled={uploadingSidebarIcon}
-                      title="Upload an image for the sidebar (scaled automatically, max 8MB)"
-                      style={{
-                        width: '28px', height: '28px', fontSize: '14px', borderRadius: '4px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
-                        border: `1px solid ${isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.55)' : 'rgba(255,255,255,0.08)'}`,
-                        background: isManagedSidebarIconUrl(displayIcon) ? 'rgba(200,148,58,0.15)' : 'transparent',
-                        flexShrink: 0,
-                      }}
-                    >{uploadingSidebarIcon ? '…' : '🖼'}</button>
-                  </>
-                )}
-                {sidebarIconUploadErr && canUploadSidebarIcon && (
-                  <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(224,112,112,0.95)', maxWidth: '200px' }}>
-                    {sidebarIconUploadErr}
-                  </span>
-                )}
-              </div>
-              {noteIconMenuOpen && createPortal(
+          {noteIconMenuOpen && !note?.is_folder && canEdit && createPortal(
                 <div
                   role="dialog"
                   aria-modal="true"
@@ -2301,8 +2354,6 @@ export default function NoteEditor({
                 </div>,
                 document.body,
               )}
-            </>
-          )}
 
           {/* DM Only badge — visible in toolbar when flag is set */}
           {isDmOnly && (
@@ -2358,6 +2409,17 @@ export default function NoteEditor({
             style={{ ...S.viewBtn(showMdHelp), marginLeft: '2px', fontSize: '11px', padding: '4px 8px' }}
             title="Markdown reference"
           >?</button>
+
+          {((!note?.is_folder && canEdit) || (canFolderStyle && canEditContent && !scopeRootForTools)) && (
+            <button
+              type="button"
+              onClick={() => setEditorExtrasOpen((o) => !o)}
+              style={{ ...S.viewBtn(editorExtrasOpen), fontSize: '9px', padding: isMobile ? '6px 10px' : '4px 10px' }}
+              title={editorExtrasOpen ? 'Hide icon and sidebar description' : 'Show icon and sidebar description'}
+            >
+              {editorExtrasOpen ? 'Hide settings' : (note?.is_folder ? 'Folder settings' : 'Note settings')}
+            </button>
+          )}
 
           {canEdit && dirty && (
             <button style={S.saveBtn(true)} onClick={handleSave} disabled={saving}>
@@ -2925,7 +2987,7 @@ export default function NoteEditor({
         )}
 
         {/* Nested subfolders: Chronicle appearance (world/campaign roots use tabbed Icons above). */}
-        {canFolderStyle && canEditContent && !scopeRootForTools && (
+        {canFolderStyle && canEditContent && !scopeRootForTools && editorExtrasOpen && (
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
             <div style={S.connLabel}>CHRONICLE APPEARANCE</div>
             <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
@@ -3023,9 +3085,61 @@ export default function NoteEditor({
           </div>
         )}
 
-        {/* Optional sidebar blurb for notes (same column as folders; icon row is in toolbar) */}
-        {!note?.is_folder && canEdit && (
+        {/* Note appearance: icon + sidebar description (collapsed under Note settings) */}
+        {!note?.is_folder && canEdit && editorExtrasOpen && (
           <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={S.connLabel}>NOTE APPEARANCE</div>
+            <p style={{ fontFamily: 'Crimson Pro, serif', fontSize: '13px', color: 'rgba(226,213,187,0.38)', margin: '0 0 10px', lineHeight: 1.45 }}>
+              Choose an icon and short description for the sidebar. Without a custom icon, the note uses its category default.
+              {canUploadSidebarIcon && ' DMs and admins can upload an image for the sidebar (max 8MB); it is scaled automatically in the tree.'}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }} title="Sidebar icon">
+              <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)' }}>SIDEBAR ICON</span>
+              <button
+                type="button"
+                onClick={() => setNoteIconMenuOpen(true)}
+                title={!displayIcon ? 'Using category default — click to choose an icon' : 'Change sidebar icon'}
+                style={{
+                  width: '40px', height: '40px', borderRadius: '6px', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `1px ${!displayIcon ? 'dashed' : 'solid'} rgba(200,148,58,${!displayIcon ? '0.35' : '0.2'})`,
+                  background: 'rgba(255,255,255,0.03)',
+                }}
+              >
+                {isManagedSidebarIconUrl(displayIcon) ? (
+                  <img src={displayIcon} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
+                ) : (
+                  <span style={{ fontSize: '22px', lineHeight: 1 }}>{displayIcon || defaultNoteIconEmoji(category)}</span>
+                )}
+              </button>
+              {canUploadSidebarIcon && (
+                <>
+                  <input
+                    ref={sidebarIconInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={handleSidebarIconFile}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => sidebarIconInputRef.current?.click()}
+                    disabled={uploadingSidebarIcon}
+                    title="Upload an image for the sidebar (scaled automatically, max 8MB)"
+                    style={{
+                      fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.12em', padding: '8px 14px', cursor: uploadingSidebarIcon ? 'wait' : 'pointer',
+                      border: '1px solid rgba(200,148,58,0.35)', borderRadius: '4px', background: 'rgba(200,148,58,0.08)', color: 'var(--ch-text-primary-75)',
+                    }}
+                  >
+                    {uploadingSidebarIcon ? 'Uploading…' : 'Upload image icon'}
+                  </button>
+                </>
+              )}
+              {sidebarIconUploadErr && canUploadSidebarIcon && (
+                <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(224,112,112,0.95)' }}>
+                  {sidebarIconUploadErr}
+                </span>
+              )}
+            </div>
             <label style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.45)', display: 'block', marginBottom: '6px' }}>SIDEBAR DESCRIPTION</label>
             <textarea
               value={displaySummary}
@@ -3042,9 +3156,46 @@ export default function NoteEditor({
         )}
       </div>
 
-      <div style={{ ...S.body, ...S.bodyInScroll }}>
+      <div
+        style={{
+          ...S.body,
+          ...S.bodyInScroll,
+          ...(useFolderSubfolderBody
+            ? { height: 'clamp(420px, calc(100vh - 200px), 920px)', flex: '1 1 auto', minHeight: '360px' }
+            : {}),
+        }}
+      >
         {viewMode === 'edit' ? (
-          showCampaignRootSplit && note?.is_folder ? (
+          useFolderSubfolderBody ? (
+            <FolderSubfolderBody
+              viewMode="edit"
+              isMobile={isMobile}
+              showFolderDmSplit={showFolderDmSplit}
+              showFolderNoteCards={showFolderNoteCards}
+              folderPreviewNotes={folderPreviewNotes}
+              folderId={note?.id}
+              allNotes={notes}
+              content={content}
+              canEdit={canEdit}
+              onContentChange={handleMainEditorChange}
+              onEditorKeyDown={handleEditorKeyDown}
+              contentTextareaRef={contentTextareaRef}
+              onOpenNote={onOpenReferenceNote}
+              markdownComponents={markdownComponents}
+              theme={theme}
+              editorStyle={S.editor}
+              previewStyle={S.preview}
+              folderDmTabs={folderDmTabs}
+              activeDmTabId={activeDmTabId}
+              onFolderDmTabsChange={setFolderDmTabs}
+              onActiveDmTabChange={persistActiveDmTab}
+              onDmDirty={markDirty}
+              dmNoteId={note?.id}
+              campaignSplitRef={tutorialRefs?.campaignSplit || campaignSplitRef}
+              partyPaneRef={tutorialRefs?.partyPane || partyPaneRef}
+              mentionPopup={bodyMentionPopup}
+            />
+          ) : showFolderDmSplit && note?.is_folder ? (
             <div
               ref={tutorialRefs?.campaignSplit || campaignSplitRef}
               style={{
@@ -3054,11 +3205,12 @@ export default function NoteEditor({
                 flexDirection: isMobile ? 'column' : 'row',
                 gap: 0,
                 minHeight: 0,
+                height: '100%',
               }}
             >
               <div
                 style={{
-                  flex: 1,
+                  flex: isMobile ? '1 1 auto' : '1 1 50%',
                   minWidth: 0,
                   minHeight: isMobile ? '200px' : 0,
                   display: 'flex',
@@ -3097,7 +3249,7 @@ export default function NoteEditor({
               </div>
               <div
                 style={{
-                  flex: 1,
+                  flex: isMobile ? '1 1 auto' : '1 1 50%',
                   minWidth: 0,
                   minHeight: isMobile ? '200px' : 0,
                   display: 'flex',
@@ -3280,7 +3432,36 @@ export default function NoteEditor({
           </div>
           )
         ) : (
-          showCampaignRootSplit && note?.is_folder ? (
+          useFolderSubfolderBody ? (
+            <FolderSubfolderBody
+              viewMode="view"
+              isMobile={isMobile}
+              showFolderDmSplit={showFolderDmSplit}
+              showFolderNoteCards={showFolderNoteCards}
+              folderPreviewNotes={folderPreviewNotes}
+              folderId={note?.id}
+              allNotes={notes}
+              content={content}
+              canEdit={canEdit}
+              onContentChange={handleMainEditorChange}
+              onEditorKeyDown={handleEditorKeyDown}
+              contentTextareaRef={contentTextareaRef}
+              onOpenNote={onOpenReferenceNote}
+              markdownComponents={markdownComponents}
+              theme={theme}
+              editorStyle={S.editor}
+              previewStyle={S.preview}
+              folderDmTabs={folderDmTabs}
+              activeDmTabId={activeDmTabId}
+              onFolderDmTabsChange={setFolderDmTabs}
+              onActiveDmTabChange={persistActiveDmTab}
+              onDmDirty={markDirty}
+              dmNoteId={note?.id}
+              campaignSplitRef={tutorialRefs?.campaignSplit || campaignSplitRef}
+              partyPaneRef={tutorialRefs?.partyPane || partyPaneRef}
+              mentionPopup={null}
+            />
+          ) : showFolderDmSplit && note?.is_folder ? (
             <div
               ref={tutorialRefs?.campaignSplit || campaignSplitRef}
               style={{
@@ -3288,14 +3469,18 @@ export default function NoteEditor({
                 flexDirection: isMobile ? 'column' : 'row',
                 flex: 1,
                 minHeight: 0,
-                overflow: 'auto',
+                height: '100%',
+                overflow: 'hidden',
               }}
             >
               <div
                 style={{
                   ...S.preview,
-                  flex: 1,
+                  flex: isMobile ? '1 1 auto' : '1 1 50%',
                   minWidth: 0,
+                  minHeight: isMobile ? '200px' : 0,
+                  display: 'flex',
+                  flexDirection: 'column',
                   borderRight: isMobile ? 'none' : '1px solid rgba(255,255,255,0.06)',
                   borderBottom: isMobile ? '1px solid rgba(255,255,255,0.06)' : 'none',
                 }}
@@ -3323,12 +3508,12 @@ export default function NoteEditor({
               <div
                 style={{
                   ...S.preview,
-                  flex: 1,
+                  flex: isMobile ? '1 1 auto' : '1 1 50%',
                   minWidth: 0,
+                  minHeight: isMobile ? '200px' : 0,
                   background: 'rgba(200,148,58,0.03)',
                   display: 'flex',
                   flexDirection: 'column',
-                  minHeight: 0,
                 }}
               >
                 <FolderDmTabsPane

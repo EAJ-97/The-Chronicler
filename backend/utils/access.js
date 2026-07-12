@@ -277,6 +277,22 @@ function canCollaborateOnWorldLayer(noteId, userId, admin = false) {
   return isWorldMember(worldId, userId);
 }
 
+/**
+ * True when a folder may store DM-only tabbed notes (campaign root or subfolder under a campaign).
+ * Excludes world roots and world-layer organizer folders (e.g. World Lore).
+ * @param {number} folderId
+ * @returns {boolean}
+ */
+function canStoreFolderDmTabs(folderId) {
+  const row = db.prepare(
+    'SELECT id, is_folder, is_world, parent_id FROM notes WHERE id = ? AND deleted_at IS NULL'
+  ).get(folderId);
+  if (!row?.is_folder) return false;
+  if (row.is_world && !row.parent_id) return false;
+  if (isPlayableCampaignRoot(folderId)) return true;
+  return isNoteInPlayableCampaignScope(folderId) && !isNoteInWorldOnlyScope(folderId);
+}
+
 module.exports = {
   isAdmin,
   getRootFolderId,
@@ -295,4 +311,5 @@ module.exports = {
   isCampaignMember,
   canAccessCampaignScope,
   canCollaborateOnWorldLayer,
+  canStoreFolderDmTabs,
 };

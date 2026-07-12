@@ -64,7 +64,7 @@ function TreeNode({
   node, depth, selectedId, onSelect, onCreateNote, onCreateFolder,
   onDelete, expandedIds, onToggleExpand, currentUser, onRename,
   draggedId, onDragStart, onDragEnd, onDrop, onReorder, dropTargetId, dropIndicator, onDragOverNode, onSnapshot, onExport, onSync,
-  allNotes, dmCampaignIds, simulatedRole, isMobile,
+  allNotes, dmCampaignIds, simulatedRole, viewAsUserId = null, isMobile,
   tutorialForceHoverNodeId,
   tutorialActionRefs,
 }) {
@@ -78,10 +78,11 @@ function TreeNode({
   const isFolder = !!node.is_folder;
   const isExpanded = expandedIds.has(node.id);
   const isSelected = node.id === selectedId;
-  const isAdmin = simulatedRole ? false : !!currentUser.is_admin;
+  const effectiveUserId = viewAsUserId ?? currentUser.id;
+  const isAdmin = !simulatedRole && !viewAsUserId && !!currentUser.is_admin;
   const isOwner = simulatedRole === 'owner' ? true
     : simulatedRole ? false
-    : node.user_id === currentUser.id;
+    : node.user_id === effectiveUserId;
   const isDragging = draggedId === node.id;
   const isDropTarget = dropTargetId === node.id || (dropIndicator?.nodeId === node.id && dropIndicator.edge === 'into');
 
@@ -353,7 +354,7 @@ function TreeNode({
           draggedId={draggedId} onDragStart={onDragStart} onDragEnd={onDragEnd}
           onDrop={onDrop} onReorder={onReorder} dropTargetId={dropTargetId}
           dropIndicator={dropIndicator} onDragOverNode={onDragOverNode} onSnapshot={onSnapshot} onExport={onExport} onSync={onSync}
-          allNotes={allNotes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
+          allNotes={allNotes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole} viewAsUserId={viewAsUserId}
           isMobile={isMobile}
           tutorialForceHoverNodeId={tutorialForceHoverNodeId}
           tutorialActionRefs={tutorialActionRefs}
@@ -395,6 +396,7 @@ export default function NoteList({
   currentUser,
   dmCampaignIds,
   simulatedRole,
+  viewAsUserId = null,
   collapsed,
   onToggleCollapse,
   isMobile,
@@ -551,7 +553,12 @@ export default function NoteList({
         <div ref={tutorialRefs?.createBar || null} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateNote(null)}>+ Note</button>
           {insideCampaign ? (
-            <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onCreateFolder(campaignFolderId)}>+ Folder</button>
+            <button
+              style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }}
+              onClick={() => onCreateFolder(selectedId == null ? campaignFolderId : null)}
+            >
+              + Folder
+            </button>
           ) : worldRowSelected ? (
             <button style={{ ...newBtn, padding: isMobile ? '11px 0' : '7px 0' }} onClick={() => onOpenCampaignModal?.({ underWorldId: selectedId })}>+ Campaign</button>
           ) : (
@@ -658,7 +665,7 @@ export default function NoteList({
                 onSnapshot={onSnapshot}
                 onExport={onExport}
                 onSync={onSync}
-                allNotes={notes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole}
+                allNotes={notes} dmCampaignIds={dmCampaignIds} simulatedRole={simulatedRole} viewAsUserId={viewAsUserId}
                 isMobile={isMobile}
                 tutorialForceHoverNodeId={tutorialForceHoverNodeId}
                 tutorialActionRefs={tutorialActionRefs}

@@ -19,6 +19,7 @@ const {
   isCampaignMember,
   canAccessCampaignScope,
   canCollaborateOnWorldLayer,
+  canStoreFolderDmTabs,
 } = require('../utils/access');
 const {
   getScopeFolder,
@@ -584,7 +585,7 @@ router.get('/:id', authenticateToken, (req, res) => {
   if (!canSee(note.id, req.user.id, admin)) return res.status(403).json({ error: 'Access denied' });
   const under_completed_archive = !!isNoteUnderCompletedArchive(note.id);
   const row = { ...withPermissions(withTags(note)), under_completed_archive };
-  if (note.is_folder && isWorldOrCampaignRootFolder(note.id)) {
+  if (note.is_folder && canStoreFolderDmTabs(note.id)) {
     const hasDmData =
       (row.folder_dm_content != null && String(row.folder_dm_content).length > 0) ||
       (row.folder_dm_tabs != null && String(row.folder_dm_tabs).length > 0);
@@ -1065,14 +1066,14 @@ router.put('/:id', authenticateToken, (req, res) => {
   }
 
   /**
-   * DM-only markdown tabs for world/campaign root folders (party sees `content` only).
+   * DM-only markdown tabs for world/campaign root folders and campaign subfolders (party sees `content` only).
    * Preferred field: `folder_dm_tabs` (JSON array). Legacy `folder_dm_content` still accepted.
    */
   if (
     (folder_dm_tabs !== undefined || folder_dm_content !== undefined) &&
     note.is_folder &&
     canFullEdit &&
-    isWorldOrCampaignRootFolder(note.id)
+    (isWorldOrCampaignRootFolder(note.id) || canStoreFolderDmTabs(note.id))
   ) {
     if (archived && !admin) {
       return res.status(403).json({

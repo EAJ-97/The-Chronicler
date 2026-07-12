@@ -5,6 +5,7 @@ import { buildMarkdownComponents } from '../utils/markdownComponents.jsx';
 import { buildMarkdownCss } from '../theme/markdownCss.js';
 import { useTheme } from '../theme/useTheme.js';
 import { getCategoryColor } from '../theme/categoryColors.js';
+import { PEEK_PANEL_MS, PEEK_PANEL_EASING } from '../utils/panelAnimation.js';
 
 /**
  * Renders a read-only markdown preview of stacked referenced notes (opened from `note:` links).
@@ -17,6 +18,7 @@ import { getCategoryColor } from '../theme/categoryColors.js';
  * @param {() => void} props.onBack — Pop one level (disabled when stack length ≤ 1 is handled by hiding or disabling).
  * @param {() => void} props.onClose — Clear the stack and return focus to the main editor note.
  * @param {(noteId: number) => void} props.onOpenReference — Push another referenced note onto the stack.
+ * @param {boolean} props.isOpen — When false, panel slides out (stack may still hold ids until exit completes).
  * @param {boolean} props.isMobile — When true, panel is a full-screen overlay instead of the right column.
  */
 export default function ReferencePeekPanel({
@@ -25,6 +27,7 @@ export default function ReferencePeekPanel({
   onBack,
   onClose,
   onOpenReference,
+  isOpen,
   isMobile,
 }) {
   const { theme } = useTheme();
@@ -52,16 +55,22 @@ export default function ReferencePeekPanel({
         background: 'var(--ch-panel-bg)',
         borderTop: '1px solid rgba(200,148,58,0.2)',
         overflow: 'hidden',
+        transform: isOpen ? 'translateY(0)' : 'translateY(100%)',
+        transition: `transform ${PEEK_PANEL_MS}ms ${PEEK_PANEL_EASING}`,
+        willChange: 'transform',
       }
     : {
-        flex: '1 1 50%',
+        width: '100%',
+        height: '100%',
         minWidth: 0,
-        maxWidth: '50%',
         display: 'flex',
         flexDirection: 'column',
         background: 'var(--ch-panel-bg)',
         borderLeft: '1px solid rgba(200,148,58,0.15)',
         overflow: 'hidden',
+        transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
+        transition: `transform ${PEEK_PANEL_MS}ms ${PEEK_PANEL_EASING}`,
+        willChange: 'transform',
       };
 
   return (
@@ -252,8 +261,8 @@ export default function ReferencePeekPanel({
       <style>{`
         @keyframes refPeekPageIn {
           from {
-            transform: translateX(28px);
-            opacity: 0.65;
+            transform: translateX(20px);
+            opacity: 0.7;
           }
           to {
             transform: translateX(0);
@@ -261,7 +270,7 @@ export default function ReferencePeekPanel({
           }
         }
         .ref-peek-top-page {
-          animation: refPeekPageIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          animation: refPeekPageIn ${PEEK_PANEL_MS}ms ${PEEK_PANEL_EASING} forwards;
         }
         .md-ref-peek h1 { font-size: 17px; }
         .md-ref-peek h2 { font-size: 15px; }
