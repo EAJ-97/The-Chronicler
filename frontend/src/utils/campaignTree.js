@@ -26,13 +26,9 @@ export function getCampaignFolderIdForSelection(notes, selectedId) {
   const map = notesByIdMap(notes);
   let cur = map.get(selectedId);
   while (cur) {
-    if (cur.is_folder && !cur.parent_id) {
-      if (cur.is_world) return null;
-      return cur.id;
-    }
-    const parent = cur.parent_id != null ? map.get(cur.parent_id) : null;
-    if (cur.is_folder && parent && parent.is_world) return cur.id;
-    cur = parent;
+    if (isPlayableCampaignRootFolder(notes, cur)) return cur.id;
+    if (!cur.parent_id) return null;
+    cur = map.get(cur.parent_id);
   }
   return null;
 }
@@ -59,14 +55,21 @@ export function isPlayableCampaignRootFolder(allNotes, folder) {
   if (!folder?.is_folder) return false;
   if (folder.is_world && !folder.parent_id) return false;
   if (!folder.parent_id && !folder.is_world) return true;
-  const map = notesByIdMap(allNotes || []);
-  const parent = map.get(folder.parent_id);
-  if (!parent?.is_world || parent.parent_id != null) return false;
-  return (allNotes || []).some(
+
+  const hasSessionJournal = (allNotes || []).some(
     (n) => n.parent_id === folder.id
       && n.is_folder
       && String(n.title || '').trim().toLowerCase() === 'session journal',
   );
+  if (!hasSessionJournal) return false;
+
+  const map = notesByIdMap(allNotes || []);
+  const parent = map.get(folder.parent_id);
+  if (!parent) {
+    // World parent not in the user's note list (orphan campaign root) — still a campaign.
+    return true;
+  }
+  return !!(parent.is_world && parent.parent_id == null);
 }
 
 /**

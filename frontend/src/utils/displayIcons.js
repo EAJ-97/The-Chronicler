@@ -35,6 +35,17 @@ export function getFolderTreeKind(folder, map) {
   return 'subfolder';
 }
 
+/**
+ * Short sidebar label for world or campaign scope roots; null for other rows.
+ * @param {TreeKind} kind
+ * @returns {'WORLD'|'CAMP'|null}
+ */
+export function getScopeFolderKindLabel(kind) {
+  if (kind === 'world') return 'WORLD';
+  if (kind === 'campaign') return 'CAMP';
+  return null;
+}
+
 /** Cosmic / setting-scale choices for world-layer roots */
 export const WORLD_ICONS = ['🌍', '🌐', '🗺️', '✨', '🌙', '🏛️', '🔮', '📿', '🌌', '🌠', '♾️', '⚔️'];
 
