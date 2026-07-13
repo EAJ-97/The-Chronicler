@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
+const { isAdmin, isGrantedUser, isNoteUnderCompletedArchive } = require('../utils/access');
 const { demoMutateForbiddenForAny } = require('../utils/demoAccess');
 
 const router = express.Router();
@@ -19,6 +19,18 @@ function canSeeNote(noteId, userId) {
   if (note.user_id === userId) return true;
   if (note.visibility === 'shared') return true;
   return isGrantedUser(noteId, userId);
+}
+
+/**
+ * Whether the user may create, update, or delete a connection between two notes.
+ * Matches POST visibility: both endpoints must be readable by the user.
+ * @param {{ source_note_id: number, target_note_id: number }} conn
+ * @param {number} userId
+ * @returns {boolean}
+ */
+function canMutateConnection(conn, userId) {
+  if (isAdmin(userId)) return true;
+  return canSeeNote(conn.source_note_id, userId) && canSeeNote(conn.target_note_id, userId);
 }
 
 /** Allowed graph edge directions: bidirectional, forward (source→target), reverse (target→source). */
@@ -145,7 +157,7 @@ router.post('/', authenticateToken, (req, res) => {
   }
 });
 
-// PUT update label and/or direction — owner, DM, or admin
+// PUT update label and/or direction — same visibility as POST (both endpoints readable)
 router.put('/:id', authenticateToken, (req, res) => {
   const { label } = req.body;
   const admin = isAdmin(req.user.id);
@@ -153,9 +165,7 @@ router.put('/:id', authenticateToken, (req, res) => {
   if (!conn) return res.status(404).json({ error: 'Connection not found' });
   const demoPut = demoMutateForbiddenForAny(req.user.id, [conn.source_note_id, conn.target_note_id]);
   if (demoPut) return res.status(403).json({ error: demoPut });
-  const isCreator = conn.created_by === req.user.id;
-  const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
-  if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });
+  if (!canMutateConnection(conn, req.user.id)) return res.status(403).json({ error: 'Not authorised' });
   if (
     !admin &&
     (isNoteUnderCompletedArchive(conn.source_note_id) || isNoteUnderCompletedArchive(conn.target_note_id))
@@ -179,16 +189,14 @@ router.put('/:id', authenticateToken, (req, res) => {
   res.json(updated);
 });
 
-// DELETE — owner, DM, or admin
+// DELETE — same visibility as POST (both endpoints readable)
 router.delete('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const conn  = db.prepare('SELECT * FROM connections WHERE id = ?').get(req.params.id);
   if (!conn) return res.status(404).json({ error: 'Connection not found' });
   const demoDel = demoMutateForbiddenForAny(req.user.id, [conn.source_note_id, conn.target_note_id]);
   if (demoDel) return res.status(403).json({ error: demoDel });
-  const isCreator = conn.created_by === req.user.id;
-  const isDM = isDMOf(conn.source_note_id, req.user.id) || isDMOf(conn.target_note_id, req.user.id);
-  if (!admin && !isCreator && !isDM) return res.status(403).json({ error: 'Not authorised' });
+  if (!canMutateConnection(conn, req.user.id)) return res.status(403).json({ error: 'Not authorised' });
   if (
     !admin &&
     (isNoteUnderCompletedArchive(conn.source_note_id) || isNoteUnderCompletedArchive(conn.target_note_id))

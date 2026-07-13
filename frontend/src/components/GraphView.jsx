@@ -440,11 +440,19 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
    */
   const handleEdgeSave = useCallback(async (connId, { label, direction }) => {
     if (webReadOnly) return;
-    setEditingEdge(null);
+    if (!connId) {
+      window.alert('Could not save — connection id is missing. Try clicking the edge again.');
+      return;
+    }
     try {
       await api.put(`/connections/${connId}`, { label, direction });
+      setEditingEdge(null);
       onUpdateConnection();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const msg = err.response?.data?.error;
+      if (msg) window.alert(msg);
+      console.error(err);
+    }
   }, [onUpdateConnection, webReadOnly]);
 
   /**
@@ -700,7 +708,7 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
     if (connectModeRef.current || theoryModeRef.current || shipModeRef.current || pathModeRef.current) return;
     const gimmickKind = payload.kind === 'theory' || payload.kind === 'ship' ? payload.kind : null;
     setEditingEdge({
-      connId: payload.connId,
+      id: payload.connId,
       label: payload.label,
       direction: payload.direction || 'bidirectional',
       gimmickKind,
@@ -2129,14 +2137,14 @@ function buildDirectionArrowStyles(theme) {
   for (const { key } of EDGE_KIND_META) {
     const t = theme[key] || DEFAULT_EDGE_THEME[key];
     const b = Math.max(0.05, Math.min(1, t.brightness));
-    const arrowOp = Math.min(1, b * 1.6);
+    const arrowOp = Math.round(Math.min(1, b * 1.6) * 1000) / 1000;
+    const arrowColor = hexToRgba(t.color, arrowOp);
     rules.push(
       {
         selector: `edge.kind-${key}.dir-forward`,
         style: {
           'target-arrow-shape': 'triangle',
-          'target-arrow-color': t.color,
-          'target-arrow-opacity': arrowOp,
+          'target-arrow-color': arrowColor,
           'arrow-scale': 1.1,
         },
       },
@@ -2144,8 +2152,7 @@ function buildDirectionArrowStyles(theme) {
         selector: `edge.kind-${key}.dir-reverse`,
         style: {
           'source-arrow-shape': 'triangle',
-          'source-arrow-color': t.color,
-          'source-arrow-opacity': arrowOp,
+          'source-arrow-color': arrowColor,
           'arrow-scale': 1.1,
         },
       },

@@ -13,7 +13,9 @@ export function isCanonConnection(conn) {
 }
 
 /**
- * Precomputes directed canon adjacency for O(1) neighbour lookup during BFS.
+ * Precomputes undirected canon adjacency for O(1) neighbour lookup during BFS.
+ * Edge direction arrows are visual/semantic only — hover tiers and Find Path may
+ * traverse a canon link from either endpoint.
  * @param {object[]} connections
  * @returns {Map<string, string[]>}
  */
@@ -27,10 +29,8 @@ export function buildCanonAdjacency(connections) {
     if (!isCanonConnection(c)) continue;
     const s = String(c.source_note_id);
     const t = String(c.target_note_id);
-    const dir = c.direction || 'bidirectional';
-    if (dir === 'bidirectional') { add(s, t); add(t, s); }
-    else if (dir === 'forward') add(s, t);
-    else if (dir === 'reverse') add(t, s);
+    add(s, t);
+    add(t, s);
   }
   return adj;
 }
