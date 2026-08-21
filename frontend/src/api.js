@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getAuthToken, clearAuthSession } from './utils/authStorage.js';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -12,9 +13,9 @@ function isChroniclerSessionExpired(err) {
   return err.response?.data?.error === 'Invalid or expired session';
 }
 
-// Attach JWT to every outgoing request
+// Attach JWT to every outgoing request (localStorage or sessionStorage)
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = getAuthToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -27,8 +28,7 @@ api.interceptors.response.use(
     const status = err.response?.status;
     const hadAuth = !!(err.config?.headers?.Authorization);
     if (hadAuth && status === 403 && isChroniclerSessionExpired(err)) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      clearAuthSession();
       window.location.reload();
     }
     return Promise.reject(err);

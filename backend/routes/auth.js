@@ -7,6 +7,11 @@ const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
 
 const router = express.Router();
 
+/** JWT lifetime when the user did not check Remember me (browser session / short-lived). */
+const JWT_EXPIRES_SESSION = '12h';
+/** JWT lifetime when Remember me is checked (persists across browser restarts). */
+const JWT_EXPIRES_REMEMBER = '90d';
+
 /**
  * Reads whether admin demo data is present (`settings.demo_seeded`).
  * @returns {boolean}
@@ -14,6 +19,15 @@ const router = express.Router();
 function getDemoSeededFlag() {
   const demoRow = db.prepare("SELECT value FROM settings WHERE key = 'demo_seeded'").get();
   return demoRow?.value === 'true';
+}
+
+/**
+ * Resolves JWT expiry from the login/register body `remember_me` flag.
+ * @param {unknown} rememberMe - Truthy request body value means long-lived token
+ * @returns {string} jsonwebtoken `expiresIn` value
+ */
+function jwtExpiresForRemember(rememberMe) {
+  return rememberMe ? JWT_EXPIRES_REMEMBER : JWT_EXPIRES_SESSION;
 }
 
 /**
@@ -68,14 +82,16 @@ router.post('/register', async (req, res) => {
       console.error('[register demo sync]', e.message);
     }
 
+    const rememberMe = !!req.body.remember_me;
     const token = jwt.sign(
       { id: newUserId, username, is_admin: isFirstUser ? 1 : 0 },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: jwtExpiresForRemember(rememberMe) }
     );
 
     res.status(201).json({
       token,
+      remember_me: rememberMe,
       user: { id: newUserId, username, is_admin: isFirstUser ? 1 : 0, demo_seeded: getDemoSeededFlag() },
     });
   } catch (err) {
@@ -96,14 +112,16 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
 
+    const rememberMe = req.body.remember_me !== false && req.body.remember_me !== 'false';
     const token = jwt.sign(
       { id: user.id, username: user.username, is_admin: user.is_admin, force_password_change: user.force_password_change || 0 },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: jwtExpiresForRemember(rememberMe) }
     );
 
     res.json({
       token,
+      remember_me: rememberMe,
       user: {
         id: user.id,
         username: user.username,

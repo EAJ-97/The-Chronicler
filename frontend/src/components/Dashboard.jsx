@@ -15,6 +15,7 @@ import DdbCharacterImportWizard from './DdbCharacterImportWizard.jsx';
 import TutorialOverlay from './TutorialOverlay.jsx';
 import ThemeSettingsPanel from './ThemeSettingsPanel.jsx';
 import api from '../api.js';
+import { getAuthToken } from '../utils/authStorage.js';
 import { ddbPost, isDdbLinkedNote } from '../utils/ddbCobalt.js';
 import { planSiblingReorder, sortOrderForFolderEnd } from '../utils/noteSortOrder.js';
 import { useDevGraphToolsEnabled } from '../utils/useDevGraphToolsEnabled.js';
@@ -647,7 +648,7 @@ export default function Dashboard({ user, onLogout }) {
   // Live updates via WebSocket — reload data whenever another user changes something
   const wsRef = useRef(null);
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (!token) return;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${proto}://${window.location.host}/ws?token=${token}`;

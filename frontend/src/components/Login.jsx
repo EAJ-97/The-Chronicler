@@ -57,6 +57,16 @@ const S = {
     transition: 'border-color 0.2s',
   },
   field: { marginBottom: '20px' },
+  rememberRow: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+    marginBottom: '8px', marginTop: '-4px', cursor: 'pointer', userSelect: 'none',
+  },
+  rememberCheck: {
+    width: '15px', height: '15px', accentColor: '#c8943a', cursor: 'pointer', flexShrink: 0,
+  },
+  rememberLabel: {
+    fontFamily: 'Crimson Pro, serif', fontSize: '14px', color: 'rgba(226,213,187,0.65)',
+  },
   button: {
     width: '100%', padding: '12px',
     background: 'linear-gradient(135deg, #c8943a, #a07030)',
@@ -94,12 +104,14 @@ const S = {
 
 /**
  * Login / register screen. When the server sets `ADMIN_RECOVERY_TOKEN`, optional admin recovery form is shown.
- * @param {{ onLogin: (user: object, token: string) => void }} props
+ * @param {{ onLogin: (user: object, token: string, rememberMe?: boolean) => void }} props
  */
 export default function Login({ onLogin }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register' | 'recover-admin'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  /** When true, request a 90-day JWT and persist it in localStorage. */
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -115,6 +127,11 @@ export default function Login({ onLogin }) {
       .catch(() => setRecoveryEnabled(false));
   }, []);
 
+  /**
+   * Submits login or register with the Remember me preference.
+   * @param {React.FormEvent} e
+   * @returns {Promise<void>}
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -122,8 +139,8 @@ export default function Login({ onLogin }) {
     setLoading(true);
     try {
       const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
-      const res = await api.post(endpoint, { username, password });
-      onLogin(res.data.user, res.data.token);
+      const res = await api.post(endpoint, { username, password, remember_me: rememberMe });
+      onLogin(res.data.user, res.data.token, rememberMe);
     } catch (err) {
       setError(err.response?.data?.error || 'Something went wrong');
     } finally {
@@ -309,6 +326,17 @@ export default function Login({ onLogin }) {
                   onBlur={(e) => (e.target.style.borderColor = 'rgba(200,148,58,0.2)')}
                 />
               </div>
+              <label style={S.rememberRow}>
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  style={S.rememberCheck}
+                />
+                <span style={S.rememberLabel}>
+                  Remember me{mode === 'login' ? ' (stay signed in)' : ''}
+                </span>
+              </label>
               <button
                 type="submit"
                 style={{ ...S.button, opacity: loading ? 0.6 : 1 }}
