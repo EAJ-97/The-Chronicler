@@ -443,11 +443,11 @@ router.get('/update-check', authenticateToken, adminOnly, async (req, res) => {
     const latestVersion = latestTag.replace(/^v/, '');
     const latestCommit = await resolveTagToCommitSha(latestTag);
 
-    // Primary signal: if this build commit equals the latest release commit, no update is needed.
-    // Fallback: if commit metadata is unavailable, use semver comparison to preserve old behavior.
+    // Same commit as the latest release → up to date (covers package.json lagging the tag).
+    // Otherwise compare semver only — a newer local commit must not count as "update available".
     let updateAvailable;
-    if (currentCommit && latestCommit) {
-      updateAvailable = currentCommit !== latestCommit;
+    if (currentCommit && latestCommit && currentCommit === latestCommit) {
+      updateAvailable = false;
     } else {
       updateAvailable = compareSemver(currentVersion, latestVersion) < 0;
     }
