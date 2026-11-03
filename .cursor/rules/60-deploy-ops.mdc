@@ -32,6 +32,7 @@ Do the low-risk parts yourself and ask about the rest, then report:
 4. Backups: projects with data and no backup in the last 7 days. Run them.
 5. Failing CI on main: fix it.
 6. Projects missing kit pieces: onboard them (existing-project rule).
+7. Drift: compare each project's `.cursor/rules` (except `05-project-context.mdc`), `scripts/deploy.sh`, and `scripts/backup.sh` with `~/templates/homelab-project` (and `~/ops/.cursor/rules` with the template rules). Where the template is newer, update via one PR per project (ops commits directly). Keep deliberate local changes and mention them in the report.
 
 ## When something is down
 1. Find what is broken: status, `docker compose logs --tail=200`, `.deploy-log`.
