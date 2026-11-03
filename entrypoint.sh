@@ -2,9 +2,21 @@
 
 # Auto-generate JWT_SECRET if not provided via environment.
 # The secret is persisted to the data volume so it survives container restarts.
-# To override, set JWT_SECRET in docker-compose.yml environment or a .env file.
+# To override, set JWT_SECRET in docker-compose.yml environment or a .env file
+# to a real random value (never a replace-me / example placeholder).
 
 SECRET_FILE="/data/.jwt_secret"
+
+# Treat empty or example placeholders as unset so a copied .env.example cannot
+# become the live signing key. Do not print the rejected value.
+case "$JWT_SECRET" in
+  ""|replace-me*)
+    if [ -n "$JWT_SECRET" ]; then
+      echo "[entrypoint] Ignoring placeholder JWT_SECRET; using /data/.jwt_secret or generating one"
+    fi
+    JWT_SECRET=""
+    ;;
+esac
 
 if [ -z "$JWT_SECRET" ]; then
   if [ -f "$SECRET_FILE" ]; then
@@ -16,6 +28,8 @@ if [ -z "$JWT_SECRET" ]; then
     chmod 600 "$SECRET_FILE"
     echo "[entrypoint] Generated new JWT_SECRET and saved to $SECRET_FILE"
   fi
+else
+  export JWT_SECRET
 fi
 
 # Auto-generate ADMIN_RECOVERY_TOKEN if not provided via environment.
