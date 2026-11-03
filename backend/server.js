@@ -44,6 +44,11 @@ ensureImagesDataDir();
 const IMAGES_DIR = getImagesDataDir();
 app.use('/api/images/files', express.static(IMAGES_DIR));
 
+// Liveness for Docker / deploy healthchecks
+app.get('/health', (_req, res) => {
+  res.json({ ok: true });
+});
+
 // API routes
 app.use('/api/auth',        authRoutes);
 app.use('/api/notes',       notesRoutes);
