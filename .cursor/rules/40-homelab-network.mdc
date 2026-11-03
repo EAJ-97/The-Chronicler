@@ -1,0 +1,31 @@
+---
+description: Use when exposing a service, adding a public route, editing nginx or reverse proxy config, Cloudflare Tunnel or Access, DNS, or playit.gg tunnels
+alwaysApply: false
+---
+
+# Home lab networking
+
+## How traffic flows
+- Web: internet -> Cloudflare Access -> Cloudflare Tunnel -> nginx container (`~/ejhomelabs`) -> app container by name.
+- Routes are paths on `ejhomelabs.me` (`/gameservers`, `/friends`, ...). DNS and the tunnel already point the whole domain at nginx, so new paths need no DNS or tunnel changes.
+- Game servers: playit.gg tunnels.
+- Remote admin: WireGuard on the router. Never expose SSH or admin panels.
+
+## Adding a public route (do it yourself, in this order)
+Exposure is high risk, so it needs my approval (a confirmed project plan counts).
+
+1. **Check Cloudflare Access covers the path BEFORE nginx routes anything:**
+   `curl -sI https://ejhomelabs.me/<path>/ | grep -i '^location'`
+   - Location points at `cloudflareaccess.com`: protected, continue.
+   - Anything else: not protected. Stop, do not add the route. Tell me the exact clicks: Cloudflare Zero Trust dashboard, Access, Applications, edit the app that protects `/gameservers`, add `ejhomelabs.me/<path>`, save. When I say done, check again.
+2. **Add the route** in `~/ejhomelabs` on a branch: a `location /<path>/` block proxying to `http://<container-name>:<port>/`, passing through the Cloudflare Access headers the app needs. Keep every existing route untouched. Make sure the app works under a sub-path (base URL, assets, redirects).
+3. **Test the config:** `docker exec ejhomelabs-web nginx -t`
+4. **Ship** the ejhomelabs change through its PR flow, then reload: `docker exec ejhomelabs-web nginx -s reload`
+5. **Verify:**
+   - Inside Docker: `docker run --rm --network <nginx-network> curlimages/curl:8.10.1 -fsS http://<container-name>:<port>/health`
+   - From outside: the curl in step 1 still shows the Access redirect.
+6. If any check fails, revert the nginx change and reload, so no other site breaks. Then report.
+
+## Rules
+- Never create or change DNS records, tunnel routes, or Access policies yourself. Those are dashboard clicks for me; give exact steps.
+- Never disable or weaken Cloudflare Access on an existing route.

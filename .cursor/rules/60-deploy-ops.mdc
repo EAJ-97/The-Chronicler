@@ -1,0 +1,41 @@
+---
+description: Use for deploying, rolling back, backups, restores, health checks, status reports, maintenance, monitoring, incidents, or when something is down
+alwaysApply: false
+---
+
+# Deploys and operations
+
+## Deploy
+After a merge, from the project folder on notes: `scripts/deploy.sh`
+It pulls main, rebuilds, waits for every container to be healthy, tags the deploy (`deploy-YYYYMMDD-HHMMSS`), and logs it to `.deploy-log`. If the new version is unhealthy, it rolls back to the previous version automatically and exits with an error.
+
+On a failed deploy: read the logs it printed, fix forward with a new PR, deploy again. Never leave a project down at the end of a task; if you cannot fix it, make sure the rollback is running and report.
+
+## Manual rollback
+`git tag -l 'deploy-*' | tail -5` to find a good version, then `git checkout --detach <tag> && docker compose up -d --build`. Report that the server is on an older version and what needs fixing. The next `scripts/deploy.sh` returns it to main.
+
+## Backups
+- `scripts/backup.sh` archives `./data` to `~/backups/<project>/`, keeping the newest 10. Run it yourself before migrations, upgrades, or anything that touches data.
+- Databases: dump first into `./data/dumps/`, then back up.
+- Restoring a backup replaces live data, so ask first.
+
+## When I say "status" (or "health check")
+For every project in `~` that has a compose file, gather and show one table:
+project, containers up/total, health, restarts (`docker inspect -f '{{.RestartCount}}'`), last deploy (last line of `.deploy-log`), CI on main (`gh run list --branch main --limit 1`), open PRs, open issues.
+Then list only the problems, worst first, with what you recommend.
+
+## When I say "maintenance"
+Do the low-risk parts yourself and ask about the rest, then report:
+1. Status (above).
+2. Dependabot PRs across repos (git-github rule).
+3. Disk: `df -h / /mnt/*`, `docker system df`. Report heavy usage; never prune without asking.
+4. Backups: projects with data and no backup in the last 7 days. Run them.
+5. Failing CI on main: fix it.
+6. Projects missing kit pieces: onboard them (existing-project rule).
+
+## When something is down
+1. Find what is broken: status, `docker compose logs --tail=200`, `.deploy-log`.
+2. Restore service fast: restart it, or roll back if a recent deploy is the cause.
+3. Fix the root cause through the normal pipeline.
+4. Add an entry under `## Incidents` in CHANGELOG: date, what broke, impact, cause, fix.
+5. Report.

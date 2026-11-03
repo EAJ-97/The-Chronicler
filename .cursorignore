@@ -1,0 +1,9 @@
+# Files the Cursor AI should never read or index
+.env
+*.env
+secrets/
+*.key
+*.pem
+data/
+backups/
+logs/

@@ -1,0 +1,39 @@
+---
+description: Use when working on, debugging, changing, refactoring, or onboarding an existing project
+alwaysApply: false
+---
+
+# Existing projects
+
+## First look
+Before changing anything in a project you have not worked in this chat:
+1. Read README, `05-project-context.mdc`, `compose.yaml`.
+2. `git log --oneline -10`, `docker compose ps`, open PRs and issues (`gh pr list`, `gh issue list`).
+3. Keep going; no need to summarize back to me unless something looks wrong or surprising.
+
+## Onboarding (bring a project up to the kit standard)
+If a project is missing any of these, add them from `~/templates/homelab-project/` in one PR named `ops: onboard to devops kit`:
+- `.cursor/rules/` (copy with `cp -rn` so nothing is overwritten)
+- `.github/workflows/ci.yml`, adapted to the project's stack, passing
+- `.github/dependabot.yml` with the right ecosystems
+- `scripts/deploy.sh` and `scripts/backup.sh`
+- `CHANGELOG.md`
+- the template's `.gitignore` and `.cursorignore` entries (merge in missing lines, keep existing ones)
+- a healthcheck in `compose.yaml` (and a `/health` endpoint if it is a web app and easy to add)
+- a GitHub repo, if it has none (private)
+
+Do not change app behavior in the onboarding PR. Merge it when CI is green, deploy, verify. Game server projects: see below before deploying.
+
+## Debugging
+- Start from evidence: `docker compose logs --tail=100 <service>`, the exact error, recent changes (`git log`, `.deploy-log`).
+- If a recent deploy caused it, roll back first (deploy-ops rule) to restore service, then fix forward.
+- State your hypothesis in the report. Change one thing at a time. Remove debug code before committing.
+
+## Changing things safely
+- Before renaming containers, volumes, routes, ports, or env vars, find what depends on them (nginx config, the game server dashboard in `~/gameservers`, other compose files) with `grep -r` across `~`, and update them in the same change.
+- No major upgrades as a side effect. Propose them separately.
+
+## Game servers (Minecraft, CS2, anything the dashboard controls)
+- They are started and stopped on demand by the `~/gameservers` dashboard. Do not start or stop them yourself unless I ask.
+- If a game server container is running, ask before restarting it (friends may be playing).
+- If it is stopped, deploy by rebuilding/pulling only (`docker compose build` or `docker compose pull`); changes take effect on the next start. Do not start it just to check health.

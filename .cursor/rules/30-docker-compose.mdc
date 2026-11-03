@@ -1,0 +1,29 @@
+---
+description: Docker and Docker Compose standards for homelab services
+globs: compose.yaml, compose.yml, docker-compose.yml, docker-compose.yaml, **/Dockerfile, **/*.dockerfile
+alwaysApply: false
+---
+
+# Docker Compose standards
+
+## Service definition
+- Pin image tags (`postgres:16.4`, not `latest`). Dependabot proposes bumps.
+- `container_name` is the project name, or `<project>-<role>` for multi-container apps.
+- `restart: unless-stopped` for long-running services. On-demand game servers use `restart: "no"`.
+- Every service has a `healthcheck`. Web apps check their `/health` endpoint. Databases use their own check (`pg_isready`, etc.). Make sure the tool the check uses (wget, curl) exists in the image.
+- Config comes from `env_file: .env`. Never hardcode secrets in compose files.
+- Set `TZ=America/Chicago` when the app logs or schedules anything.
+- Use multi-stage builds and a non-root user in Dockerfiles when it is easy to do.
+
+## Networking
+- Web apps do not publish host ports. They join nginx's Docker network (external network in `compose.yaml`) so nginx reaches them by container name.
+- Publish a host port only when something outside Docker needs it (game servers, a playit.gg agent target).
+- An app that trusts the `Cf-Access-Authenticated-User-Email` header must never publish a host port. Otherwise anyone on the network could fake the header and log in as anyone.
+
+## Data
+- Persistent data goes in `./data/<thing>` (gitignored) or named volumes. Document it in the context rule.
+- Shared storage under `/mnt/...` (media, games) is high risk: never change permissions or delete there without asking.
+- Back up with `scripts/backup.sh` before migrations or upgrades. For databases, dump first (`pg_dump`, `sqlite3 .backup`) into `./data/dumps/`, then run the backup.
+
+## Validate before shipping
+`docker compose config --quiet`, then `docker compose build`, then start it and confirm health with `docker compose ps`. Use `docker compose logs --tail=100` (no `-f`, it never returns).
