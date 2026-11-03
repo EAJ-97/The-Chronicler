@@ -26,7 +26,7 @@ PREV="$(git rev-parse HEAD)"
 
 # --- 2. Get the latest main -------------------------------------------------
 if git remote get-url origin >/dev/null 2>&1; then
-  git fetch --quiet --tags origin
+  git fetch --quiet origin
   git checkout --quiet main
   git merge --ff-only --quiet origin/main || {
     echo "Local main has commits that are not on GitHub. Not deploying; push or fix them first."
