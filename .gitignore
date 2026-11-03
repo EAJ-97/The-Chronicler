@@ -39,3 +39,20 @@ docs/
 .DS_Store
 Thumbs.db
 *.swp
+# Secrets: never commit these
+*.env
+secrets/
+*.key
+*.pem
+# Runtime data and logs
+logs/
+backups/
+*.log
+.deploy-log
+# Language and tool clutter
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/

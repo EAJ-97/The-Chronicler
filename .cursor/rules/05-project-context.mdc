@@ -10,16 +10,17 @@ alwaysApply: true
 - Location on server: ~/notesapp
 - Container name(s): dnd-chronicler (compose service `chronicler`)
 - Internal port: 3001 (published on host; Cloudflare Tunnel `notes.ejhomelabs.me` → localhost:3001)
-- Health check: none dedicated yet (HTTP UI on `/`)
+- Health check: http://dnd-chronicler:3001/health (or localhost:3001/health)
 - Public route: https://notes.ejhomelabs.me/
 - Auth: app JWT (login/register). Remember me → 90d JWT in localStorage; else 12h in sessionStorage. Not behind Cloudflare Access.
-- Persistent data: Docker volume `notesapp_chronicler_data` → `/data` (DB + uploads). Host backups via `~/bin/backup-chronicler.sh`.
-- Deploy: `./deploy.sh` today (kit `scripts/deploy.sh` not onboarded yet)
+- Persistent data: Docker volume `notesapp_chronicler_data` → `/data` (DB + uploads). Backed up with scripts/backup.sh; nightly host job `~/bin/backup-chronicler.sh` also runs.
+- Deploy: scripts/deploy.sh (legacy `./deploy.sh` wraps it)
 - Env vars: see `.env.example` (`JWT_SECRET`; others auto-generated into `/data` on first boot)
 - GitHub repo: EAJ-97/The-Chronicler (private); folder name is `notesapp`
 
 ## Code map
-- `backend/server.js`: Express app; mounts `/api/*` routes
+- `scripts/deploy.sh` / `scripts/backup.sh`: deploy with health wait; archive volume/`./data`
+- `backend/server.js`: Express app; `/health` + `/api/*` routes
 - `backend/db/database.js` / `demoSeeder.js`: SQLite + demo data
 - `backend/routes/auth.js`: login/register JWT expiry (remember_me)
 - `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs
