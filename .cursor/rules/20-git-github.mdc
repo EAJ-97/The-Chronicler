@@ -1,0 +1,54 @@
+---
+description: Use for anything involving git, commits, branches, GitHub, pull requests, CI, GitHub Actions, Dependabot, issues, or repo settings
+alwaysApply: false
+---
+
+# Git and GitHub
+
+## Repos
+- Every project has a private GitHub repo unless it is local-only. Create with `gh repo create <name> --private --source=. --remote=origin --push`.
+- Repo settings (newproj sets these; apply them to repos that lack them):
+  `gh repo edit --delete-branch-on-merge --enable-squash-merge --enable-merge-commit=false --enable-rebase-merge=false`
+- Keep the repo description in sync with the project purpose: `gh repo edit --description "..."`.
+- Never make a repo public, delete it, or transfer it.
+
+## Branches and commits
+- Never commit directly to main on GitHub projects. Everything goes through a PR. You open, check, and merge it, so it costs me nothing and gives us CI and history.
+- Branch names: `feat/`, `fix/`, `chore/`, `docs/`, `ops/` plus a short name.
+- Conventional Commits, present tense, subject under 72 characters: `feat: add idle shutdown timer`, `fix: correct healthcheck path`.
+- Before every commit, check `git diff --staged` for secrets. If you find one, unstage it, move it into `.env`, and carry on.
+- If the secret scan (setup script or gitleaks in CI) flags something that is not a secret (a UI label, a docs placeholder), add the comment `gitleaks:allow` at the end of that line, in the file's comment style. Only do this when you are sure; if in doubt, ask.
+
+## PR flow (do all of it yourself)
+1. `git push -u origin HEAD`
+2. `gh pr create --title "<conventional title>" --body "<what changed, why, how it was tested, risk: low or high>"`
+3. Wait for CI: `gh pr checks --watch --fail-fast`
+4. CI failed: read `gh run view --log-failed`, fix, push, wait again. After three failed attempts, stop and report.
+5. **Low risk and green:** `gh pr merge --squash --delete-branch`, then `git switch main && git pull`.
+6. **High risk** (core rule list): post the PR link and a two-line summary and ask "merge and deploy?"
+7. After merging: deploy (deploy-ops rule).
+
+## CI (GitHub Actions)
+- Every repo has `.github/workflows/ci.yml`: secret scan (gitleaks), compose validation, image build, plus the stack's lint and tests. Keep main green.
+- When you add a language or framework, add its lint and test steps to CI in the same PR.
+- Never add anything that lets GitHub reach the home lab (self-hosted runners, SSH deploy keys, webhooks into notes). Deploys happen on notes with `scripts/deploy.sh`.
+
+## Dependabot
+- `.github/dependabot.yml` covers docker and github-actions, plus the stack's ecosystem.
+- Handle open Dependabot PRs whenever I ask for maintenance, or when you start work in a repo that has them (`gh pr list --author app/dependabot`):
+  - patch or minor with green CI: merge and deploy
+  - major: read the changelog, summarize breaking changes, ask
+
+## Issues are the to-do list
+- Anything worth doing later (a bug outside the current task, tech debt, a follow-up): `gh issue create --title "..." --body "..."`. Do not fix it on the side and do not forget it.
+- Reference issues in PRs with `Closes #N`.
+- When I ask what is on the list: `gh search issues --owner "$(gh api user --jq .login)" --state open`, grouped by repo.
+
+## If a secret was committed
+1. Tell me right away which secret and where.
+2. Rotate it first (new token or password). Anything pushed counts as leaked, even in a private repo. Rotating usually needs me (dashboard login), so give exact steps.
+3. Put the new value in `.env`, never in code.
+4. Cleaning history needs a force push, which is mine to approve.
+
+## Local-only projects
+No PRs or CI. Still use branches for bigger changes, Conventional Commits, and the secret check. Offer once to move it to GitHub if it grows.

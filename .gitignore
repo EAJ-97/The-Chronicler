@@ -24,7 +24,6 @@ docker-compose.dev.yml
 Dockerfile.dev
 
 # AI / agent context (local only, not for public repo)
-CONTEXT.md
 roadmaps.md
 plans/
 
@@ -35,8 +34,6 @@ RELEASE_NOTES*.md
 # Local docs (not tracked unless we explicitly add something worth shipping)
 docs/
 
-# Cursor IDE — ignore everything
-.cursor/*
 
 # OS / editor
 .DS_Store

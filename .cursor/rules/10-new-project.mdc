@@ -1,0 +1,40 @@
+---
+description: Use when creating, scaffolding, or starting a new project, app, service, tool, or container
+alwaysApply: false
+---
+
+# New projects
+
+## 1. Confirm the plan in one message
+Do not interview me with a list of questions. Propose a complete plan with sensible defaults and ask me to confirm or change it, all in one message:
+
+```
+Plan for `plant-tracker`
+- What: tracks watering schedules for my plants, used by me and family
+- Stack: Python + FastAPI + SQLite (small, simple, one container)
+- GitHub: private repo <my-github>/plant-tracker with CI and Dependabot
+- Access: public at ejhomelabs.me/plants behind Cloudflare Access
+- Data: SQLite file in ./data, backed up before risky changes
+Reply "go", or tell me what to change.
+```
+
+- **Always include the GitHub line and always ask.** GitHub (private) is the default. If I already said "local" or "no GitHub", show `GitHub: none (local only)` instead, but still show it so I can correct it.
+- Pick the simplest stack that fits and say why in a few words. If similar projects of mine use a stack, prefer that.
+- Approving a plan with a public route counts as approving the exposure (no second ask later).
+- Skip the confirmation only if I already gave every detail and said to go ahead.
+
+## 2. Build it end to end (no more questions unless truly undecidable)
+1. Run `newproj <name>` (add `--local` if no GitHub). It creates `~/<name>` from the template with git, the private GitHub repo, CI, Dependabot, and deploy/backup scripts.
+2. Work in `~/<name>` on a branch `feat/initial-app`.
+3. Write the app with a `/health` endpoint that returns 200, a `Dockerfile`, and at least a basic test.
+4. Finish `compose.yaml`: pinned image tags, healthcheck, nginx network (docker-compose rule). Fill `.env.example`; create `.env` with generated values.
+5. Pick an internal port with no conflicts: check `docker ps --format "table {{.Names}}\t{{.Ports}}"` and `ss -tlnp`.
+6. Add the stack's lint and test steps to `.github/workflows/ci.yml`, and its package ecosystem (pip, npm, etc.) to `.github/dependabot.yml`.
+7. Fill in `05-project-context.mdc`, README, and CHANGELOG.
+8. Ship through the normal pipeline: PR, CI green, merge.
+9. Deploy with `scripts/deploy.sh` and confirm healthy.
+10. If public: follow the homelab-network rule to add and verify the route.
+11. Report with the live URL and repo link.
+
+## Game and TCP/UDP services
+These go through playit.gg, not Cloudflare. Build and deploy the container, then tell me exactly what to set up in the playit.gg dashboard (that part is mine).
