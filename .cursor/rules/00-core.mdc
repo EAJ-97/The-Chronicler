@@ -76,3 +76,9 @@ Give it as its own copy-and-paste code block. If it is a restart, the restart co
 ## Secrets
 - Config values go in `.env.example` with a placeholder and a comment, and are read from environment variables in code.
 - If a secret ever lands in a commit, follow the leaked-secret steps in the git-github rule immediately.
+- Never run anything whose output can contain secret values, since terminal output goes into the chat and a printed secret counts as leaked.
+  - gitleaks always with `--redact`.
+  - `docker compose config` always with `--quiet`.
+  - `docker inspect` never shows `.Config.Env`; use `--format` for only the needed fields.
+  - Never `cat`, `grep`, `head`, `env`, or `printenv` on `.env` files or container environments. To check a variable is set: `grep -q '^NAME=.' .env && echo set`.
+  - If a secret is printed anyway, say so in the report and give rotation steps.
