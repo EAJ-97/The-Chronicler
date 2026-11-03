@@ -75,6 +75,7 @@ Give it as its own copy-and-paste code block. If it is a restart, the restart co
 
 ## Secrets
 - Config values go in `.env.example` with a placeholder and a comment, and are read from environment variables in code.
+- Never create `.env` by copying `.env.example` when that file holds secret placeholders (`replace-me`, `changeme`, example tokens). Generate real values (`openssl rand -hex 32`) or leave the variables empty so the app can auto-generate them.
 - If a secret ever lands in a commit, follow the leaked-secret steps in the git-github rule immediately.
 - Never run anything whose output can contain secret values, since terminal output goes into the chat and a printed secret counts as leaked.
   - gitleaks always with `--redact`.
