@@ -17,7 +17,7 @@
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0",
     "sigma": "^3.0.3",
-    "three": "^0.179.1"
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
