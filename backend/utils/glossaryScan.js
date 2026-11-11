@@ -2,7 +2,7 @@
  * Scan one session's journal for glossary suggestions via Claude.
  */
 const db = require('../db/database');
-const { getGlossaryScanModel } = require('./aiModels');
+const { getGlossaryScanModel, modelSupportsTemperature } = require('./aiModels');
 const {
   getGlossaryForSession,
   getTopLevelScopeForNote,
@@ -156,6 +156,16 @@ async function callClaudeScan({ system, user }) {
     throw err;
   }
 
+  // Budget includes thinking tokens on 5.5. Only send temperature when allowlisted.
+  const model = getGlossaryScanModel();
+  const reqBody = {
+    model,
+    max_tokens: 4096,
+    system,
+    messages: [{ role: 'user', content: user }],
+  };
+  if (modelSupportsTemperature(model)) reqBody.temperature = 0;
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -163,14 +173,7 @@ async function callClaudeScan({ system, user }) {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
-    // Haiku 5.5+ rejects `temperature`; omit it (extraction does not need sampling).
-    // Budget includes thinking tokens on 5.5, so keep this roomy for long sessions.
-    body: JSON.stringify({
-      model: getGlossaryScanModel(),
-      max_tokens: 4096,
-      system,
-      messages: [{ role: 'user', content: user }],
-    }),
+    body: JSON.stringify(reqBody),
   });
 
   if (!response.ok) {
