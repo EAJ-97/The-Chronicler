@@ -5,6 +5,7 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Fixed
+- Character `played_by`: autosave used a stale value (never persisted); dropdown now includes the logged-in user
 - Glossary AI scan: read `text` content blocks after Haiku 5.5 `thinking`; brace-extract JSON; map type synonyms; raise max_tokens
 - Glossary AI scan: omit `temperature` (Haiku 5.5 rejects it); show scan/build-from-past status and real API errors
 - Session recap prompts use the real `session_number` / title instead of folder session count

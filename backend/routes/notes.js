@@ -461,18 +461,25 @@ router.get('/meta/users', authenticateToken, (req, res) => {
     }
     users = users.filter((u) => !rosterIds.has(u.id));
   } else if (campaign_id) {
-    // Return only members of this campaign with is_dm flag
+    // Return members of this campaign with is_dm flag.
+    // Default excludes the requester (sharing toggles); include_self=1 for played_by pickers.
+    const includeSelf = String(req.query.include_self || '') === '1' || String(req.query.include_self || '') === 'true';
     users = db.prepare(`
       SELECT DISTINCT u.id, u.username, u.is_admin,
         CASE WHEN EXISTS (SELECT 1 FROM folder_roles fr WHERE fr.folder_id = ? AND fr.user_id = u.id) THEN 1 ELSE 0 END as is_dm
       FROM users u
-      WHERE u.id != ?
+      WHERE (${includeSelf ? '1=1' : 'u.id != ?'})
         AND (
           EXISTS (SELECT 1 FROM note_permissions np WHERE np.note_id = ? AND np.user_id = u.id)
           OR EXISTS (SELECT 1 FROM folder_roles fr WHERE fr.folder_id = ? AND fr.user_id = u.id)
+          ${includeSelf ? 'OR u.id = ?' : ''}
         )
       ORDER BY u.username ASC
-    `).all(campaign_id, req.user.id, campaign_id, campaign_id);
+    `).all(
+      ...(includeSelf
+        ? [campaign_id, campaign_id, campaign_id, req.user.id]
+        : [campaign_id, req.user.id, campaign_id, campaign_id]),
+    );
   } else {
     users = db.prepare('SELECT id, username, is_admin, 0 as is_dm FROM users ORDER BY username ASC').all();
     users = users.filter(u => u.id !== req.user.id);
