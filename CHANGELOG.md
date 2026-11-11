@@ -4,6 +4,12 @@ All notable changes to The Chronicler (notesapp). Newest first.
 
 ## Unreleased
 
+### Fixed
+- Recap edit 500: ensure `recaps.updated_at` exists (migration 050 had been marked done without adding the column)
+
+### Added
+- Delete session recap (DELETE `/api/recaps/:id`) for campaign DM or admin; refunds one generation toward the author; Delete button in RecapViewer
+
 ### Changed
 - AI chronicle: three-step pipeline (extract scenes JSON → write with Opus → verify + one revision); summary stays single-step; `RECAP_EXTRACT_MODEL` / `RECAP_WRITE_MODEL` / `RECAP_VERIFY_MODEL`; `verify_report` column (API + UI only when `RECAP_DEBUG=1`)
 - AI recaps: app-assembled markdown title (`# Chronicle/Summary of…`), optional `*Session N*`, model `##` subtitle; chronicle style sample + STYLE rules; full-page themed markdown reader with Edit/Save
