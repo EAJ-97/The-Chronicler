@@ -10,8 +10,21 @@ const {
   assembleRecapMarkdown,
 } = require('../utils/recapPromptBuild');
 const { getRecapModel, modelSupportsTemperature, extractAssistantText } = require('../utils/aiModels');
+const { runChroniclePipeline, isRecapDebug } = require('../utils/chroniclePipeline');
 
 const router = express.Router();
+
+/**
+ * Strip verify_report unless RECAP_DEBUG (debug mode only).
+ * @param {object|null|undefined} recap
+ * @returns {object|null|undefined}
+ */
+function maybeStripVerifyReport(recap) {
+  if (!recap || isRecapDebug()) return recap;
+  if (!Object.prototype.hasOwnProperty.call(recap, 'verify_report')) return recap;
+  const { verify_report: _vr, ...rest } = recap;
+  return rest;
+}
 
 /**
  * Shared quota / lock checks before generating or submitting a recap.
@@ -39,13 +52,16 @@ function assertRecapQuota(uid, sessionId) {
  * @param {string} tone
  * @param {string} content
  * @param {import('express').Request} req
+ * @param {import('express').Response} res
  * @param {object} [sources]
+ * @param {object|null} [verifyReport]
  */
-function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res, sources) {
+function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res, sources, verifyReport) {
+  const reportJson = verifyReport ? JSON.stringify(verifyReport) : null;
   const recapResult = db.prepare(`
-    INSERT INTO recaps (session_id, folder_id, generated_by, tone, content, is_dm_only)
-    VALUES (?, ?, ?, ?, ?, 0)
-  `).run(sessionId, folderId, uid, tone, content);
+    INSERT INTO recaps (session_id, folder_id, generated_by, tone, content, is_dm_only, verify_report)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+  `).run(sessionId, folderId, uid, tone, content, reportJson);
 
   db.prepare(`
     INSERT INTO recap_usage (session_id, user_id, count) VALUES (?, ?, 1)
@@ -60,7 +76,7 @@ function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res
     req.app.broadcast({ type: 'recap_generated', session_id: sessionId, recap_id: recap.id, generated_by: uid });
   }
 
-  res.json({ recap, sources: sources || null });
+  res.json({ recap: maybeStripVerifyReport(recap), sources: sources || null });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -117,7 +133,9 @@ router.get('/session/:sessionId', authenticateToken, (req, res) => {
     ORDER BY r.created_at DESC
   `).all(sessionId);
 
-  const visible = recaps.filter(r => !r.is_dm_only || admin || dm);
+  const visible = recaps
+    .filter(r => !r.is_dm_only || admin || dm)
+    .map(maybeStripVerifyReport);
   res.json(visible);
 });
 
@@ -173,25 +191,52 @@ router.post('/generate', authenticateToken, async (req, res) => {
   if (aiEnabled?.value !== 'true') return res.status(503).json({ error: 'AI features are not enabled.' });
 
   const t = tone === 'summary' ? 'summary' : 'chronicle';
-  const built = buildRecapPromptsForSession(session_id, t);
-  if (!built.ok) return res.status(built.status).json({ error: built.error });
-
-  const {
-    session,
-    system_prompt: systemPrompt,
-    user_prompt: userPrompt,
-    sources,
-    temperature,
-  } = built;
 
   try {
     const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get()?.value?.trim();
     if (!apiKey) return res.status(503).json({ error: 'No Anthropic API key configured.' });
 
-    const debugOn = ['1', 'true', 'yes'].includes(String(process.env.RECAP_DEBUG || '').trim().toLowerCase());
-    if (debugOn) {
-      console.log('[recap/debug] system_prompt\n', systemPrompt);
-      console.log('[recap/debug] user_prompt\n', userPrompt);
+    // Chronicle: extract → write → verify (+ one revision). Summary: single-step.
+    if (t === 'chronicle') {
+      const result = await runChroniclePipeline(session_id, apiKey);
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+
+      const content = assembleRecapMarkdown({
+        tone: 'chronicle',
+        worldTitle: result.sources.world_title,
+        campaignTitle: result.sources.campaign_title,
+        sessionNumber: result.sources.session_number,
+        subtitle: result.subtitle,
+        body: result.body,
+      });
+
+      return insertRecapAndRespond(
+        session_id,
+        result.session.folder_id,
+        uid,
+        'chronicle',
+        content,
+        req,
+        res,
+        result.sources,
+        result.verify_report,
+      );
+    }
+
+    const built = buildRecapPromptsForSession(session_id, 'summary');
+    if (!built.ok) return res.status(built.status).json({ error: built.error });
+
+    const {
+      session,
+      system_prompt: systemPrompt,
+      user_prompt: userPrompt,
+      sources,
+      temperature,
+    } = built;
+
+    if (isRecapDebug()) {
+      console.log('[recap/debug] summary system_prompt\n', systemPrompt);
+      console.log('[recap/debug] summary user_prompt\n', userPrompt);
     }
 
     const model = getRecapModel();
@@ -226,10 +271,9 @@ router.post('/generate', authenticateToken, async (req, res) => {
       return res.status(500).json({ error: 'Empty response from AI' });
     }
 
-    // App builds H1 + session line; model may supply ## subtitle then body.
     const { subtitle, body } = parseModelRecapOutput(raw);
     const content = assembleRecapMarkdown({
-      tone: t,
+      tone: 'summary',
       worldTitle: sources.world_title,
       campaignTitle: sources.campaign_title,
       sessionNumber: sources.session_number,
@@ -237,7 +281,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
       body,
     });
 
-    insertRecapAndRespond(session_id, session.folder_id, uid, t, content, req, res, sources);
+    insertRecapAndRespond(session_id, session.folder_id, uid, 'summary', content, req, res, sources, null);
   } catch (e) {
     console.error('[recap/generate]', e);
     res.status(500).json({ error: e.message });
@@ -280,7 +324,7 @@ router.put('/:id', authenticateToken, (req, res) => {
     req.app.broadcast({ type: 'recap_updated', session_id: recap.session_id, recap_id: id, updated_by: uid });
   }
 
-  res.json({ recap: updated });
+  res.json({ recap: maybeStripVerifyReport(updated) });
 });
 
 // ── GET /recaps/folder-roles/:folderId ─────────────────────────────────────

@@ -377,23 +377,22 @@ function getRecapSourcesForSession(sessionId) {
 }
 
 /**
- * Loads journal data and builds Anthropic prompts for session recap generation.
+ * Load session journal + tagged payload blocks shared by summary and chronicle extract.
  * @param {number} sessionId
- * @param {'chronicle'|'summary'} tone
+ * @returns {{ ok: true, session: object, sources: object, sessionBlock: string, partyBlock: string, glossaryBlock: string, journalText: string, journalBlock: string, payloadBlocks: string }
+ *   | { ok: false, status: number, error: string }}
  */
-function buildRecapPromptsForSession(sessionId, tone) {
+function loadRecapSessionContext(sessionId) {
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   if (!session) return { ok: false, status: 404, error: 'Session not found' };
 
   const entries = loadSessionJournalEntries(sessionId);
-
   if (entries.length === 0) {
     return { ok: false, status: 400, error: 'This session has no entries to summarize.' };
   }
 
   const { campaignTitle, worldTitle, campaignId } = resolveSessionScopeTitles(session.folder_id);
 
-  // Change 1: tagged <session> with real campaign + optional world + session number
   const sessionLines = [
     `Campaign: ${campaignTitle || 'Unknown Campaign'}`,
   ];
@@ -404,11 +403,8 @@ function buildRecapPromptsForSession(sessionId, tone) {
   sessionLines.push(`Session: ${sessionValue}`);
   const sessionBlock = `<session>\n${sessionLines.join('\n')}\n</session>`;
 
-  // Change 2: <party> from played_by character notes
   const partyBlock = formatPartyBlock(campaignId);
-
   const authorToCharacter = buildAuthorCharacterMap(campaignId);
-  // Change 3–4: authorship grouping, bullets, local date headers, quote tags
   const journalText = formatJournalBlock(entries, authorToCharacter);
 
   let glossaryBlock = '';
@@ -425,6 +421,62 @@ function buildRecapPromptsForSession(sessionId, tone) {
     console.error('[recapPromptBuild] glossary', e.message);
   }
 
+  const journalBlock = `<journal>\n${journalText}\n</journal>`;
+  const parts = [sessionBlock, partyBlock];
+  if (glossaryBlock) parts.push(glossaryBlock);
+  parts.push(journalBlock);
+  const payloadBlocks = parts.filter(Boolean).join('\n\n');
+
+  const sources = {
+    session_id: session.id,
+    session_number: session.session_number ?? null,
+    session_title: session.title || null,
+    session_label: session.session_number != null
+      ? String(session.session_number)
+      : (session.title || `id ${session.id}`),
+    campaign_title: campaignTitle,
+    world_title: worldTitle,
+    entry_count: entries.length,
+    scope: 'session_journal_and_glossary',
+  };
+
+  return {
+    ok: true,
+    session,
+    sources,
+    sessionBlock,
+    partyBlock,
+    glossaryBlock,
+    journalText,
+    journalBlock,
+    payloadBlocks,
+  };
+}
+
+/**
+ * Style-example block for chronicle write step (empty string if file missing).
+ * @returns {string}
+ */
+function buildStyleExampleBlock() {
+  const styleExample = loadStyleExample();
+  if (!styleExample) return '';
+  return `<style_example>
+${styleExample}
+</style_example>
+
+This sample shows the voice, pacing, and texture to aim for. Its people, places, and events are not part of this campaign. Never use any of its content.`;
+}
+
+/**
+ * Loads journal data and builds Anthropic prompts for session summary (single-step).
+ * Chronicle uses runChroniclePipeline instead.
+ * @param {number} sessionId
+ * @param {'chronicle'|'summary'} tone
+ */
+function buildRecapPromptsForSession(sessionId, tone) {
+  const ctx = loadRecapSessionContext(sessionId);
+  if (!ctx.ok) return ctx;
+
   const fidelityShared = `CRITICAL RULES:
 - Story facts come ONLY from the <journal> entries for this one session. Do not invent scenes, outcomes, motives, people, or places that are not in the journal.
 - The <glossary> block is a spelling and identity aid only. Use it to preserve names and aliases; do not invent events from it.
@@ -436,15 +488,9 @@ function buildRecapPromptsForSession(sessionId, tone) {
 - When the journal is ambiguous, prefer understating over guessing.
 - Do not use em dashes (—) or double hyphens (--) as dash substitutes. Use commas, periods, or plain hyphens sparingly.`;
 
-  const styleExample = loadStyleExample();
-  const styleExampleBlock = styleExample
-    ? `<style_example>
-${styleExample}
-</style_example>
-
-This sample shows the voice, pacing, and texture to aim for. Its people, places, and events are not part of this campaign. Never use any of its content.`
-    : '';
-
+  // Legacy single-step chronicle prompt kept only if something still calls tone=chronicle here.
+  // Production chronicle uses chroniclePipeline.js (extract → write → verify).
+  const styleExampleBlock = buildStyleExampleBlock();
   const chronicleStyle = `STYLE:
 - Open with a scene-setting sentence that places the reader in the moment.
 - Vary sentence length. Let important moments land in short sentences.
@@ -473,40 +519,23 @@ ${fidelityShared}`;
     ? 'Write the chronicle entry for this session. Start with the ## subtitle line.'
     : 'Write the session summary for this session.';
 
-  // Order: session → party → glossary → journal (no Source-material line)
-  const parts = [sessionBlock, partyBlock];
-  if (glossaryBlock) parts.push(glossaryBlock);
-  parts.push(`<journal>\n${journalText}\n</journal>`);
-  parts.push(closing);
-  const userPrompt = parts.filter(Boolean).join('\n\n');
-
-  const sources = {
-    session_id: session.id,
-    session_number: session.session_number ?? null,
-    session_title: session.title || null,
-    session_label: session.session_number != null
-      ? String(session.session_number)
-      : (session.title || `id ${session.id}`),
-    campaign_title: campaignTitle,
-    world_title: worldTitle,
-    entry_count: entries.length,
-    scope: 'session_journal_and_glossary',
-  };
-
+  const userPrompt = `${ctx.payloadBlocks}\n\n${closing}`;
   const temperature = tone === 'chronicle' ? 0.4 : 0;
 
   return {
     ok: true,
-    session,
+    session: ctx.session,
     system_prompt: systemPrompt,
     user_prompt: userPrompt,
-    sources,
+    sources: ctx.sources,
     temperature,
   };
 }
 
 module.exports = {
   buildRecapPromptsForSession,
+  loadRecapSessionContext,
+  buildStyleExampleBlock,
   getRecapSourcesForSession,
   parseModelRecapOutput,
   assembleRecapMarkdown,

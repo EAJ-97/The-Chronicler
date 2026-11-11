@@ -38,14 +38,32 @@ function getGlossaryScanModel() {
   return (process.env.GLOSSARY_SCAN_MODEL || 'claude-haiku-5-5').trim();
 }
 
-/** Session recap generation (default Claude Sonnet 5.5). */
+/** Session summary recap (default Claude Sonnet 5.5). Chronicle uses the per-step getters below. */
 function getRecapModel() {
   return (process.env.RECAP_MODEL || 'claude-sonnet-5-5').trim();
+}
+
+/** Chronicle step 1 — extract scenes JSON (default Claude Sonnet 5.5). */
+function getRecapExtractModel() {
+  return (process.env.RECAP_EXTRACT_MODEL || 'claude-sonnet-5-5').trim();
+}
+
+/** Chronicle step 2 — write prose from scenes (default Claude Opus 5.5). */
+function getRecapWriteModel() {
+  return (process.env.RECAP_WRITE_MODEL || 'claude-opus-5-5').trim();
+}
+
+/** Chronicle step 3 — verify facts vs prose (default Claude Sonnet 5.5). */
+function getRecapVerifyModel() {
+  return (process.env.RECAP_VERIFY_MODEL || 'claude-sonnet-5-5').trim();
 }
 
 module.exports = {
   getGlossaryScanModel,
   getRecapModel,
+  getRecapExtractModel,
+  getRecapWriteModel,
+  getRecapVerifyModel,
   modelSupportsTemperature,
   MODELS_SUPPORTING_TEMPERATURE,
   extractAssistantText,
