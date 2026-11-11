@@ -117,6 +117,13 @@ function canEditRecap(uid, recap) {
   return isDM(uid, recap.session_id);
 }
 
+/** Admin or campaign DM may delete any recap for the session. */
+function canDeleteRecap(uid, recap) {
+  if (!recap) return false;
+  if (isAdmin(uid)) return true;
+  return isDM(uid, recap.session_id);
+}
+
 // ── GET /recaps/session/:sessionId ─────────────────────────────────────────
 // Returns all non-dm-only recaps for a session (+ dm-only if requester is DM/admin)
 router.get('/session/:sessionId', authenticateToken, (req, res) => {
@@ -312,9 +319,14 @@ router.put('/:id', authenticateToken, (req, res) => {
     if (demoMsg) return res.status(403).json({ error: demoMsg });
   }
 
-  db.prepare(`
-    UPDATE recaps SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-  `).run(trimmed, id);
+  try {
+    db.prepare(`
+      UPDATE recaps SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(trimmed, id);
+  } catch (e) {
+    console.error('[recap/put]', e);
+    return res.status(500).json({ error: e.message || 'Failed to save recap' });
+  }
 
   const updated = db.prepare(
     'SELECT r.*, u.username as author FROM recaps r JOIN users u ON u.id = r.generated_by WHERE r.id = ?'
@@ -325,6 +337,60 @@ router.put('/:id', authenticateToken, (req, res) => {
   }
 
   res.json({ recap: maybeStripVerifyReport(updated) });
+});
+
+// ── DELETE /recaps/:id ─────────────────────────────────────────────────────
+// Remove a recap (admin or campaign DM). Refunds one generation toward the author.
+router.delete('/:id', authenticateToken, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const uid = req.user.id;
+
+  if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid recap id' });
+
+  const recap = db.prepare('SELECT * FROM recaps WHERE id = ?').get(id);
+  if (!recap) return res.status(404).json({ error: 'Recap not found' });
+
+  if (!canDeleteRecap(uid, recap)) {
+    return res.status(403).json({ error: 'Only a campaign DM or an admin can delete a recap.' });
+  }
+
+  if (recap.folder_id != null) {
+    const demoMsg = demoMutateForbiddenMessage(uid, recap.folder_id);
+    if (demoMsg) return res.status(403).json({ error: demoMsg });
+  }
+
+  try {
+    const del = db.transaction(() => {
+      db.prepare('DELETE FROM recaps WHERE id = ?').run(id);
+      const usage = db.prepare(
+        'SELECT count FROM recap_usage WHERE session_id = ? AND user_id = ?'
+      ).get(recap.session_id, recap.generated_by);
+      if (usage && usage.count > 1) {
+        db.prepare(
+          'UPDATE recap_usage SET count = count - 1 WHERE session_id = ? AND user_id = ?'
+        ).run(recap.session_id, recap.generated_by);
+      } else if (usage) {
+        db.prepare(
+          'DELETE FROM recap_usage WHERE session_id = ? AND user_id = ?'
+        ).run(recap.session_id, recap.generated_by);
+      }
+    });
+    del();
+  } catch (e) {
+    console.error('[recap/delete]', e);
+    return res.status(500).json({ error: e.message || 'Failed to delete recap' });
+  }
+
+  if (req.app.broadcast) {
+    req.app.broadcast({
+      type: 'recap_deleted',
+      session_id: recap.session_id,
+      recap_id: id,
+      deleted_by: uid,
+    });
+  }
+
+  res.json({ ok: true, id });
 });
 
 // ── GET /recaps/folder-roles/:folderId ─────────────────────────────────────

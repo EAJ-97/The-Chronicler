@@ -867,6 +867,15 @@ migrate('052_recaps_verify_report', () => {
   }
 });
 
+// 050 swallowed ALTER failures and still recorded success; ensure updated_at exists
+migrate('053_recaps_ensure_updated_at', () => {
+  const cols = db.prepare('PRAGMA table_info(recaps)').all().map((c) => c.name);
+  if (!cols.includes('updated_at')) {
+    db.exec('ALTER TABLE recaps ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP');
+  }
+  db.exec(`UPDATE recaps SET updated_at = COALESCE(updated_at, created_at) WHERE updated_at IS NULL`);
+});
+
 // ─── Default admin account (created once on first boot) ───────────────────────
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {

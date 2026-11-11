@@ -25,6 +25,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const mdComponents = useMemo(() => buildMarkdownComponents(), []);
   const readerCss = useMemo(() => buildRecapReaderCss(theme), [theme]);
@@ -79,6 +80,8 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
     || activeRecap.generated_by === currentUser.id
   );
 
+  const canDeleteActive = !!activeRecap && (usage?.is_admin || usage?.is_dm);
+
   const startEdit = () => {
     if (!activeRecap) return;
     setError('');
@@ -110,6 +113,29 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
       setError(e.response?.data?.error || e.message || 'Save failed.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!activeRecap || !canDeleteActive) return;
+    const label = activeRecap.tone === 'chronicle' ? 'chronicle' : 'summary';
+    if (!window.confirm(`Delete this ${label}? This cannot be undone.`)) return;
+    setDeleting(true);
+    setError('');
+    setEditing(false);
+    try {
+      const deletedId = activeRecap.id;
+      await api.delete(`/recaps/${deletedId}`);
+      const next = recaps.filter((r) => r.id !== deletedId);
+      setRecaps(next);
+      setActiveIdx(0);
+      if (newRecapId === deletedId) setNewRecapId(null);
+      const usageRes = await api.get(`/recaps/usage/${sessionId}`);
+      setUsage(usageRes.data);
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Delete failed.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -231,7 +257,20 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
           </>
         )}
         {activeRecap && canEditActive && !editing && (
-          <button type="button" onClick={startEdit} style={barBtn(false)}>EDIT</button>
+          <button type="button" disabled={deleting} onClick={startEdit} style={barBtn(false)}>EDIT</button>
+        )}
+        {activeRecap && canDeleteActive && !editing && (
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={handleDelete}
+            style={{
+              ...barBtn(false),
+              color: deleting ? 'var(--ch-text-muted)' : 'rgba(220,100,100,0.9)',
+            }}
+          >
+            {deleting ? 'DELETING…' : 'DELETE'}
+          </button>
         )}
         {editing && (
           <>
