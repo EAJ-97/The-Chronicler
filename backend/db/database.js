@@ -215,6 +215,7 @@ db.exec(`
     content      TEXT    NOT NULL,
     is_dm_only   INTEGER DEFAULT 0,
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id)   REFERENCES sessions(id) ON DELETE CASCADE,
     FOREIGN KEY (folder_id)    REFERENCES notes(id)    ON DELETE CASCADE,
     FOREIGN KEY (generated_by) REFERENCES users(id)
@@ -726,6 +727,20 @@ migrate('049_notes_is_campaign', () => {
         SELECT 1 FROM folder_roles fr WHERE fr.folder_id = notes.id AND fr.role = 'dm'
       )
   `).run();
+});
+
+// Editable session recaps: track last manual edit time
+migrate('050_recaps_updated_at', () => {
+  try {
+    db.exec('ALTER TABLE recaps ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP');
+  } catch {
+    /* already exists on fresh installs */
+  }
+  try {
+    db.exec(`UPDATE recaps SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''`);
+  } catch {
+    /* ignore */
+  }
 });
 
 // ─── Default admin account (created once on first boot) ───────────────────────

@@ -2,32 +2,40 @@ import { useState, useEffect } from 'react';
 import api from '../api.js';
 
 /**
- * Modal: list session recaps and generate via server (Anthropic).
- * @param {{ sessionId: number, sessionNum: number, onClose: () => void, aiEnabled: boolean, recapServerReady?: boolean }} props
+ * Modal: list session recaps, generate via server (Anthropic), and edit saved text.
+ * @param {{ sessionId: number, sessionNum: number, onClose: () => void, aiEnabled: boolean, recapServerReady?: boolean, currentUser?: { id: number, is_admin?: boolean } }} props
  */
-export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled, recapServerReady = false }) {
+export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled, recapServerReady = false, currentUser = null }) {
   const [recaps, setRecaps] = useState([]);
   const [usage, setUsage] = useState(null);
+  const [sources, setSources] = useState(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [tone, setTone] = useState('chronicle');
   const [activeIdx, setActiveIdx] = useState(0);
   const [error, setError] = useState('');
   const [newRecapId, setNewRecapId] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [saving, setSaving] = useState(false);
 
   /**
-   * Fetches recaps and usage quota for this session; clears loading and sets list index to 0.
+   * Fetches recaps, usage quota, and source confirmation for this session.
    * @returns {Promise<void>}
    */
   const load = async () => {
     try {
-      const [recapsRes, usageRes] = await Promise.all([
+      const [recapsRes, usageRes, sourcesRes] = await Promise.all([
         api.get(`/recaps/session/${sessionId}`),
         api.get(`/recaps/usage/${sessionId}`),
+        api.get(`/recaps/sources/${sessionId}`),
       ]);
       setRecaps(recapsRes.data);
       setUsage(usageRes.data);
+      setSources(sourcesRes.data);
       setActiveIdx(0);
+      setEditing(false);
+      setEditText('');
     } catch (e) {
       setError('Failed to load recaps.');
     } finally {
@@ -44,12 +52,14 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
   const handleGenerate = async () => {
     setError('');
     setGenerating(true);
+    setEditing(false);
     try {
       const res = await api.post('/recaps/generate', { session_id: sessionId, tone });
       const fresh = [res.data.recap, ...recaps];
       setRecaps(fresh);
       setActiveIdx(0);
       setNewRecapId(res.data.recap.id);
+      if (res.data.sources) setSources(res.data.sources);
       const usageRes = await api.get(`/recaps/usage/${sessionId}`);
       setUsage(usageRes.data);
     } catch (e) {
@@ -59,7 +69,49 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
     }
   };
 
-  const canGenerate = aiEnabled && usage?.can_generate && !generating && recapServerReady;
+  const activeRecap = recaps[activeIdx];
+
+  const canEditActive = !!activeRecap && !!currentUser && (
+    usage?.is_admin
+    || usage?.is_dm
+    || activeRecap.generated_by === currentUser.id
+  );
+
+  const startEdit = () => {
+    if (!activeRecap) return;
+    setError('');
+    setEditText(activeRecap.content || '');
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setEditText('');
+    setError('');
+  };
+
+  const handleSave = async () => {
+    if (!activeRecap) return;
+    const trimmed = editText.trim();
+    if (!trimmed) {
+      setError('Recap content cannot be empty.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await api.put(`/recaps/${activeRecap.id}`, { content: trimmed });
+      setRecaps((prev) => prev.map((r) => (r.id === activeRecap.id ? res.data.recap : r)));
+      setEditing(false);
+      setEditText('');
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || 'Save failed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canGenerate = aiEnabled && usage?.can_generate && !generating && !editing && recapServerReady;
 
   const usageLabel = () => {
     if (!usage) return '';
@@ -69,15 +121,30 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
     return `${usage.remaining} of ${usage.allowed} remaining`;
   };
 
+  const sourcesLabel = () => {
+    if (!sources) return '';
+    const label = sources.session_number != null
+      ? `Session ${sources.session_number}`
+      : (sources.session_title || `Session ${sessionNum}`);
+    const titleBit = sources.session_title && sources.session_number != null
+      ? ` (${sources.session_title})`
+      : '';
+    const n = sources.entry_count ?? 0;
+    return `Using ${label}${titleBit} — ${n} journal ${n === 1 ? 'entry' : 'entries'} (this session only)`;
+  };
+
   const formatDate = (d) => new Date(d.includes('T') ? d : d.replace(' ', 'T') + 'Z')
     .toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  const activeRecap = recaps[activeIdx];
 
   const generateHint = () => {
     if (!aiEnabled || !usage?.can_generate) return '';
     if (recapServerReady) return '';
     return 'Configure Anthropic API key in Admin → AI.';
+  };
+
+  const selectRecap = (i) => {
+    if (editing) return;
+    setActiveIdx(i);
   };
 
   return (
@@ -86,7 +153,7 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
       background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '24px',
-    }} onClick={e => e.target === e.currentTarget && onClose()}>
+    }} onClick={e => e.target === e.currentTarget && !editing && onClose()}>
       <div style={{
         width: '100%', maxWidth: '680px', maxHeight: '88vh',
         background: 'linear-gradient(160deg, #0f1219 0%, #0a0c14 100%)',
@@ -104,6 +171,11 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
                 {usageLabel()}
               </div>
             )}
+            {sources && (
+              <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(139,196,226,0.55)', marginTop: '4px' }}>
+                {sourcesLabel()}
+              </div>
+            )}
           </div>
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(226,213,187,0.3)', fontSize: '20px' }}>×</button>
         </div>
@@ -113,12 +185,13 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: '4px' }}>
                 {['chronicle', 'summary'].map(t => (
-                  <button key={t} type="button" onClick={() => setTone(t)} style={{
-                    padding: '4px 12px', borderRadius: '3px', cursor: 'pointer',
+                  <button key={t} type="button" onClick={() => !editing && setTone(t)} disabled={editing} style={{
+                    padding: '4px 12px', borderRadius: '3px', cursor: editing ? 'not-allowed' : 'pointer',
                     fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
                     background: tone === t ? 'rgba(200,148,58,0.15)' : 'transparent',
                     border: `1px solid ${tone === t ? 'rgba(200,148,58,0.4)' : 'rgba(255,255,255,0.08)'}`,
                     color: tone === t ? '#c8943a' : 'rgba(226,213,187,0.3)',
+                    opacity: editing ? 0.5 : 1,
                   }}>
                     {t === 'chronicle' ? '📜 CHRONICLE' : '📋 SUMMARY'}
                   </button>
@@ -181,17 +254,18 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
               {recaps.length > 1 && (
                 <div style={{ width: '180px', flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.05)', overflowY: 'auto', padding: '8px 0' }}>
                   {recaps.map((r, i) => (
-                    <div key={r.id} onClick={() => setActiveIdx(i)} style={{
-                      padding: '10px 14px', cursor: 'pointer',
+                    <div key={r.id} onClick={() => selectRecap(i)} style={{
+                      padding: '10px 14px', cursor: editing ? 'not-allowed' : 'pointer',
                       background: i === activeIdx ? 'rgba(200,148,58,0.08)' : 'transparent',
                       borderLeft: i === activeIdx ? '2px solid rgba(200,148,58,0.5)' : '2px solid transparent',
+                      opacity: editing && i !== activeIdx ? 0.45 : 1,
                     }}>
                       <div style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: i === activeIdx ? '#c8943a' : 'rgba(226,213,187,0.4)', marginBottom: '3px' }}>
                         {r.tone === 'chronicle' ? '📜 CHRONICLE' : '📋 SUMMARY'}
                         {r.id === newRecapId && <span style={{ marginLeft: '5px', color: 'rgba(80,200,100,0.7)' }}>NEW</span>}
                       </div>
                       <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '11px', color: 'rgba(226,213,187,0.3)' }}>
-                        {r.author} · {formatDate(r.created_at)}
+                        {r.author} · {formatDate(r.updated_at || r.created_at)}
                       </div>
                     </div>
                   ))}
@@ -200,27 +274,82 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
 
               {activeRecap && (
                 <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
                     <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.15em', color: 'rgba(200,148,58,0.5)', padding: '3px 10px', border: '1px solid var(--ch-border-strong)', borderRadius: '3px' }}>
                       {activeRecap.tone === 'chronicle' ? '📜 CHRONICLE' : '📋 SUMMARY'}
                     </span>
                     <span style={{ fontFamily: 'Crimson Pro, serif', fontSize: '12px', color: 'rgba(226,213,187,0.3)' }}>
-                      by {activeRecap.author} · {formatDate(activeRecap.created_at)}
+                      by {activeRecap.author} · {formatDate(activeRecap.updated_at || activeRecap.created_at)}
                     </span>
-                    {activeRecap.id === newRecapId && (
+                    {activeRecap.id === newRecapId && !editing && (
                       <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.1em', color: 'rgba(80,200,100,0.7)', padding: '2px 8px', border: '1px solid rgba(80,200,100,0.2)', borderRadius: '3px' }}>JUST GENERATED</span>
                     )}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                      {!editing && canEditActive && (
+                        <button
+                          type="button"
+                          onClick={startEdit}
+                          style={{
+                            padding: '4px 12px', borderRadius: '3px', cursor: 'pointer',
+                            fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                            border: '1px solid rgba(200,148,58,0.35)', background: 'rgba(200,148,58,0.1)', color: 'var(--ch-accent)',
+                          }}
+                        >Edit</button>
+                      )}
+                      {editing && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={handleSave}
+                            style={{
+                              padding: '4px 12px', borderRadius: '3px', cursor: saving ? 'default' : 'pointer',
+                              fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                              border: '1px solid rgba(200,148,58,0.35)', background: 'rgba(200,148,58,0.1)', color: 'var(--ch-accent)',
+                            }}
+                          >{saving ? 'Saving…' : 'Save'}</button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={cancelEdit}
+                            style={{
+                              padding: '4px 12px', borderRadius: '3px', cursor: saving ? 'default' : 'pointer',
+                              fontFamily: 'var(--ch-font-display)', fontSize: '8px', letterSpacing: '0.12em',
+                              border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'rgba(226,213,187,0.45)',
+                            }}
+                          >Cancel</button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div style={{
-                    fontFamily: 'Crimson Pro, serif',
-                    fontSize: activeRecap.tone === 'chronicle' ? '16px' : '14px',
-                    lineHeight: activeRecap.tone === 'chronicle' ? '1.9' : '1.7',
-                    color: 'rgba(226,213,187,0.85)',
-                    whiteSpace: 'pre-wrap',
-                    fontStyle: activeRecap.tone === 'chronicle' ? 'italic' : 'normal',
-                  }}>
-                    {activeRecap.content}
-                  </div>
+                  {editing ? (
+                    <textarea
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      disabled={saving}
+                      style={{
+                        width: '100%', minHeight: '220px', boxSizing: 'border-box', resize: 'vertical',
+                        background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(200,148,58,0.25)', borderRadius: '4px',
+                        color: 'rgba(226,213,187,0.9)',
+                        fontSize: activeRecap.tone === 'chronicle' ? '16px' : '14px',
+                        fontFamily: 'Crimson Pro, serif',
+                        lineHeight: activeRecap.tone === 'chronicle' ? '1.9' : '1.7',
+                        fontStyle: activeRecap.tone === 'chronicle' ? 'italic' : 'normal',
+                        padding: '14px 16px', outline: 'none',
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      fontFamily: 'Crimson Pro, serif',
+                      fontSize: activeRecap.tone === 'chronicle' ? '16px' : '14px',
+                      lineHeight: activeRecap.tone === 'chronicle' ? '1.9' : '1.7',
+                      color: 'rgba(226,213,187,0.85)',
+                      whiteSpace: 'pre-wrap',
+                      fontStyle: activeRecap.tone === 'chronicle' ? 'italic' : 'normal',
+                    }}>
+                      {activeRecap.content}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

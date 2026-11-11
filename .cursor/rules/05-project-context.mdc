@@ -23,12 +23,14 @@ alwaysApply: true
 - `backend/server.js`: Express app; `/health` + `/api/*` routes
 - `backend/db/database.js` / `demoSeeder.js`: SQLite + demo data
 - `backend/routes/auth.js`: login/register JWT expiry (remember_me)
-- `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs
+- `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs (recaps: generate, sources, PUT edit)
+- `backend/utils/recapPromptBuild.js`: session-journal-only Anthropic prompts + source metadata for recaps
 - `backend/routes/admin.js` / `backup.js` / `snapshots.js`: admin, backup, vault
 - `backend/routes/images.js` / `aiTools.js` / `ddb.js` / `timeline.js` / `integrity.js`: media, AI, D&D Beyond, timeline
 - `backend/utils/access.js`: folder/note permissions helpers
 - `frontend/src/App.jsx` / `main.jsx`: SPA shell
 - `frontend/src/components/Login.jsx` / `NoteEditor.jsx` / `FolderSubfolderBody.jsx` / `FolderNoteCards.jsx` / `ReferencePeekPanel.jsx`: main UI
+- `frontend/src/components/RecapViewer.jsx` / `Journal.jsx`: session recaps (generate, source line, Edit/Save)
 - `frontend/src/utils/authStorage.js` / `folderPreview.js` / `panelAnimation.js`: client helpers
 - `frontend/src/graph/`: knowledge graph (adjacency/BFS undirected for path highlight)
 - `docker-compose.yml`: production `chronicler` on 3001
@@ -39,5 +41,6 @@ alwaysApply: true
 - Default first-boot login is `admin` / `admin` — change immediately.
 - Organizer subfolders: overview always editable; preview cards list descendant notes (excluding world/campaign roots).
 - Graph connections: PUT `/connections/:id` uses same visibility as POST; arrow direction is visual only for path highlight.
+- AI session recaps use only that session’s journal entries (plus campaign title label). Chronicle may dramatize; it must not invent off-journal facts. Recaps are editable by author/DM/admin without spending generation quota.
 - Do not commit one-off `RELEASE_NOTES*.md` / `release-*-notes.txt`; put release text in chat or GitHub Releases UI.
 - `CONTEXT.md` is retired; this file is the only project context. `.cursor/` rules are versioned in git.

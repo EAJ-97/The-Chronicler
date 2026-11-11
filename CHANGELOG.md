@@ -5,13 +5,17 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Fixed
+- Session recap prompts use the real `session_number` / title instead of folder session count
 - Entrypoint ignores `replace-me*` JWT_SECRET placeholders and falls back to `/data/.jwt_secret`
 - `.env.example` leaves `JWT_SECRET` empty so copying it cannot override the volume secret
 
 ### Changed
+- AI recaps: Chronicle stays story-like but session-journal-only; Summary stays factual; tone-based temperature; Player labels and spelling/attribution fidelity rules
 - Synced template fixes: secret-output rules, maintenance drift check, deploy fetches only main
 
 ### Added
+- Editable session recaps (PUT `/api/recaps/:id` for author/DM/admin; Edit/Save in RecapViewer; no quota burn)
+- Recap source confirmation (`GET /api/recaps/sources/:sessionId` + UI line showing session + journal entry count)
 - DevOps kit: scripts/deploy.sh, scripts/backup.sh, CI, Dependabot
 - `/health` liveness endpoint and compose healthcheck
 - Legacy `./deploy.sh` now wraps `scripts/deploy.sh`
