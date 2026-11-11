@@ -37,6 +37,12 @@ All notable changes to The Chronicler (notesapp). Newest first.
 
 ## Incidents
 
+### 2026-11-11 — recap edit 500, then brief boot loop
+- **What broke:** Saving a recap returned 500 (`no such column: updated_at`). A fix deploy then crash-looped the container for a few minutes.
+- **Impact:** Recap edits failed until the column was added; site was down briefly (~3–4 minutes) during the failed migration boot loop.
+- **Cause:** Migration 050 used `ALTER TABLE … ADD COLUMN updated_at … DEFAULT CURRENT_TIMESTAMP`. SQLite rejects non-constant defaults on `ADD COLUMN`; the error was swallowed and the migration was still marked done. The follow-up ensure migration repeated the same illegal default and aborted boot.
+- **Fix:** Add `updated_at` as a nullable column, then backfill from `created_at` (#30 / #31).
+
 ### 2026-11-02 — placeholder JWT_SECRET active on production
 - **What broke:** From about 19:11 CT until ~21:00 CT, the app signed tokens with the `.env.example` placeholder instead of `/data/.jwt_secret`.
 - **Impact:** Anyone who knew the placeholder could forge login JWTs on the public site; existing sessions from before 19:11 were invalidated until the hotfix.
