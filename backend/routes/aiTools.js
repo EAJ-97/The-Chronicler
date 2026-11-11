@@ -8,6 +8,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, isDMOf, isGrantedUser, isNoteUnderCompletedArchive, isWorldOrCampaignRootFolder } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { buildLoreCorpus, buildJournalCorpusText, buildAttachmentContextFromPrompt } = require('../utils/aiCorpus');
+const { extractAssistantText } = require('../utils/aiModels');
 const {
   loreSoFarPrompts,
   npcGeneratorPrompts,
@@ -97,7 +98,7 @@ async function callAnthropic(system, user, maxTokens = 4096) {
     throw new Error(err?.error?.message || 'Anthropic API error');
   }
   const data = await response.json();
-  const text = data.content?.[0]?.text?.trim();
+  const text = extractAssistantText(data);
   if (!text) throw new Error('Empty response from AI');
   return text;
 }

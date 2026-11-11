@@ -18,6 +18,21 @@ function modelSupportsTemperature(modelId) {
   return MODELS_SUPPORTING_TEMPERATURE.has(id);
 }
 
+/**
+ * Pull text from an Anthropic Messages response.
+ * 5.5+ models may lead with a `thinking` block; never assume content[0] is text.
+ * @param {object} data
+ * @returns {string}
+ */
+function extractAssistantText(data) {
+  const blocks = Array.isArray(data?.content) ? data.content : [];
+  return blocks
+    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+}
+
 /** Glossary suggestion scan (default Claude Haiku 5.5). */
 function getGlossaryScanModel() {
   return (process.env.GLOSSARY_SCAN_MODEL || 'claude-haiku-5-5').trim();
@@ -33,4 +48,5 @@ module.exports = {
   getRecapModel,
   modelSupportsTemperature,
   MODELS_SUPPORTING_TEMPERATURE,
+  extractAssistantText,
 };

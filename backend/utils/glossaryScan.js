@@ -2,7 +2,7 @@
  * Scan one session's journal for glossary suggestions via Claude.
  */
 const db = require('../db/database');
-const { getGlossaryScanModel, modelSupportsTemperature } = require('./aiModels');
+const { getGlossaryScanModel, modelSupportsTemperature, extractAssistantText } = require('./aiModels');
 const {
   getGlossaryForSession,
   getTopLevelScopeForNote,
@@ -28,21 +28,6 @@ function normalizeEntryType(raw) {
   if (['object', 'artifact', 'weapon', 'gear'].includes(t)) return 'item';
   if (['org', 'organization', 'guild', 'group', 'cult', 'house'].includes(t)) return 'faction';
   return t;
-}
-
-/**
- * Pull text blocks from an Anthropic Messages response.
- * Haiku 5.5+ may lead with a `thinking` block; content[0].text is often empty.
- * @param {object} data
- * @returns {string}
- */
-function extractAssistantText(data) {
-  const blocks = Array.isArray(data?.content) ? data.content : [];
-  return blocks
-    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
 }
 
 /**
@@ -327,7 +312,6 @@ function scheduleDebouncedSessionScan(sessionId) {
 
 module.exports = {
   validateScanPayload,
-  extractAssistantText,
   parseJsonFromModelText,
   normalizeEntryType,
   scanSessionGlossary,
