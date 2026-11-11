@@ -253,6 +253,7 @@ db.exec(`
     tone         TEXT    NOT NULL DEFAULT 'chronicle',
     content      TEXT    NOT NULL,
     is_dm_only   INTEGER DEFAULT 0,
+    verify_report TEXT DEFAULT NULL,
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id)   REFERENCES sessions(id) ON DELETE CASCADE,
@@ -854,6 +855,15 @@ migrate('051_glossary', () => {
     if (!hasStub.get(scope.id)) {
       insertStub.run(scope.user_id, scope.id, scope.is_demo ? 1 : 0);
     }
+  }
+});
+
+// Chronicle pipeline verify report (JSON); shown in API when RECAP_DEBUG=1
+migrate('052_recaps_verify_report', () => {
+  try {
+    db.exec('ALTER TABLE recaps ADD COLUMN verify_report TEXT DEFAULT NULL');
+  } catch {
+    /* already exists on fresh installs */
   }
 });
 

@@ -409,6 +409,35 @@ export default function RecapViewer({ sessionId, sessionNum, onClose, aiEnabled,
               >
                 {activeRecap.content || ''}
               </ReactMarkdown>
+              {activeRecap.verify_report != null && activeRecap.verify_report !== '' && (
+                <details style={{
+                  marginTop: 28,
+                  padding: '12px 14px',
+                  border: '1px dashed var(--ch-border)',
+                  borderRadius: 4,
+                  color: 'var(--ch-text-muted)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                }}
+                >
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontFamily: 'var(--ch-font-display)',
+                    fontSize: 8,
+                    letterSpacing: '0.12em',
+                    marginBottom: 8,
+                  }}
+                  >
+                    VERIFY REPORT (DEBUG)
+                  </summary>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {typeof activeRecap.verify_report === 'string'
+                      ? activeRecap.verify_report
+                      : JSON.stringify(activeRecap.verify_report, null, 2)}
+                  </pre>
+                </details>
+              )}
               <style>{readerCss}</style>
             </div>
           ) : null}
