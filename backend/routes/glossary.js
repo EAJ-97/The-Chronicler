@@ -321,6 +321,27 @@ router.post('/:id/build-from-past', authenticateToken, async (req, res) => {
       errors.push({ session_id: s.id, error: r.error });
     }
   }
+
+  if (sessions.length === 0) {
+    return res.json({
+      ok: true,
+      sessions: 0,
+      added_entries: 0,
+      added_aliases: 0,
+      errors: [],
+      message: 'No journal sessions found under this world/campaign',
+    });
+  }
+  if (errors.length === sessions.length) {
+    return res.status(500).json({
+      ok: false,
+      sessions: sessions.length,
+      added_entries: 0,
+      added_aliases: 0,
+      errors,
+      error: errors[0]?.error || 'Scan failed for all sessions',
+    });
+  }
   res.json({ ok: true, sessions: sessions.length, added_entries, added_aliases, errors });
 });
 

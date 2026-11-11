@@ -17,6 +17,7 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
   const [draft, setDraft] = useState({ name: '', type: 'npc', description: '', aliases: '' });
   const [editId, setEditId] = useState(null);
   const [scanSessionId, setScanSessionId] = useState('');
+  const [scanStatus, setScanStatus] = useState('');
 
   const campaigns = useMemo(() => {
     const scope = notes.find((n) => n.id === scopeNoteId);
@@ -27,8 +28,8 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
     return scope.is_folder ? [scope] : [];
   }, [notes, scopeNoteId]);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     setError('');
     try {
       const res = await api.get(`/glossary/by-scope/${scopeNoteId}`);
@@ -36,7 +37,7 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load glossary');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
@@ -121,10 +122,18 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
     if (!scanSessionId) return;
     setBusy(true);
     setError('');
+    setScanStatus('Scanning…');
     try {
-      await api.post(`/glossary/scan/${scanSessionId}`);
-      await load();
+      const res = await api.post(`/glossary/scan/${scanSessionId}`);
+      const { added_entries = 0, added_aliases = 0 } = res.data || {};
+      setScanStatus(
+        added_entries || added_aliases
+          ? `Added ${added_entries} suggestion(s), ${added_aliases} alias suggestion(s). Review below.`
+          : 'Scan finished — no new suggestions (already known, skipped PCs, or nothing in the journal).'
+      );
+      await load({ quiet: true });
     } catch (e) {
+      setScanStatus('');
       setError(e.response?.data?.error || 'Scan failed, try again');
     } finally {
       setBusy(false);
@@ -134,11 +143,29 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
   const buildPast = async () => {
     setBusy(true);
     setError('');
+    setScanStatus('Scanning past sessions… this can take a while.');
     try {
-      await api.post(`/glossary/${data.glossary.id}/build-from-past`);
-      await load();
+      const res = await api.post(`/glossary/${data.glossary.id}/build-from-past`);
+      const {
+        sessions = 0,
+        added_entries = 0,
+        added_aliases = 0,
+        errors = [],
+        message,
+      } = res.data || {};
+      if (message) {
+        setScanStatus(message);
+      } else {
+        const failNote = errors.length ? ` (${errors.length} session(s) failed)` : '';
+        setScanStatus(
+          `Scanned ${sessions} session(s): ${added_entries} suggestion(s), ${added_aliases} alias suggestion(s).${failNote}`
+        );
+      }
+      await load({ quiet: true });
     } catch (e) {
-      setError(e.response?.data?.error || 'Build failed');
+      setScanStatus('');
+      const d = e.response?.data;
+      setError(d?.error || d?.errors?.[0]?.error || 'Build failed');
     } finally {
       setBusy(false);
     }
@@ -218,6 +245,9 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
             <button type="button" style={S.btn} disabled={busy || !scanSessionId} onClick={runScan}>Scan this session</button>
             <button type="button" style={S.btn} disabled={busy} onClick={buildPast}>Build from past sessions</button>
           </div>
+          {scanStatus && (
+            <div style={{ ...S.muted, marginBottom: 10, color: 'rgba(226,213,187,0.7)' }}>{scanStatus}</div>
+          )}
           <label style={{ ...S.muted, display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               type="checkbox"

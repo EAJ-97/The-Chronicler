@@ -108,10 +108,10 @@ async function callClaudeScan({ system, user }) {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
+    // Haiku 5.5+ rejects `temperature`; omit it (extraction does not need sampling).
     body: JSON.stringify({
       model: getGlossaryScanModel(),
       max_tokens: 2000,
-      temperature: 0,
       system,
       messages: [{ role: 'user', content: user }],
     }),
@@ -199,15 +199,18 @@ ${journalText}`;
   } catch (e) {
     console.error('[glossaryScan]', e.code || '', e.message, e.raw || '');
     const retryable = e.code === 'PARSE' || e.code === 'VALIDATE' || e.code === 'API';
+    if (e.code === 'NO_KEY' || e.code === 'AI_OFF') {
+      return { ok: false, error: e.message, retryable: false };
+    }
     if (opts.retry && retryable) {
       try {
         payload = await callClaudeScan({ system, user });
       } catch (e2) {
         console.error('[glossaryScan] retry failed', e2.code || '', e2.message);
-        return { ok: false, error: 'Scan failed, try again', retryable: false };
+        return { ok: false, error: e2.message || 'Scan failed, try again', retryable: false };
       }
     } else {
-      return { ok: false, error: 'Scan failed, try again', retryable };
+      return { ok: false, error: e.message || 'Scan failed, try again', retryable };
     }
   }
 

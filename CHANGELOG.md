@@ -5,6 +5,7 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Fixed
+- Glossary AI scan: omit `temperature` (Haiku 5.5 rejects it); show scan/build-from-past status and real API errors
 - Session recap prompts use the real `session_number` / title instead of folder session count
 - Entrypoint ignores `replace-me*` JWT_SECRET placeholders and falls back to `/data/.jwt_secret`
 - `.env.example` leaves `JWT_SECRET` empty so copying it cannot override the volume secret
