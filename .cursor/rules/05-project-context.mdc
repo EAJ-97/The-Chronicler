@@ -25,7 +25,7 @@ alwaysApply: true
 - `backend/routes/auth.js`: login/register JWT expiry (remember_me)
 - `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs (recaps: generate, sources, PUT edit)
 - `backend/routes/glossary.js` / `backend/utils/glossary.js` / `glossaryScan.js`: top-level glossary CRUD, merge/detach, suggestion scan
-- `backend/utils/aiModels.js`: `GLOSSARY_SCAN_MODEL` / `RECAP_MODEL` / `modelSupportsTemperature`
+- `backend/utils/aiModels.js`: `GLOSSARY_SCAN_MODEL` / `RECAP_MODEL` / `modelSupportsTemperature` / `extractAssistantText`
 - `backend/utils/recapPromptBuild.js`: `<session>` + `<party>` + `<glossary>` + formatted `<journal>` prompts
 - `frontend/src/components/GlossaryPage.jsx` / `GlossaryMergeModal.jsx`: glossary UI + campaign→world merge review
 - `backend/routes/admin.js` / `backup.js` / `snapshots.js`: admin, backup, vault
