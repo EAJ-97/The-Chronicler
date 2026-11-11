@@ -828,6 +828,7 @@ export default function NoteEditor({
   const displayIconRef = useRef(displayIcon);
   const displaySummaryRef = useRef(displaySummary);
   const categoryRef = useRef(category);
+  const playedByRef = useRef(playedBy);
   const significanceRef = useRef(significance);
   const narrativeWeightRef = useRef(narrativeWeight);
   const dirtyRef = useRef(dirty);
@@ -838,6 +839,7 @@ export default function NoteEditor({
   displayIconRef.current = displayIcon;
   displaySummaryRef.current = displaySummary;
   categoryRef.current = category;
+  playedByRef.current = playedBy;
   significanceRef.current = significance;
   narrativeWeightRef.current = narrativeWeight;
   dirtyRef.current = dirty;
@@ -942,9 +944,11 @@ export default function NoteEditor({
     api.get('/notes/meta/tags').then(r => setAllTags(r.data.map(t => t.tag))).catch(() => {});
   }, []);
 
-  // Load users for permissions panel — scoped to campaign/world members when inside a scope tree
+  // Load users for permissions / played_by — scoped to campaign/world members when inside a scope tree.
+  // played_by needs the roster even when the editor is not a folder manager (players claim themselves).
+  const needsPlayedByRoster = !note?.is_folder && (category === 'npc' || category === 'character');
   useEffect(() => {
-    if (!note?.id || !canManage) return;
+    if (!note?.id || (!canManage && !needsPlayedByRoster)) return;
     if (showMemberPanel) {
       api.get('/notes/meta/users', { params: { campaign_id: note.id } }).then(r => setAllUsers(r.data)).catch(() => {});
       return;
@@ -958,9 +962,10 @@ export default function NoteEditor({
       root = parent;
     }
     const scopeId = rosterId ?? root?.id;
+    // Sharing APIs omit the requester; played_by dropdown merges currentUser client-side.
     const params = scopeId ? { campaign_id: scopeId } : {};
     api.get('/notes/meta/users', { params }).then(r => setAllUsers(r.data)).catch(() => {});
-  }, [note?.id, canManage, showMemberPanel, notes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [note?.id, canManage, needsPlayedByRoster, showMemberPanel, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load users eligible for add-member dropdown (world: all users; campaign: world roster when nested)
   useEffect(() => {
@@ -1002,6 +1007,7 @@ export default function NoteEditor({
         title: titleRef.current,
         content: contentRef.current,
         category: categoryRef.current,
+        played_by: playedByRef.current === '' || playedByRef.current == null ? null : playedByRef.current,
         ...(showFolderDmSplit ? { folder_dm_tabs: serializeFolderDmTabsForSave(folderDmTabsRef.current) } : {}),
       });
       navigator.sendBeacon
@@ -1033,7 +1039,7 @@ export default function NoteEditor({
       title: titleRef.current,
       content: contentRef.current,
       category: categoryRef.current,
-      played_by: playedBy === '' || playedBy == null ? null : playedBy,
+      played_by: playedByRef.current === '' || playedByRef.current == null ? null : playedByRef.current,
       significance: significanceRef.current,
       narrative_weight: narrativeWeightRef.current,
       display_icon: displayIconRef.current === '' ? null : displayIconRef.current,
@@ -1050,6 +1056,7 @@ export default function NoteEditor({
       const res = await api.put(`/notes/${noteIdRef.current}`, payload);
       // Update our tracked server timestamp so next save has the right baseline
       serverUpdatedAt.current = res.data?.updated_at || serverUpdatedAt.current;
+      if (res.data?.played_by !== undefined) setPlayedBy(res.data.played_by ?? null);
       setDirty(false);
       setSavedAt(new Date());
       if (onSave) onSave(res.data);
@@ -1071,11 +1078,12 @@ export default function NoteEditor({
         });
       } else {
         console.error('Save failed', err);
+        window.alert(err.response?.data?.error || 'Save failed');
       }
     } finally {
       setSaving(false);
     }
-  }, [canEdit, onSave, showFolderDmSplit, note?.is_folder, playedBy]);
+  }, [canEdit, onSave, showFolderDmSplit, note?.is_folder]);
 
   /**
    * Switches root-folder tool tab and persists the choice for the next visit.
@@ -2235,16 +2243,31 @@ export default function NoteEditor({
               value={playedBy ?? ''}
               onChange={(e) => {
                 const v = e.target.value;
-                setPlayedBy(v === '' ? null : Number(v));
+                const next = v === '' ? null : Number(v);
+                playedByRef.current = next;
+                setPlayedBy(next);
                 markDirty();
               }}
               disabled={!canEdit}
               title="Player character assignment (skipped by glossary scans)"
             >
               <option value="">None (NPC)</option>
-              {(allUsers || []).map((u) => (
-                <option key={u.id} value={u.id}>{u.username}</option>
-              ))}
+              {(() => {
+                // Party roster API omits the current user (sharing UI); played_by must include self.
+                const byId = new Map();
+                if (currentUser?.id != null) {
+                  byId.set(Number(currentUser.id), {
+                    id: currentUser.id,
+                    username: currentUser.username || 'You',
+                  });
+                }
+                for (const u of allUsers || []) byId.set(Number(u.id), u);
+                return [...byId.values()]
+                  .sort((a, b) => String(a.username).localeCompare(String(b.username)))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>{u.username}</option>
+                  ));
+              })()}
             </select>
           )}
 
