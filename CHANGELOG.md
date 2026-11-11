@@ -5,7 +5,8 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Fixed
-- Recap edit 500: ensure `recaps.updated_at` exists (migration 050 had been marked done without adding the column)
+- Recap edit 500: ensure `recaps.updated_at` exists (migration 050 used illegal `DEFAULT CURRENT_TIMESTAMP` on `ADD COLUMN`, failed silently, and was still marked done)
+- Boot crash from follow-up migration that repeated the same illegal default
 
 ### Added
 - Delete session recap (DELETE `/api/recaps/:id`) for campaign DM or admin; refunds one generation toward the author; Delete button in RecapViewer
