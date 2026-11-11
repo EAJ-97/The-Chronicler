@@ -962,8 +962,8 @@ export default function NoteEditor({
       root = parent;
     }
     const scopeId = rosterId ?? root?.id;
+    // Sharing APIs omit the requester; played_by dropdown merges currentUser client-side.
     const params = scopeId ? { campaign_id: scopeId } : {};
-    if (needsPlayedByRoster) params.include_self = '1';
     api.get('/notes/meta/users', { params }).then(r => setAllUsers(r.data)).catch(() => {});
   }, [note?.id, canManage, needsPlayedByRoster, showMemberPanel, notes]); // eslint-disable-line react-hooks/exhaustive-deps
 
