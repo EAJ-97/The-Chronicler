@@ -26,14 +26,16 @@ alwaysApply: true
 - `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs (recaps: generate, sources, PUT edit)
 - `backend/routes/glossary.js` / `backend/utils/glossary.js` / `glossaryScan.js`: top-level glossary CRUD, merge/detach, suggestion scan
 - `backend/utils/aiModels.js`: `GLOSSARY_SCAN_MODEL` / `RECAP_MODEL` / `modelSupportsTemperature` / `extractAssistantText`
-- `backend/utils/recapPromptBuild.js`: `<session>` + `<party>` + `<glossary>` + formatted `<journal>` prompts
+- `backend/utils/recapPromptBuild.js`: `<session>` + `<party>` + `<glossary>` + formatted `<journal>` prompts; title assemble / `##` subtitle parse
+- `backend/prompts/style_example.md`: chronicle voice sample injected as `<style_example>`
+- `frontend/src/components/RecapViewer.jsx`: full-page markdown recap reader (generate / edit)
 - `frontend/src/components/GlossaryPage.jsx` / `GlossaryMergeModal.jsx`: glossary UI + campaign→world merge review
 - `backend/routes/admin.js` / `backup.js` / `snapshots.js`: admin, backup, vault
 - `backend/routes/images.js` / `aiTools.js` / `ddb.js` / `timeline.js` / `integrity.js`: media, AI, D&D Beyond, timeline
 - `backend/utils/access.js`: folder/note permissions helpers
 - `frontend/src/App.jsx` / `main.jsx`: SPA shell
 - `frontend/src/components/Login.jsx` / `NoteEditor.jsx` / `FolderSubfolderBody.jsx` / `FolderNoteCards.jsx` / `ReferencePeekPanel.jsx`: main UI
-- `frontend/src/components/RecapViewer.jsx` / `Journal.jsx`: session recaps (generate, source line, Edit/Save)
+- `frontend/src/components/Journal.jsx`: journal + opens RecapViewer
 - `frontend/src/utils/authStorage.js` / `folderPreview.js` / `panelAnimation.js`: client helpers
 - `frontend/src/graph/`: knowledge graph (adjacency/BFS undirected for path highlight)
 - `docker-compose.yml`: production `chronicler` on 3001
@@ -44,7 +46,7 @@ alwaysApply: true
 - Default first-boot login is `admin` / `admin` — change immediately.
 - Organizer subfolders: overview always editable; preview cards list descendant notes (excluding world/campaign roots).
 - Graph connections: PUT `/connections/:id` uses same visibility as POST; arrow direction is visual only for path highlight.
-- AI session recaps use `<session>` / `<party>` (from `played_by`) / approved `<glossary>` / formatted `<journal>`. Chronicle may dramatize; it must not invent off-journal facts. Recaps are editable by author/DM/admin without spending generation quota. `RECAP_DEBUG=1` logs full prompts.
+- AI session recaps use `<session>` / `<party>` (from `played_by`) / approved `<glossary>` / formatted `<journal>`. Stored markdown: app H1 + optional session line + model `##` subtitle + body. Chronicle may dramatize; it must not invent off-journal facts. Recaps are editable by author/DM/admin without spending generation quota. `RECAP_DEBUG=1` logs full prompts. Change `RECAP_MODEL` in `.env` then `docker compose up -d --force-recreate chronicler`.
 - Glossary exists only on World roots or standalone Campaigns (`is_glossary` stub note). Campaigns under a World use the World glossary. Search/mentions/AI corpus exclude glossary stubs.
 - Do not commit one-off `RELEASE_NOTES*.md` / `release-*-notes.txt`; put release text in chat or GitHub Releases UI.
 - `CONTEXT.md` is retired; this file is the only project context. `.cursor/` rules are versioned in git.

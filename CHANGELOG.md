@@ -5,6 +5,7 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Changed
+- AI recaps: app-assembled markdown title (`# Chronicle/Summary of…`), optional `*Session N*`, model `##` subtitle; chronicle style sample + STYLE rules; full-page themed markdown reader with Edit/Save
 - AI recaps: user payload is `<session>` → `<party>` → `<glossary>` → `<journal>` (authorship groups, local date headers via `APP_TIMEZONE`, quote tags); default `RECAP_MODEL=claude-sonnet-5-5`; `RECAP_DEBUG`; shared `modelSupportsTemperature` allowlist for recaps + glossary scan
 - AI recaps: Chronicle covers every scene (roughly one paragraph per 2–4 scenes); Summary stays 200–350 words and covers every scene briefly
 - Synced template fixes: secret-output rules, maintenance drift check, deploy fetches only main
