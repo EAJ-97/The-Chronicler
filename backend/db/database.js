@@ -98,6 +98,8 @@ db.exec(`
     status             TEXT     DEFAULT NULL,
     is_world           INTEGER  DEFAULT 0,
     is_campaign        INTEGER  DEFAULT 0,
+    is_glossary        INTEGER  DEFAULT 0,
+    played_by          INTEGER  DEFAULT NULL,
     source_note_id     INTEGER  DEFAULT NULL,
     display_icon       TEXT     DEFAULT NULL,
     display_summary    TEXT     DEFAULT NULL,
@@ -106,7 +108,44 @@ db.exec(`
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE SET NULL
+    FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE SET NULL,
+    FOREIGN KEY (played_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  -- Top-level glossary (one per World or standalone Campaign scope note)
+  CREATE TABLE IF NOT EXISTS glossaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_note_id INTEGER NOT NULL UNIQUE,
+    players_can_review_suggestions INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (scope_note_id) REFERENCES notes(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS glossary_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    glossary_id INTEGER NOT NULL,
+    name TEXT NOT NULL COLLATE NOCASE,
+    type TEXT NOT NULL CHECK (type IN ('npc', 'place', 'item', 'faction', 'other')),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('approved', 'suggested', 'dismissed')),
+    campaign_id INTEGER DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (glossary_id) REFERENCES glossaries(id) ON DELETE CASCADE,
+    FOREIGN KEY (campaign_id) REFERENCES notes(id) ON DELETE SET NULL,
+    UNIQUE (glossary_id, name COLLATE NOCASE)
+  );
+
+  CREATE TABLE IF NOT EXISTS glossary_entry_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    glossary_id INTEGER NOT NULL,
+    entry_id INTEGER NOT NULL,
+    alias TEXT NOT NULL COLLATE NOCASE,
+    status TEXT NOT NULL CHECK (status IN ('approved', 'suggested', 'dismissed')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (glossary_id) REFERENCES glossaries(id) ON DELETE CASCADE,
+    FOREIGN KEY (entry_id) REFERENCES glossary_entries(id) ON DELETE CASCADE,
+    UNIQUE (glossary_id, alias COLLATE NOCASE)
   );
 
   CREATE TABLE IF NOT EXISTS note_permissions (
@@ -740,6 +779,81 @@ migrate('050_recaps_updated_at', () => {
     db.exec(`UPDATE recaps SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''`);
   } catch {
     /* ignore */
+  }
+});
+
+// Top-level glossaries + stub notes; played_by for PC skip list
+migrate('051_glossary', () => {
+  try { db.exec('ALTER TABLE notes ADD COLUMN is_glossary INTEGER DEFAULT 0'); } catch { /* fresh */ }
+  try { db.exec('ALTER TABLE notes ADD COLUMN played_by INTEGER DEFAULT NULL'); } catch { /* fresh */ }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS glossaries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope_note_id INTEGER NOT NULL UNIQUE,
+      players_can_review_suggestions INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (scope_note_id) REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS glossary_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      glossary_id INTEGER NOT NULL,
+      name TEXT NOT NULL COLLATE NOCASE,
+      type TEXT NOT NULL CHECK (type IN ('npc', 'place', 'item', 'faction', 'other')),
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL CHECK (status IN ('approved', 'suggested', 'dismissed')),
+      campaign_id INTEGER DEFAULT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (glossary_id) REFERENCES glossaries(id) ON DELETE CASCADE,
+      FOREIGN KEY (campaign_id) REFERENCES notes(id) ON DELETE SET NULL,
+      UNIQUE (glossary_id, name COLLATE NOCASE)
+    );
+    CREATE TABLE IF NOT EXISTS glossary_entry_aliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      glossary_id INTEGER NOT NULL,
+      entry_id INTEGER NOT NULL,
+      alias TEXT NOT NULL COLLATE NOCASE,
+      status TEXT NOT NULL CHECK (status IN ('approved', 'suggested', 'dismissed')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (glossary_id) REFERENCES glossaries(id) ON DELETE CASCADE,
+      FOREIGN KEY (entry_id) REFERENCES glossary_entries(id) ON DELETE CASCADE,
+      UNIQUE (glossary_id, alias COLLATE NOCASE)
+    );
+    CREATE INDEX IF NOT EXISTS idx_glossary_entries_glossary ON glossary_entries(glossary_id);
+    CREATE INDEX IF NOT EXISTS idx_glossary_aliases_glossary ON glossary_entry_aliases(glossary_id);
+    CREATE INDEX IF NOT EXISTS idx_glossary_aliases_entry ON glossary_entry_aliases(entry_id);
+    CREATE INDEX IF NOT EXISTS idx_notes_is_glossary ON notes(is_glossary);
+  `);
+
+  // Backfill (inline — avoid requiring utils/glossary while this module is still loading)
+  const scopeRoots = db.prepare(`
+    SELECT id, user_id, is_demo, is_world, is_campaign FROM notes
+    WHERE is_folder = 1 AND parent_id IS NULL AND deleted_at IS NULL
+      AND (is_world = 1 OR is_campaign = 1 OR (COALESCE(is_world, 0) = 0 AND COALESCE(is_campaign, 0) = 0))
+  `).all().filter((r) => r.is_world === 1 || r.is_campaign === 1 || (!r.is_world && !r.parent_id));
+
+  const insertG = db.prepare('INSERT OR IGNORE INTO glossaries (scope_note_id) VALUES (?)');
+  const hasStub = db.prepare(`
+    SELECT id FROM notes WHERE parent_id = ? AND COALESCE(is_glossary, 0) = 1 AND deleted_at IS NULL LIMIT 1
+  `);
+  const insertStub = db.prepare(`
+    INSERT INTO notes (
+      user_id, parent_id, title, content, is_shared, is_folder, category,
+      sort_order, visibility, is_glossary, is_demo
+    ) VALUES (?, ?, 'Glossary', '', 1, 0, 'glossary', -1000, 'shared', 1, ?)
+  `);
+
+  for (const scope of scopeRoots) {
+    // Skip world-layer only? Worlds yes; standalone non-world roots yes; skip nothing at root except we already filtered
+    if (!scope.is_world && scope.is_campaign !== 1) {
+      // legacy standalone root without is_campaign flag
+      if (scope.is_world) continue;
+    }
+    insertG.run(scope.id);
+    if (!hasStub.get(scope.id)) {
+      insertStub.run(scope.user_id, scope.id, scope.is_demo ? 1 : 0);
+    }
   }
 });
 

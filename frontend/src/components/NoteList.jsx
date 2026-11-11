@@ -34,6 +34,10 @@ function buildTree(notes) {
 
   const sortNodes = (arr) => {
     arr.sort((a, b) => {
+      // Glossary stub always first under its parent
+      const ag = a.is_glossary ? 1 : 0;
+      const bg = b.is_glossary ? 1 : 0;
+      if (ag !== bg) return bg - ag;
       if (a.is_folder !== b.is_folder) return b.is_folder - a.is_folder;
       if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
       return a.title.localeCompare(b.title);
@@ -98,7 +102,9 @@ function TreeNode({
   const canExportBackup =
     isExportRootFolder &&
     (isAdmin || (dmCampaignIds && dmCampaignIds.includes(node.id)));
-  const canManage = isRootFolder ? (isAdmin || isDM) : (isAdmin || isOwner || isDM);
+  const canManage = node.is_glossary
+    ? false
+    : (isRootFolder ? (isAdmin || isDM) : (isAdmin || isOwner || isDM));
   const indent = depth * INDENT + 10;
 
   const rowStyle = {

@@ -232,6 +232,12 @@ router.post('/', authenticateToken, (req, res) => {
   `).get(result.lastInsertRowid);
 
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: fid });
+  try {
+    const { scheduleDebouncedSessionScan } = require('../utils/glossaryScan');
+    scheduleDebouncedSessionScan(session_id);
+  } catch (e) {
+    console.error('[journal] glossary scan schedule', e.message);
+  }
   res.status(201).json(entry);
 });
 
@@ -533,6 +539,14 @@ router.put('/:id', authenticateToken, (req, res) => {
   `).get(req.params.id);
 
   if (req.app.broadcast) req.app.broadcast({ type: 'journal_changed', folder_id: entry.folder_id });
+  if (content !== undefined && entry.session_id) {
+    try {
+      const { scheduleDebouncedSessionScan } = require('../utils/glossaryScan');
+      scheduleDebouncedSessionScan(entry.session_id);
+    } catch (e) {
+      console.error('[journal] glossary scan schedule', e.message);
+    }
+  }
   res.json(updated);
 });
 

@@ -11,9 +11,11 @@ All notable changes to The Chronicler (notesapp). Newest first.
 
 ### Changed
 - AI recaps: Chronicle stays story-like but session-journal-only; Summary stays factual; tone-based temperature; Player labels and spelling/attribution fidelity rules
+- Recap user prompt order is `<glossary>` then `<journal>` then the Write… line; model via `RECAP_MODEL`
 - Synced template fixes: secret-output rules, maintenance drift check, deploy fetches only main
 
 ### Added
+- Top-level Glossary (one per World or standalone Campaign): locked tree doc, CRUD, suggestions, merge-on-move, Haiku 5.5 scan (`GLOSSARY_SCAN_MODEL`), `played_by` on NPC notes
 - Editable session recaps (PUT `/api/recaps/:id` for author/DM/admin; Edit/Save in RecapViewer; no quota burn)
 - Recap source confirmation (`GET /api/recaps/sources/:sessionId` + UI line showing session + journal entry count)
 - DevOps kit: scripts/deploy.sh, scripts/backup.sh, CI, Dependabot
