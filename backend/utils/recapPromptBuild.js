@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const db = require('../db/database');
 const { getRootFolderId, getCampaignFolderId } = require('./access');
 const {
@@ -6,6 +8,92 @@ const {
   getApprovedEntriesForRecap,
   formatGlossaryBlock,
 } = require('./glossary');
+
+const STYLE_EXAMPLE_PATH = path.join(__dirname, '../prompts/style_example.md');
+
+/**
+ * Load chronicle style sample once (empty string if missing).
+ * @returns {string}
+ */
+function loadStyleExample() {
+  try {
+    return fs.readFileSync(STYLE_EXAMPLE_PATH, 'utf8').trim();
+  } catch (e) {
+    console.error('[recapPromptBuild] style_example.md missing', e.message);
+    return '';
+  }
+}
+
+/**
+ * Split model output into optional ## subtitle and body. Never throws.
+ * @param {string} raw
+ * @returns {{ subtitle: string|null, body: string }}
+ */
+function parseModelRecapOutput(raw) {
+  const text = String(raw || '').replace(/^\uFEFF/, '').trim();
+  if (!text) return { subtitle: null, body: '' };
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i += 1;
+  if (i >= lines.length) return { subtitle: null, body: '' };
+  const first = lines[i].trim();
+  if (first.startsWith('## ')) {
+    const subtitle = first.slice(3).trim() || null;
+    let j = i + 1;
+    if (j < lines.length && !lines[j].trim()) j += 1;
+    const body = lines.slice(j).join('\n').trim();
+    return { subtitle, body };
+  }
+  return { subtitle: null, body: text };
+}
+
+/**
+ * Soft-strip accidental model H1 that duplicates our app title.
+ * @param {string} body
+ * @returns {string}
+ */
+function stripDuplicateTitleHeadings(body) {
+  let t = String(body || '').trim();
+  const lines = t.split(/\r?\n/);
+  if (lines.length && /^#\s+(Chronicle|Summary)\s+of\b/i.test(lines[0].trim())) {
+    let i = 1;
+    if (i < lines.length && !lines[i].trim()) i += 1;
+    t = lines.slice(i).join('\n').trim();
+  }
+  return t;
+}
+
+/**
+ * Build stored markdown: app H1 + optional session line + optional ## subtitle + body.
+ * @param {{ tone: string, worldTitle?: string|null, campaignTitle?: string|null, sessionNumber?: number|null, subtitle?: string|null, body: string }} opts
+ * @returns {string}
+ */
+function assembleRecapMarkdown(opts) {
+  const tone = opts.tone === 'summary' ? 'summary' : 'chronicle';
+  const campaign = (opts.campaignTitle || 'Unknown Campaign').trim();
+  const world = opts.worldTitle ? String(opts.worldTitle).trim() : '';
+  const kind = tone === 'summary' ? 'Summary' : 'Chronicle';
+  const h1 = world
+    ? `# ${kind} of ${world}: ${campaign}`
+    : `# ${kind} of ${campaign}`;
+
+  const parts = [h1];
+  if (opts.sessionNumber != null && opts.sessionNumber !== '') {
+    parts.push('');
+    parts.push(`*Session ${opts.sessionNumber}*`);
+  }
+  const subtitle = opts.subtitle ? String(opts.subtitle).trim() : '';
+  if (subtitle) {
+    parts.push('');
+    parts.push(`## ${subtitle.replace(/^#+\s*/, '')}`);
+  }
+  const body = stripDuplicateTitleHeadings(opts.body || '');
+  if (body) {
+    parts.push('');
+    parts.push(body);
+  }
+  return parts.join('\n').trim() + '\n';
+}
 
 /**
  * App timezone for journal date headers (default America/Chicago).
@@ -337,7 +425,6 @@ function buildRecapPromptsForSession(sessionId, tone) {
     console.error('[recapPromptBuild] glossary', e.message);
   }
 
-  // Change 6: system prompt fidelity + tone-specific length rules
   const fidelityShared = `CRITICAL RULES:
 - Story facts come ONLY from the <journal> entries for this one session. Do not invent scenes, outcomes, motives, people, or places that are not in the journal.
 - The <glossary> block is a spelling and identity aid only. Use it to preserve names and aliases; do not invent events from it.
@@ -346,18 +433,44 @@ function buildRecapPromptsForSession(sessionId, tone) {
 - The <party> section lists each player character and who plays them. Usernames are real people, not in-world characters. Never use them in the chronicle.
 - If the journal says a character was unaffected or did not do something, keep that.
 - Direct quotes must keep their wording and meaning. Theories a character states belong in the recap, attributed to that character.
-- When the journal is ambiguous, prefer understating over guessing.`;
+- When the journal is ambiguous, prefer understating over guessing.
+- Do not use em dashes (—) or double hyphens (--) as dash substitutes. Use commas, periods, or plain hyphens sparingly.`;
+
+  const styleExample = loadStyleExample();
+  const styleExampleBlock = styleExample
+    ? `<style_example>
+${styleExample}
+</style_example>
+
+This sample shows the voice, pacing, and texture to aim for. Its people, places, and events are not part of this campaign. Never use any of its content.`
+    : '';
+
+  const chronicleStyle = `STYLE:
+- Open with a scene-setting sentence that places the reader in the moment.
+- Vary sentence length. Let important moments land in short sentences.
+- Describe places through the journal's own details, made vivid.
+- End paragraphs on a resonant line or a sense of what is coming, using only what the journal supports.
+- Present prophecies and important spoken words as markdown blockquotes.
+- Only italicize quoted speech inside blockquotes or emphasis; do not italicize the whole chronicle.
+
+${styleExampleBlock}`.trim();
 
   const systemPrompt = tone === 'chronicle'
-    ? `You are a skilled scribe chronicling the adventures of a Dungeons & Dragons party. Write in an immersive, in-world narrative style — as if recording events in an official chronicle or historical record. Use past tense, third person. Storytelling voice, scene framing, and paced prose are welcome when dramatizing what the journal actually records. Do not invent facts beyond the journal. Include names, key events, discoveries, conflicts, and decisions that appear in the source. Do not use bullet points. Include every scene in the journal, in order, including small or humorous moments. Length should fit the journal, roughly one paragraph per 2-4 scenes.
+    ? `You are a skilled scribe chronicling the adventures of a Dungeons & Dragons party. Write in an immersive, in-world narrative style, as if recording events in an official chronicle or historical record. Use past tense, third person. Storytelling voice, scene framing, and paced prose are welcome when dramatizing what the journal actually records. Do not invent facts beyond the journal. Include names, key events, discoveries, conflicts, and decisions that appear in the source. Do not use bullet points. Include every scene in the journal, in order, including small or humorous moments. Length should fit the journal, roughly one paragraph per 2-4 scenes.
 
-${fidelityShared}`
+Begin with a subtitle line in the form '## <subtitle>'. The subtitle names the session's main events or themes in 3 to 8 evocative words, using only places, people, and events from the journal (for example '## The Golden Orchard and Whispered Fates'). Do not write any other title, heading, date line, or byline. The app adds the main title separately.
+
+${fidelityShared}
+
+${chronicleStyle}`
     : `You are summarizing a Dungeons & Dragons session for the players. Be clear, factual, and organized. Highlight: what happened, key NPCs encountered, decisions made, and any unresolved threads — only when present in the journal. Use bullet points where helpful. Keep it concise — 200-350 words. Cover every scene briefly, even if only in a clause. Prefer understatement when details are thin.
+
+Optionally begin with a subtitle line in the form '## <subtitle>' (3 to 8 words from the journal). Do not write any other title, heading, date line, or byline. The app adds the main title separately.
 
 ${fidelityShared}`;
 
   const closing = tone === 'chronicle'
-    ? 'Write the chronicle entry for this session.'
+    ? 'Write the chronicle entry for this session. Start with the ## subtitle line.'
     : 'Write the session summary for this session.';
 
   // Order: session → party → glossary → journal (no Source-material line)
@@ -395,7 +508,8 @@ ${fidelityShared}`;
 module.exports = {
   buildRecapPromptsForSession,
   getRecapSourcesForSession,
-  // exported for focused tests / debug dumps
+  parseModelRecapOutput,
+  assembleRecapMarkdown,
   formatJournalBlock,
   speakerFromPreviousLine,
   maybeWrapQuote,

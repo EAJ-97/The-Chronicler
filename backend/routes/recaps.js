@@ -3,7 +3,12 @@ const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
-const { buildRecapPromptsForSession, getRecapSourcesForSession } = require('../utils/recapPromptBuild');
+const {
+  buildRecapPromptsForSession,
+  getRecapSourcesForSession,
+  parseModelRecapOutput,
+  assembleRecapMarkdown,
+} = require('../utils/recapPromptBuild');
 const { getRecapModel, modelSupportsTemperature, extractAssistantText } = require('../utils/aiModels');
 
 const router = express.Router();
@@ -214,12 +219,23 @@ router.post('/generate', authenticateToken, async (req, res) => {
     }
 
     const data = await response.json();
-    const content = extractAssistantText(data);
-    if (!content) {
+    const raw = extractAssistantText(data);
+    if (!raw) {
       const types = Array.isArray(data.content) ? data.content.map((c) => c.type).join(',') : 'none';
       console.error('[recap/generate] empty text', `stop=${data.stop_reason || '?'} blocks=[${types}]`);
       return res.status(500).json({ error: 'Empty response from AI' });
     }
+
+    // App builds H1 + session line; model may supply ## subtitle then body.
+    const { subtitle, body } = parseModelRecapOutput(raw);
+    const content = assembleRecapMarkdown({
+      tone: t,
+      worldTitle: sources.world_title,
+      campaignTitle: sources.campaign_title,
+      sessionNumber: sources.session_number,
+      subtitle,
+      body,
+    });
 
     insertRecapAndRespond(session_id, session.folder_id, uid, t, content, req, res, sources);
   } catch (e) {

@@ -85,3 +85,88 @@ export function buildMarkdownCss(theme) {
   }
 `;
 }
+
+/**
+ * Typography for the full-page recap reader (chronicle feel).
+ * @param {import('./schema.js').ChroniclerTheme} theme
+ * @returns {string}
+ */
+export function buildRecapReaderCss(theme) {
+  const tokens = theme?.fonts ? theme : CHRONICLER_DEFAULT;
+  const { colors, fonts } = tokens;
+  const display = `'${fonts.display}', serif`;
+  const body = `'${fonts.body}', Georgia, serif`;
+  const accent = colors.accent;
+  const text = colors.textPrimary;
+  const muted = colors.textMuted || 'rgba(226,213,187,0.45)';
+
+  return `
+  .md-recap-reader {
+    font-family: ${body};
+    color: ${text};
+    font-size: 1.125rem;
+    line-height: 1.7;
+    max-width: 70ch;
+    margin: 0 auto;
+    padding: 8px 4px 48px;
+  }
+  .md-recap-reader h1 {
+    font-family: ${display};
+    color: ${accent};
+    font-size: 1.65rem;
+    letter-spacing: 0.06em;
+    line-height: 1.25;
+    margin: 0 0 0.75rem;
+    font-weight: 500;
+  }
+  .md-recap-reader h2 {
+    font-family: ${display};
+    color: ${accent};
+    font-size: 1.2rem;
+    letter-spacing: 0.08em;
+    margin: 1.25rem 0 1rem;
+    font-weight: 500;
+  }
+  .md-recap-reader h3 {
+    font-family: ${display};
+    color: ${accent};
+    font-size: 1.05rem;
+    margin: 1rem 0 0.5rem;
+  }
+  .md-recap-reader > p:first-of-type em:only-child,
+  .md-recap-reader p:has(> em:only-child) {
+    display: block;
+    font-style: italic;
+    color: ${muted};
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    margin: 0 0 1.25rem;
+  }
+  .md-recap-reader p {
+    margin: 0 0 1.1rem;
+  }
+  .md-recap-reader blockquote {
+    border-left: 3px solid ${accent};
+    margin: 1.25rem 0;
+    padding: 0.35rem 0 0.35rem 1rem;
+    font-style: italic;
+    opacity: 0.95;
+    color: ${text};
+  }
+  .md-recap-reader blockquote p {
+    margin: 0 0 0.5rem;
+  }
+  .md-recap-reader em { font-style: italic; }
+  .md-recap-reader strong { font-weight: 600; color: ${text}; }
+  .md-recap-reader ul, .md-recap-reader ol {
+    margin: 0 0 1.1rem;
+    padding-left: 1.4rem;
+  }
+  .md-recap-reader li { margin-bottom: 0.35rem; }
+  .md-recap-reader hr {
+    border: none;
+    border-top: 1px solid ${colors.border};
+    margin: 1.5rem 0;
+  }
+`;
+}
