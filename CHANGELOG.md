@@ -4,6 +4,11 @@ All notable changes to The Chronicler (notesapp). Newest first.
 
 ## Unreleased
 
+### Changed
+- AI recaps: user payload is `<session>` → `<party>` → `<glossary>` → `<journal>` (authorship groups, local date headers via `APP_TIMEZONE`, quote tags); default `RECAP_MODEL=claude-sonnet-5-5`; `RECAP_DEBUG`; shared `modelSupportsTemperature` allowlist for recaps + glossary scan
+- AI recaps: Chronicle covers every scene (roughly one paragraph per 2–4 scenes); Summary stays 200–350 words and covers every scene briefly
+- Synced template fixes: secret-output rules, maintenance drift check, deploy fetches only main
+
 ### Fixed
 - Character `played_by`: autosave used a stale value (never persisted); dropdown now includes the logged-in user
 - Glossary AI scan: read `text` content blocks after Haiku 5.5 `thinking`; brace-extract JSON; map type synonyms; raise max_tokens
@@ -11,11 +16,6 @@ All notable changes to The Chronicler (notesapp). Newest first.
 - Session recap prompts use the real `session_number` / title instead of folder session count
 - Entrypoint ignores `replace-me*` JWT_SECRET placeholders and falls back to `/data/.jwt_secret`
 - `.env.example` leaves `JWT_SECRET` empty so copying it cannot override the volume secret
-
-### Changed
-- AI recaps: Chronicle stays story-like but session-journal-only; Summary stays factual; tone-based temperature; Player labels and spelling/attribution fidelity rules
-- Recap user prompt order is `<glossary>` then `<journal>` then the Write… line; model via `RECAP_MODEL`
-- Synced template fixes: secret-output rules, maintenance drift check, deploy fetches only main
 
 ### Added
 - Top-level Glossary (one per World or standalone Campaign): locked tree doc, CRUD, suggestions, merge-on-move, Haiku 5.5 scan (`GLOSSARY_SCAN_MODEL`), `played_by` on NPC notes

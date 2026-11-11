@@ -4,7 +4,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { buildRecapPromptsForSession, getRecapSourcesForSession } = require('../utils/recapPromptBuild');
-const { getRecapModel } = require('../utils/aiModels');
+const { getRecapModel, modelSupportsTemperature } = require('../utils/aiModels');
 
 const router = express.Router();
 
@@ -183,6 +183,21 @@ router.post('/generate', authenticateToken, async (req, res) => {
     const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get()?.value?.trim();
     if (!apiKey) return res.status(503).json({ error: 'No Anthropic API key configured.' });
 
+    const debugOn = ['1', 'true', 'yes'].includes(String(process.env.RECAP_DEBUG || '').trim().toLowerCase());
+    if (debugOn) {
+      console.log('[recap/debug] system_prompt\n', systemPrompt);
+      console.log('[recap/debug] user_prompt\n', userPrompt);
+    }
+
+    const model = getRecapModel();
+    const reqBody = {
+      model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    };
+    if (modelSupportsTemperature(model)) reqBody.temperature = temperature;
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -190,13 +205,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({
-        model: getRecapModel(),
-        max_tokens: 1000,
-        temperature,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
+      body: JSON.stringify(reqBody),
     });
 
     if (!response.ok) {

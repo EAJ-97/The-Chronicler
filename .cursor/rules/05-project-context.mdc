@@ -15,7 +15,7 @@ alwaysApply: true
 - Auth: app JWT (login/register). Remember me → 90d JWT in localStorage; else 12h in sessionStorage. Not behind Cloudflare Access.
 - Persistent data: Docker volume `notesapp_chronicler_data` → `/data` (DB + uploads). Backed up with scripts/backup.sh; nightly host job `~/bin/backup-chronicler.sh` also runs.
 - Deploy: scripts/deploy.sh (legacy `./deploy.sh` wraps it)
-- Env vars: see `.env.example` (`JWT_SECRET`; others auto-generated into `/data` on first boot)
+- Env vars: see `.env.example` (`JWT_SECRET`; optional `RECAP_MODEL` default `claude-sonnet-5-5`, `GLOSSARY_SCAN_MODEL`, `APP_TIMEZONE` default `America/Chicago`, `RECAP_DEBUG`; others auto-generated into `/data` on first boot)
 - GitHub repo: EAJ-97/The-Chronicler (private); folder name is `notesapp`
 
 ## Code map
@@ -25,8 +25,8 @@ alwaysApply: true
 - `backend/routes/auth.js`: login/register JWT expiry (remember_me)
 - `backend/routes/notes.js` / `connections.js` / `journal.js` / `recaps.js`: core content APIs (recaps: generate, sources, PUT edit)
 - `backend/routes/glossary.js` / `backend/utils/glossary.js` / `glossaryScan.js`: top-level glossary CRUD, merge/detach, suggestion scan
-- `backend/utils/aiModels.js`: `GLOSSARY_SCAN_MODEL` / `RECAP_MODEL`
-- `backend/utils/recapPromptBuild.js`: journal + approved `<glossary>` block for Anthropic prompts
+- `backend/utils/aiModels.js`: `GLOSSARY_SCAN_MODEL` / `RECAP_MODEL` / `modelSupportsTemperature`
+- `backend/utils/recapPromptBuild.js`: `<session>` + `<party>` + `<glossary>` + formatted `<journal>` prompts
 - `frontend/src/components/GlossaryPage.jsx` / `GlossaryMergeModal.jsx`: glossary UI + campaign→world merge review
 - `backend/routes/admin.js` / `backup.js` / `snapshots.js`: admin, backup, vault
 - `backend/routes/images.js` / `aiTools.js` / `ddb.js` / `timeline.js` / `integrity.js`: media, AI, D&D Beyond, timeline
@@ -44,7 +44,7 @@ alwaysApply: true
 - Default first-boot login is `admin` / `admin` — change immediately.
 - Organizer subfolders: overview always editable; preview cards list descendant notes (excluding world/campaign roots).
 - Graph connections: PUT `/connections/:id` uses same visibility as POST; arrow direction is visual only for path highlight.
-- AI session recaps use that session’s journal plus approved top-level glossary lines. Chronicle may dramatize; it must not invent off-journal facts. Recaps are editable by author/DM/admin without spending generation quota.
+- AI session recaps use `<session>` / `<party>` (from `played_by`) / approved `<glossary>` / formatted `<journal>`. Chronicle may dramatize; it must not invent off-journal facts. Recaps are editable by author/DM/admin without spending generation quota. `RECAP_DEBUG=1` logs full prompts.
 - Glossary exists only on World roots or standalone Campaigns (`is_glossary` stub note). Campaigns under a World use the World glossary. Search/mentions/AI corpus exclude glossary stubs.
 - Do not commit one-off `RELEASE_NOTES*.md` / `release-*-notes.txt`; put release text in chat or GitHub Releases UI.
 - `CONTEXT.md` is retired; this file is the only project context. `.cursor/` rules are versioned in git.
