@@ -1,5 +1,11 @@
 const db = require('../db/database');
-const { getRootFolderId } = require('./access');
+const { getRootFolderId, getCampaignFolderId } = require('./access');
+const {
+  ensureGlossaryForScope,
+  getTopLevelScopeForNote,
+  getApprovedEntriesForRecap,
+  formatGlossaryBlock,
+} = require('./glossary');
 
 /**
  * Journal entries for one session (recap source of truth).
@@ -43,8 +49,7 @@ function getRecapSourcesForSession(sessionId) {
       session_label: sessionLabel,
       campaign_title: campaignFolder?.title || null,
       entry_count: entries.length,
-      // Confirm scope: only this session's journal (no other sessions / note bodies)
-      scope: 'session_journal_only',
+      scope: 'session_journal_and_glossary',
     },
   };
 }
@@ -53,7 +58,6 @@ function getRecapSourcesForSession(sessionId) {
  * Loads journal data and builds Anthropic prompts for session recap generation.
  * @param {number} sessionId
  * @param {'chronicle'|'summary'} tone
- * @returns {{ ok: true, session: object, system_prompt: string, user_prompt: string, sources: object, temperature: number } | { ok: false, status: number, error: string }}
  */
 function buildRecapPromptsForSession(sessionId, tone) {
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
@@ -84,9 +88,26 @@ function buildRecapPromptsForSession(sessionId, tone) {
     ? `Session Title: ${session.title}\n`
     : '';
 
+  // Approved glossary for spelling / identity (not a source of new events)
+  let glossaryBlock = '';
+  try {
+    if (session.folder_id) {
+      const scopeId = getTopLevelScopeForNote(session.folder_id);
+      if (scopeId) {
+        const { glossary } = ensureGlossaryForScope(scopeId);
+        const campaignId = getCampaignFolderId(session.folder_id);
+        const approved = getApprovedEntriesForRecap(glossary.id, campaignId);
+        glossaryBlock = formatGlossaryBlock(approved);
+      }
+    }
+  } catch (e) {
+    console.error('[recapPromptBuild] glossary', e.message);
+  }
+
   const fidelityShared = `CRITICAL RULES:
-- Source material is ONLY the journal entries provided for this one session. Do not use outside knowledge or invent scenes, outcomes, motives, people, or places that are not in those entries.
-- Preserve exact spelling of every name as written in the journal. Do not "correct" or rename.
+- Story facts come ONLY from the <journal> entries for this one session. Do not invent scenes, outcomes, motives, people, or places that are not in the journal.
+- The <glossary> block is a spelling and identity aid only. Use it to preserve names and aliases; do not invent events from it.
+- Preserve exact spelling of every name as written in the journal and glossary. Do not "correct" or rename.
 - Do not reassign actions to the wrong person.
 - Labels like [Player: username] are player account names, not in-world character names. Prefer character names when the journal states them; otherwise describe actions without inventing a character name.
 - When the journal is ambiguous, prefer understating over guessing.`;
@@ -99,14 +120,17 @@ ${fidelityShared}`
 
 ${fidelityShared}`;
 
+  const closing = tone === 'chronicle'
+    ? 'Write the chronicle entry for this session.'
+    : 'Write the session summary for this session.';
+
   const userPrompt = `Campaign: ${campaignFolder?.title || 'Unknown Campaign'}
 ${sessionNumberLine}
-${sessionTitleLine}Source material is only the journal entries below for this one session.
-
-Journal entries from this session:
+${sessionTitleLine}${glossaryBlock ? `${glossaryBlock}\n\n` : ''}<journal>
 ${journalText}
+</journal>
 
-Please write a ${tone === 'chronicle' ? 'narrative chronicle entry' : 'session summary'} for this session.`;
+${closing}`;
 
   const sources = {
     session_id: session.id,
@@ -117,10 +141,9 @@ Please write a ${tone === 'chronicle' ? 'narrative chronicle entry' : 'session s
       : (session.title || `id ${session.id}`),
     campaign_title: campaignFolder?.title || null,
     entry_count: entries.length,
-    scope: 'session_journal_only',
+    scope: 'session_journal_and_glossary',
   };
 
-  // Chronicle: mild creativity for voice; Summary: literal
   const temperature = tone === 'chronicle' ? 0.4 : 0;
 
   return {

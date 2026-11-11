@@ -4,6 +4,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
 const { buildRecapPromptsForSession, getRecapSourcesForSession } = require('../utils/recapPromptBuild');
+const { getRecapModel } = require('../utils/aiModels');
 
 const router = express.Router();
 
@@ -190,7 +191,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: getRecapModel(),
         max_tokens: 1000,
         temperature,
         system: systemPrompt,

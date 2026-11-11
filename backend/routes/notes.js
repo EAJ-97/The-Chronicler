@@ -166,8 +166,9 @@ router.get('/', authenticateToken, (req, res) => {
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
-    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.is_campaign, n.source_note_id,
-    n.display_icon, n.display_summary, n.is_completed, n.ddb_character_id, u.username AS author`;
+    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.is_campaign, n.is_glossary, n.played_by,
+    n.source_note_id, n.display_icon, n.display_summary, n.is_completed, n.ddb_character_id,
+    u.username AS author`;
 
   let notes;
   if (listingAdminAll) {
@@ -509,7 +510,8 @@ router.get('/meta/mention-suggestions', authenticateToken, (req, res) => {
     const part = db
       .prepare(
         `SELECT id, title, category, is_folder FROM notes
-         WHERE deleted_at IS NULL AND is_folder = 0 AND id IN (${ph})`
+         WHERE deleted_at IS NULL AND is_folder = 0
+           AND COALESCE(is_glossary, 0) = 0 AND id IN (${ph})`
       )
       .all(...chunk);
     candidates.push(...part);
@@ -539,7 +541,7 @@ router.get('/search', authenticateToken, (req, res) => {
   let tagMatches = db.prepare(`
     SELECT DISTINCT n.*, u.username AS author, '' AS snippet FROM note_tags nt
     JOIN notes n ON nt.note_id = n.id JOIN users u ON n.user_id = u.id
-    WHERE nt.tag LIKE ?
+    WHERE nt.tag LIKE ? AND COALESCE(n.is_glossary, 0) = 0
   `).all(`${tagQuery}%`);
 
   const safeQ = q.trim().replace(/['"*]/g, '') + '*';
@@ -549,12 +551,13 @@ router.get('/search', authenticateToken, (req, res) => {
       SELECT n.*, u.username AS author,
         snippet(notes_fts, 1, '<mark>', '</mark>', '...', 20) AS snippet
       FROM notes_fts JOIN notes n ON notes_fts.rowid = n.id JOIN users u ON n.user_id = u.id
-      WHERE notes_fts MATCH ? ORDER BY rank LIMIT 30
+      WHERE notes_fts MATCH ? AND COALESCE(n.is_glossary, 0) = 0
+      ORDER BY rank LIMIT 30
     `).all(safeQ);
   } catch (e) {
     ftsResults = db.prepare(`
       SELECT n.*, u.username AS author, '' AS snippet FROM notes n JOIN users u ON n.user_id = u.id
-      WHERE n.title LIKE ? OR n.content LIKE ? LIMIT 30
+      WHERE (n.title LIKE ? OR n.content LIKE ?) AND COALESCE(n.is_glossary, 0) = 0 LIMIT 30
     `).all(`%${q}%`, `%${q}%`);
   }
 
@@ -748,6 +751,16 @@ router.post('/', authenticateToken, (req, res) => {
     }
   }
 
+  // Glossary: Worlds and standalone campaigns get one; campaigns under a World do not
+  if (is_folder && !parent_id) {
+    try {
+      const { ensureGlossaryForScope } = require('../utils/glossary');
+      ensureGlossaryForScope(noteId);
+    } catch (e) {
+      console.error('[notes] ensureGlossaryForScope', e.message);
+    }
+  }
+
   res.status(201).json(withPermissions(withTags(note)));
   if (req.app.broadcast) req.app.broadcast({ type: 'notes_changed' });
 });
@@ -804,7 +817,7 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canManage    = admin || isOwner || (inWorldLayer ? worldCollaborator : isDM);
   const canAppend    = isDM && !canFullEdit;
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs, played_by } = req.body;
 
   // Conflict detection — only for content/title/DM-folder edits, not structural ops
   if (client_updated_at && (
@@ -859,6 +872,13 @@ router.put('/:id', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Not authorised to rename, move, or change permissions on this note' });
   }
 
+  if (note.is_glossary && parent_id !== undefined) {
+    return res.status(403).json({ error: 'The Glossary document cannot be moved.' });
+  }
+  if (note.is_glossary && title !== undefined && title.trim() !== note.title) {
+    return res.status(403).json({ error: 'The Glossary document cannot be renamed.' });
+  }
+
   // Validate move to world layer: only root campaigns can be moved under worlds
   if (parent_id !== undefined && parent_id !== null && parent_id !== -1) {
     const target = db.prepare('SELECT is_world, parent_id, is_folder FROM notes WHERE id = ?').get(parent_id);
@@ -866,6 +886,15 @@ router.put('/:id', authenticateToken, (req, res) => {
       // Moving under a world layer: source must be a root campaign (no parent, is_folder=1)
       if (note.parent_id !== null) {
         return res.status(400).json({ error: 'Only root campaigns can be moved under a world layer' });
+      }
+      // Glossary merge must go through /api/glossary/merge-apply
+      if (note.is_folder && isPlayableCampaignRoot(note.id)) {
+        return res.status(409).json({
+          error: 'Moving a campaign into a world requires glossary merge review.',
+          code: 'GLOSSARY_MERGE_REQUIRED',
+          campaign_id: note.id,
+          world_id: parent_id,
+        });
       }
     }
   }
@@ -914,6 +943,29 @@ router.put('/:id', authenticateToken, (req, res) => {
   );
 
   if (tags !== undefined && canFullEdit) saveTags(req.params.id, tags);
+
+  // played_by: owner/DM assign any campaign member; player claim/unclaim self only
+  if (played_by !== undefined && !note.is_folder && !note.is_glossary) {
+    const campaignId = getCampaignFolderId(note.id);
+    const isCampOwner = campaignId
+      ? db.prepare('SELECT user_id FROM notes WHERE id = ?').get(campaignId)?.user_id === req.user.id
+      : note.user_id === req.user.id;
+    const isCampDm = campaignId ? isDMOfFolder(campaignId, req.user.id) : isDM;
+    const elevated = admin || isCampOwner || isCampDm;
+    const nextPb = played_by === null || played_by === '' ? null : parseInt(played_by, 10);
+    let allowPb = false;
+    if (elevated) {
+      allowPb = true;
+    } else if (nextPb === null && note.played_by === req.user.id) {
+      allowPb = true; // unclaim self
+    } else if (nextPb === req.user.id && (note.played_by == null || note.played_by === req.user.id)) {
+      allowPb = true; // claim unassigned (or keep self)
+    }
+    if (!allowPb) {
+      return res.status(403).json({ error: 'Not allowed to set played_by for this note' });
+    }
+    db.prepare('UPDATE notes SET played_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nextPb, note.id);
+  }
 
   // DM Only cascade — campaigns only (world layer is party-shared).
   const prevDmOnly = note.is_dm_only;
@@ -1112,6 +1164,10 @@ router.delete('/:id', authenticateToken, (req, res) => {
   const admin = isAdmin(req.user.id);
   const note  = db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(req.params.id);
   if (!note) return res.status(404).json({ error: 'Note not found' });
+
+  if (note.is_glossary) {
+    return res.status(403).json({ error: 'The Glossary document cannot be deleted.' });
+  }
 
   const dmDel = demoMutateForbiddenMessage(req.user.id, note.id);
   if (dmDel) return res.status(403).json({ error: dmDel });

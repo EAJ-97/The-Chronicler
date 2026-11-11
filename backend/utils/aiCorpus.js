@@ -162,10 +162,10 @@ function buildLoreCorpus(campaignFolderId, userId, isAdmin) {
     if (!allowed.has(nid)) continue;
     const n = db
       .prepare(
-        'SELECT id, title, category, is_folder, content, is_dm_only FROM notes WHERE id = ? AND deleted_at IS NULL'
+        'SELECT id, title, category, is_folder, is_glossary, content, is_dm_only FROM notes WHERE id = ? AND deleted_at IS NULL'
       )
       .get(nid);
-    if (!n || n.is_folder) continue;
+    if (!n || n.is_folder || n.is_glossary) continue;
     let body = String(n.content || '');
     if (body.length > MAX_NOTE_CHARS) body = body.slice(0, MAX_NOTE_CHARS) + '\n…[truncated]';
     noteBlocks.push(
@@ -198,10 +198,10 @@ function buildLoreCorpus(campaignFolderId, userId, isAdmin) {
       if (!canIncludeNoteInCorpus(rid, userId, isAdmin)) continue;
       const n = db
         .prepare(
-          'SELECT id, title, category, is_folder, content, is_dm_only FROM notes WHERE id = ? AND deleted_at IS NULL'
+          'SELECT id, title, category, is_folder, is_glossary, content, is_dm_only FROM notes WHERE id = ? AND deleted_at IS NULL'
         )
         .get(rid);
-      if (!n || n.is_folder) continue;
+      if (!n || n.is_folder || n.is_glossary) continue;
       let body = String(n.content || '');
       if (body.length > MAX_NOTE_CHARS) body = body.slice(0, MAX_NOTE_CHARS) + '\n…[truncated]';
       refBlocks.push(

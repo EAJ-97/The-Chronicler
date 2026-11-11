@@ -269,6 +269,7 @@ export default function NoteEditor({
   const [title, setTitle] = useState(note?.title || '');
   const [content, setContent] = useState(note?.content || '');
   const [category, setCategory] = useState(note?.category || 'general');
+  const [playedBy, setPlayedBy] = useState(note?.played_by ?? null);
   const [significance, setSignificance] = useState(note?.significance || 'standard');
   const [narrativeWeight, setNarrativeWeight] = useState(note?.narrative_weight || 'node');
   const [isShared, setIsShared] = useState(!!note?.is_shared);
@@ -852,6 +853,7 @@ export default function NoteEditor({
     setTitle(note?.title || '');
     setContent(note?.content || '');
     setCategory(note?.category || 'general');
+    setPlayedBy(note?.played_by ?? null);
     setSignificance(note?.significance || 'standard');
     setNarrativeWeight(note?.narrative_weight || 'node');
     setIsShared(note?.visibility === 'shared');
@@ -1031,6 +1033,7 @@ export default function NoteEditor({
       title: titleRef.current,
       content: contentRef.current,
       category: categoryRef.current,
+      played_by: playedBy === '' || playedBy == null ? null : playedBy,
       significance: significanceRef.current,
       narrative_weight: narrativeWeightRef.current,
       display_icon: displayIconRef.current === '' ? null : displayIconRef.current,
@@ -1072,7 +1075,7 @@ export default function NoteEditor({
     } finally {
       setSaving(false);
     }
-  }, [canEdit, onSave, showFolderDmSplit, note?.is_folder]);
+  }, [canEdit, onSave, showFolderDmSplit, note?.is_folder, playedBy]);
 
   /**
    * Switches root-folder tool tab and persists the choice for the next visit.
@@ -2225,6 +2228,25 @@ export default function NoteEditor({
           >
             {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>}
+
+          {!note?.is_folder && (category === 'npc' || category === 'character') && (
+            <select
+              style={{ ...S.select, maxWidth: '160px', ...(isMobile ? { minHeight: '44px', fontSize: '14px' } : {}) }}
+              value={playedBy ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPlayedBy(v === '' ? null : Number(v));
+                markDirty();
+              }}
+              disabled={!canEdit}
+              title="Player character assignment (skipped by glossary scans)"
+            >
+              <option value="">None (NPC)</option>
+              {(allUsers || []).map((u) => (
+                <option key={u.id} value={u.id}>{u.username}</option>
+              ))}
+            </select>
+          )}
 
           {/* Significance tier */}
           {!note?.is_folder && <select

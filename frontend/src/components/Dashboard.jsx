@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import NoteList from './NoteList.jsx';
 import NoteEditor from './NoteEditor.jsx';
+import GlossaryPage from './GlossaryPage.jsx';
+import GlossaryMergeModal from './GlossaryMergeModal.jsx';
 import GraphView from './GraphView.jsx';
 import AdminPanel from './AdminPanel.jsx';
 import Journal from './Journal.jsx';
@@ -274,7 +276,7 @@ export default function Dashboard({ user, onLogout }) {
     [notes, hideDemoFolders],
   );
   const graphNotes = useMemo(
-    () => notesForList.filter((n) => !n.is_folder),
+    () => notesForList.filter((n) => !n.is_folder && !n.is_glossary),
     [notesForList],
   );
   const [dmCampaignIds, setDmCampaignIds] = useState([]);
@@ -298,6 +300,7 @@ export default function Dashboard({ user, onLogout }) {
   const [viewAsUserId, setViewAsUserId] = useState(null); // admin: full visibility as another user (exclusive with simulatedRole)
   const [viewAsUserList, setViewAsUserList] = useState([]);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
+  const [glossaryMerge, setGlossaryMerge] = useState(null); // { campaignId, worldId }
   const [showIntegrity, setShowIntegrity] = useState(false);
   const [showDdbImport, setShowDdbImport] = useState(false);
   const [showThemeSettings, setShowThemeSettings] = useState(false);
@@ -867,6 +870,7 @@ export default function Dashboard({ user, onLogout }) {
 
   const handleMoveNote = async (noteId, newParentId) => {
     try {
+      const moving = notes.find((n) => n.id === noteId);
       if (newParentId) {
         const target = notes.find(n => n.id === newParentId);
         if (target && target.visibility === 'hidden' && target.user_id !== user.id && !user.is_admin) {
@@ -875,11 +879,42 @@ export default function Dashboard({ user, onLogout }) {
           );
           if (!ok) return;
         }
+        // Campaign → World: glossary merge review
+        if (
+          moving?.is_folder
+          && moving.parent_id == null
+          && !moving.is_world
+          && target?.is_world
+          && target.parent_id == null
+        ) {
+          setGlossaryMerge({ campaignId: noteId, worldId: newParentId });
+          return;
+        }
+      }
+      // Campaign leaving a World → detach glossary
+      if (
+        newParentId == null
+        && moving?.is_folder
+        && moving.parent_id
+      ) {
+        const parent = notes.find((n) => n.id === moving.parent_id);
+        if (parent?.is_world) {
+          await api.post('/glossary/detach-campaign', { campaign_id: noteId });
+          await loadData();
+          return;
+        }
       }
       const sort_order = sortOrderForFolderEnd(notes, newParentId ?? null);
       await api.put(`/notes/${noteId}`, { parent_id: newParentId ?? null, sort_order });
       await loadData();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const data = err.response?.data;
+      if (data?.code === 'GLOSSARY_MERGE_REQUIRED') {
+        setGlossaryMerge({ campaignId: data.campaign_id, worldId: data.world_id });
+        return;
+      }
+      console.error(err);
+    }
   };
 
   /**
@@ -1484,6 +1519,18 @@ export default function Dashboard({ user, onLogout }) {
           />
         )}
 
+        {glossaryMerge && (
+          <GlossaryMergeModal
+            campaignId={glossaryMerge.campaignId}
+            worldId={glossaryMerge.worldId}
+            onClose={() => setGlossaryMerge(null)}
+            onDone={async () => {
+              setGlossaryMerge(null);
+              await loadData();
+            }}
+          />
+        )}
+
         <div ref={mainRef} style={S.main}>
           {view === 'notes' && (
             <div
@@ -1506,6 +1553,14 @@ export default function Dashboard({ user, onLogout }) {
                   transition: !isMobile ? PEEK_SPLIT_TRANSITION : undefined,
                 }}
               >
+                {selectedNote?.is_glossary ? (
+                  <GlossaryPage
+                    scopeNoteId={selectedNote.parent_id}
+                    notes={notes}
+                    currentUser={user}
+                    onRefreshNotes={loadData}
+                  />
+                ) : (
                 <NoteEditor
                   note={selectedNote}
                   notes={notes}
@@ -1542,6 +1597,7 @@ export default function Dashboard({ user, onLogout }) {
                     drawerExpand: noteEditorDrawerExpandRef,
                   }}
                 />
+                )}
               </div>
               {refStack.length > 0 && (
                 <div
