@@ -19,6 +19,61 @@ const { getCampaignFolderId } = require('./access');
 
 const ENTRY_TYPES = ['npc', 'place', 'item', 'faction', 'other'];
 
+/** Map common model synonyms onto our glossary types. */
+function normalizeEntryType(raw) {
+  const t = String(raw || '').toLowerCase().trim();
+  if (ENTRY_TYPES.includes(t)) return t;
+  if (['character', 'person', 'people', 'pc', 'npc_name', 'creature', 'monster'].includes(t)) return 'npc';
+  if (['location', 'loc', 'city', 'town', 'region', 'site', 'area'].includes(t)) return 'place';
+  if (['object', 'artifact', 'weapon', 'gear'].includes(t)) return 'item';
+  if (['org', 'organization', 'guild', 'group', 'cult', 'house'].includes(t)) return 'faction';
+  return t;
+}
+
+/**
+ * Pull text blocks from an Anthropic Messages response.
+ * Haiku 5.5+ may lead with a `thinking` block; content[0].text is often empty.
+ * @param {object} data
+ * @returns {string}
+ */
+function extractAssistantText(data) {
+  const blocks = Array.isArray(data?.content) ? data.content : [];
+  return blocks
+    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+}
+
+/**
+ * Best-effort JSON object extraction from model text.
+ * @param {string} text
+ * @returns {unknown}
+ */
+function parseJsonFromModelText(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) {
+    const err = new Error('Empty model text (no text content block)');
+    err.code = 'PARSE';
+    throw err;
+  }
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  let candidate = fence ? fence[1].trim() : trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      candidate = candidate.slice(start, end + 1);
+      return JSON.parse(candidate);
+    }
+    const err = new Error('Invalid JSON from model');
+    err.code = 'PARSE';
+    throw err;
+  }
+}
+
 /**
  * Validate Claude JSON shape for glossary scan.
  * @param {unknown} data
@@ -35,7 +90,7 @@ function validateScanPayload(data) {
   for (const e of new_entries) {
     if (!e || typeof e !== 'object') continue;
     const name = normalizeName(e.name);
-    const type = String(e.type || '').toLowerCase();
+    const type = normalizeEntryType(e.type);
     const description = String(e.description || '').trim();
     if (!name || !isValidType(type) || !description) continue;
     const aliases = Array.isArray(e.aliases)
@@ -109,9 +164,10 @@ async function callClaudeScan({ system, user }) {
       'anthropic-version': '2023-06-01',
     },
     // Haiku 5.5+ rejects `temperature`; omit it (extraction does not need sampling).
+    // Budget includes thinking tokens on 5.5, so keep this roomy for long sessions.
     body: JSON.stringify({
       model: getGlossaryScanModel(),
-      max_tokens: 2000,
+      max_tokens: 4096,
       system,
       messages: [{ role: 'user', content: user }],
     }),
@@ -125,23 +181,20 @@ async function callClaudeScan({ system, user }) {
   }
 
   const data = await response.json();
-  const text = data.content?.[0]?.text?.trim() || '';
-  // Allow fenced JSON
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fence ? fence[1].trim() : text;
+  const text = extractAssistantText(data);
   let parsed;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseJsonFromModelText(text);
   } catch (e) {
-    const err = new Error('Invalid JSON from model');
-    err.code = 'PARSE';
-    err.raw = text.slice(0, 500);
-    throw err;
+    const types = Array.isArray(data.content) ? data.content.map((c) => c.type).join(',') : 'none';
+    e.raw = `stop=${data.stop_reason || '?'} blocks=[${types}] text=${text.slice(0, 400)}`;
+    throw e;
   }
   const validated = validateScanPayload(parsed);
   if (!validated.ok) {
     const err = new Error(`Invalid scan shape: ${validated.error}`);
     err.code = 'VALIDATE';
+    err.raw = text.slice(0, 400);
     throw err;
   }
   return validated.value;
@@ -271,6 +324,9 @@ function scheduleDebouncedSessionScan(sessionId) {
 
 module.exports = {
   validateScanPayload,
+  extractAssistantText,
+  parseJsonFromModelText,
+  normalizeEntryType,
   scanSessionGlossary,
   scheduleDebouncedSessionScan,
 };
