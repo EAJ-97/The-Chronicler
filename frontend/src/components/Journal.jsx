@@ -561,6 +561,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
           sessionNum={recapSession.num}
           aiEnabled={aiEnabled}
           recapServerReady={recapServerReady}
+          currentUser={currentUser}
           onClose={async () => {
             setRecapSession(null);
             // Refresh usage cache for this session

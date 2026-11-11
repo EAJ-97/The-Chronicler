@@ -3,7 +3,7 @@ const db = require('../db/database');
 const { authenticateToken } = require('../middleware/auth');
 const { isAdmin, getRootFolderId } = require('../utils/access');
 const { demoMutateForbiddenMessage } = require('../utils/demoAccess');
-const { buildRecapPromptsForSession } = require('../utils/recapPromptBuild');
+const { buildRecapPromptsForSession, getRecapSourcesForSession } = require('../utils/recapPromptBuild');
 
 const router = express.Router();
 
@@ -33,8 +33,9 @@ function assertRecapQuota(uid, sessionId) {
  * @param {string} tone
  * @param {string} content
  * @param {import('express').Request} req
+ * @param {object} [sources]
  */
-function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res) {
+function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res, sources) {
   const recapResult = db.prepare(`
     INSERT INTO recaps (session_id, folder_id, generated_by, tone, content, is_dm_only)
     VALUES (?, ?, ?, ?, ?, 0)
@@ -53,7 +54,7 @@ function insertRecapAndRespond(sessionId, folderId, uid, tone, content, req, res
     req.app.broadcast({ type: 'recap_generated', session_id: sessionId, recap_id: recap.id, generated_by: uid });
   }
 
-  res.json({ recap });
+  res.json({ recap, sources: sources || null });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -85,6 +86,13 @@ function getAllowedCount(userId, sessionId) {
   if (isAdmin(userId)) return Infinity;
   if (isDM(userId, sessionId)) return 3;
   return 1;
+}
+
+function canEditRecap(uid, recap) {
+  if (!recap) return false;
+  if (isAdmin(uid)) return true;
+  if (recap.generated_by === uid) return true;
+  return isDM(uid, recap.session_id);
 }
 
 // ── GET /recaps/session/:sessionId ─────────────────────────────────────────
@@ -129,6 +137,16 @@ router.get('/usage/:sessionId', authenticateToken, (req, res) => {
   });
 });
 
+// ── GET /recaps/sources/:sessionId ─────────────────────────────────────────
+// Confirms which session journal will be sent to the model (no note bodies / other sessions)
+router.get('/sources/:sessionId', authenticateToken, (req, res) => {
+  const sessionId = parseInt(req.params.sessionId, 10);
+  if (Number.isNaN(sessionId)) return res.status(400).json({ error: 'Invalid session id' });
+  const built = getRecapSourcesForSession(sessionId);
+  if (!built.ok) return res.status(built.status).json({ error: built.error });
+  res.json(built.sources);
+});
+
 // ── POST /recaps/generate ──────────────────────────────────────────────────
 router.post('/generate', authenticateToken, async (req, res) => {
   const { session_id, tone = 'chronicle' } = req.body;
@@ -152,7 +170,13 @@ router.post('/generate', authenticateToken, async (req, res) => {
   const built = buildRecapPromptsForSession(session_id, t);
   if (!built.ok) return res.status(built.status).json({ error: built.error });
 
-  const { session, system_prompt: systemPrompt, user_prompt: userPrompt } = built;
+  const {
+    session,
+    system_prompt: systemPrompt,
+    user_prompt: userPrompt,
+    sources,
+    temperature,
+  } = built;
 
   try {
     const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'ai_api_key'").get()?.value?.trim();
@@ -168,6 +192,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1000,
+        temperature,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),
@@ -182,11 +207,50 @@ router.post('/generate', authenticateToken, async (req, res) => {
     const content = data.content?.[0]?.text?.trim();
     if (!content) return res.status(500).json({ error: 'Empty response from AI' });
 
-    insertRecapAndRespond(session_id, session.folder_id, uid, t, content, req, res);
+    insertRecapAndRespond(session_id, session.folder_id, uid, t, content, req, res, sources);
   } catch (e) {
     console.error('[recap/generate]', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── PUT /recaps/:id ────────────────────────────────────────────────────────
+// Edit recap content (author, DM, or admin). Does not consume generation quota.
+router.put('/:id', authenticateToken, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const uid = req.user.id;
+  const { content } = req.body || {};
+
+  if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid recap id' });
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content required' });
+  const trimmed = content.trim();
+  if (!trimmed) return res.status(400).json({ error: 'content cannot be empty' });
+
+  const recap = db.prepare('SELECT * FROM recaps WHERE id = ?').get(id);
+  if (!recap) return res.status(404).json({ error: 'Recap not found' });
+
+  if (!canEditRecap(uid, recap)) {
+    return res.status(403).json({ error: 'Only the author, a campaign DM, or an admin can edit this recap.' });
+  }
+
+  if (recap.folder_id != null) {
+    const demoMsg = demoMutateForbiddenMessage(uid, recap.folder_id);
+    if (demoMsg) return res.status(403).json({ error: demoMsg });
+  }
+
+  db.prepare(`
+    UPDATE recaps SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(trimmed, id);
+
+  const updated = db.prepare(
+    'SELECT r.*, u.username as author FROM recaps r JOIN users u ON u.id = r.generated_by WHERE r.id = ?'
+  ).get(id);
+
+  if (req.app.broadcast) {
+    req.app.broadcast({ type: 'recap_updated', session_id: recap.session_id, recap_id: id, updated_by: uid });
+  }
+
+  res.json({ recap: updated });
 });
 
 // ── GET /recaps/folder-roles/:folderId ─────────────────────────────────────

@@ -2,22 +2,64 @@ const db = require('../db/database');
 const { getRootFolderId } = require('./access');
 
 /**
- * Loads journal data and builds Anthropic prompts for session recap generation.
+ * Journal entries for one session (recap source of truth).
  * @param {number} sessionId
- * @param {'chronicle'|'summary'} tone
- * @returns {{ ok: true, session: object, system_prompt: string, user_prompt: string } | { ok: false, status: number, error: string }}
+ * @returns {Array<{ content: string, indent_level: number, author: string }>}
  */
-function buildRecapPromptsForSession(sessionId, tone) {
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
-  if (!session) return { ok: false, status: 404, error: 'Session not found' };
-
-  const entries = db.prepare(`
+function loadSessionJournalEntries(sessionId) {
+  return db.prepare(`
     SELECT je.content, je.indent_level, u.username as author
     FROM journal_entries je
     JOIN users u ON u.id = je.user_id
     WHERE je.session_id = ? AND je.is_session_break = 0
     ORDER BY je.sort_order ASC, je.id ASC
   `).all(sessionId);
+}
+
+/**
+ * Metadata confirming which session journal will be sent to the model.
+ * @param {number} sessionId
+ * @returns {{ ok: true, sources: object } | { ok: false, status: number, error: string }}
+ */
+function getRecapSourcesForSession(sessionId) {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return { ok: false, status: 404, error: 'Session not found' };
+
+  const entries = loadSessionJournalEntries(sessionId);
+  const campaignFolder = session.folder_id
+    ? db.prepare('SELECT title FROM notes WHERE id = ?').get(getRootFolderId(session.folder_id))
+    : null;
+
+  const sessionLabel = session.session_number != null
+    ? String(session.session_number)
+    : (session.title ? session.title : `id ${session.id}`);
+
+  return {
+    ok: true,
+    sources: {
+      session_id: session.id,
+      session_number: session.session_number ?? null,
+      session_title: session.title || null,
+      session_label: sessionLabel,
+      campaign_title: campaignFolder?.title || null,
+      entry_count: entries.length,
+      // Confirm scope: only this session's journal (no other sessions / note bodies)
+      scope: 'session_journal_only',
+    },
+  };
+}
+
+/**
+ * Loads journal data and builds Anthropic prompts for session recap generation.
+ * @param {number} sessionId
+ * @param {'chronicle'|'summary'} tone
+ * @returns {{ ok: true, session: object, system_prompt: string, user_prompt: string, sources: object, temperature: number } | { ok: false, status: number, error: string }}
+ */
+function buildRecapPromptsForSession(sessionId, tone) {
+  const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return { ok: false, status: 404, error: 'Session not found' };
+
+  const entries = loadSessionJournalEntries(sessionId);
 
   if (entries.length === 0) {
     return { ok: false, status: 400, error: 'This session has no entries to summarize.' };
@@ -29,29 +71,66 @@ function buildRecapPromptsForSession(sessionId, tone) {
 
   const journalText = entries.map((e) => {
     const indent = '  '.repeat(e.indent_level || 0);
-    return `${indent}[${e.author}]: ${e.content}`;
+    return `${indent}[Player: ${e.author}]: ${e.content}`;
   }).join('\n');
 
-  const sessionCount = db.prepare('SELECT COUNT(*) as c FROM sessions WHERE folder_id = ?').get(session.folder_id)?.c || 1;
+  const sessionNumberLine = session.session_number != null
+    ? `Session Number: ${session.session_number}`
+    : (session.title
+      ? `Session Title: ${session.title}`
+      : `Session Id: ${session.id}`);
+
+  const sessionTitleLine = session.title && session.session_number != null
+    ? `Session Title: ${session.title}\n`
+    : '';
+
+  const fidelityShared = `CRITICAL RULES:
+- Source material is ONLY the journal entries provided for this one session. Do not use outside knowledge or invent scenes, outcomes, motives, people, or places that are not in those entries.
+- Preserve exact spelling of every name as written in the journal. Do not "correct" or rename.
+- Do not reassign actions to the wrong person.
+- Labels like [Player: username] are player account names, not in-world character names. Prefer character names when the journal states them; otherwise describe actions without inventing a character name.
+- When the journal is ambiguous, prefer understating over guessing.`;
 
   const systemPrompt = tone === 'chronicle'
-    ? `You are a skilled scribe chronicling the adventures of a Dungeons & Dragons party. Write in an immersive, in-world narrative style — as if recording events in an official chronicle or historical record. Use past tense, third person. Include names, key events, discoveries, conflicts, and decisions. Be vivid but concise. Do not use bullet points. Write 2-4 paragraphs.`
-    : `You are summarizing a Dungeons & Dragons session for the players. Be clear, factual, and organized. Highlight: what happened, key NPCs encountered, decisions made, and any unresolved threads. Use bullet points where helpful. Keep it concise — 200-350 words.`;
+    ? `You are a skilled scribe chronicling the adventures of a Dungeons & Dragons party. Write in an immersive, in-world narrative style — as if recording events in an official chronicle or historical record. Use past tense, third person. Storytelling voice, scene framing, and paced prose are welcome when dramatizing what the journal actually records. Do not invent facts beyond the journal. Include names, key events, discoveries, conflicts, and decisions that appear in the source. Be vivid but concise. Do not use bullet points. Write 2-4 paragraphs.
+
+${fidelityShared}`
+    : `You are summarizing a Dungeons & Dragons session for the players. Be clear, factual, and organized. Highlight: what happened, key NPCs encountered, decisions made, and any unresolved threads — only when present in the journal. Use bullet points where helpful. Keep it concise — 200-350 words. Prefer understatement when details are thin.
+
+${fidelityShared}`;
 
   const userPrompt = `Campaign: ${campaignFolder?.title || 'Unknown Campaign'}
-Session Number: ${sessionCount}
+${sessionNumberLine}
+${sessionTitleLine}Source material is only the journal entries below for this one session.
 
 Journal entries from this session:
 ${journalText}
 
 Please write a ${tone === 'chronicle' ? 'narrative chronicle entry' : 'session summary'} for this session.`;
 
+  const sources = {
+    session_id: session.id,
+    session_number: session.session_number ?? null,
+    session_title: session.title || null,
+    session_label: session.session_number != null
+      ? String(session.session_number)
+      : (session.title || `id ${session.id}`),
+    campaign_title: campaignFolder?.title || null,
+    entry_count: entries.length,
+    scope: 'session_journal_only',
+  };
+
+  // Chronicle: mild creativity for voice; Summary: literal
+  const temperature = tone === 'chronicle' ? 0.4 : 0;
+
   return {
     ok: true,
     session,
     system_prompt: systemPrompt,
     user_prompt: userPrompt,
+    sources,
+    temperature,
   };
 }
 
-module.exports = { buildRecapPromptsForSession };
+module.exports = { buildRecapPromptsForSession, getRecapSourcesForSession };

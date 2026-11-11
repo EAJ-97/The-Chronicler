@@ -124,7 +124,7 @@ See `.env.example` for the minimal environment template. Session recaps use **An
 | **Party** | The full group of users assigned to a Campaign. Managed by the DM or Admin. |
 | **Creator** | A permanent attribution marker on every note and folder showing who originally made it. Not a permission — purely informational. Displayed in the UI for transparency. |
 | **Session** | A journal session within a Campaign. Groups journal entries by play session. Used as the unit for AI recap generation. |
-| **Recap** | An AI-generated summary of a journal session. Available in Chronicle (narrative) or Summary (bullet point) style. Admins are unlimited, DMs get 3 per session, all others share 1 per session. |
+| **Recap** | An AI-generated summary of a journal session. Available in Chronicle (narrative) or Summary (bullet point) style. Admins are unlimited, DMs get 3 per session, all others share 1 per session. Editable after generation (author/DM/admin; no quota). |
 | **Snapshot** | A saved point-in-time backup of a Campaign's full structure, notes, tags, and content. Non-destructive on restore — content created after the snapshot is preserved. Managed by DMs and Admins. |
 | **Vault** | The section of the Admin Panel where Snapshots are stored, browsed, and restored. Accessible to Admins only. |
 | **Graph** | The visual web of connected notes. Available in 2D and 3D modes. Each note appears as a Node, each relationship as a Connection. |
@@ -280,7 +280,9 @@ The Chronicler is fully mobile-responsive and installable as a Progressive Web A
 
 ### Session recaps
 
-- **Anthropic** — [Anthropic API](https://console.anthropic.com), billed per token (**not** included in Claude Pro). The server calls the Messages API with session journal context.
+- **Anthropic** — [Anthropic API](https://console.anthropic.com), billed per token (**not** included in Claude Pro). The server calls the Messages API with **only that session’s journal entries** (plus a campaign title label).
+- **Chronicle** — story-like voice that may dramatize what the journal records; must not invent off-journal facts. **Summary** — tighter and factual.
+- The Recap modal shows which session and how many journal entries will be used. Generated recaps can be **edited and saved** by the author, a campaign DM, or an admin (edits do not use generation quota).
 
 ### Lore So Far (Journal)
 
