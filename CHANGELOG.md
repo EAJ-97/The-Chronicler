@@ -12,6 +12,7 @@ All notable changes to The Chronicler (notesapp). Newest first.
 - Boot crash from follow-up migration that repeated the same illegal default
 
 ### Added
+- Per-note `hide_from_graph` toolbar toggle (GRAPH / NO GRAPH): stays in tree and search, excluded from knowledge graph nodes and edges
 - Delete session recap (DELETE `/api/recaps/:id`) for campaign DM or admin; refunds one generation toward the author; Delete button in RecapViewer
 
 ### Changed

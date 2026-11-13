@@ -412,7 +412,10 @@ export default memo(function GraphView({ allNotes, notes, connections, onSelectN
   );
   const visibleNotes = useMemo(() => {
     const subtreeNotes = subtreeIds ? notes.filter(n => subtreeIds.has(n.id)) : notes;
-    return subtreeNotes.filter(n => !n.is_dm_only || (isDMOfActiveCampaign && dmView));
+    return subtreeNotes.filter(n =>
+      !n.hide_from_graph
+      && (!n.is_dm_only || (isDMOfActiveCampaign && dmView))
+    );
   }, [subtreeIds, notes, isDMOfActiveCampaign, dmView]);
   const visibleConnections = useMemo(() => {
     const visibleNoteIds = new Set(visibleNotes.map(n => n.id));

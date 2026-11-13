@@ -166,7 +166,7 @@ router.get('/', authenticateToken, (req, res) => {
   const LIST_COLS = `n.id, n.user_id, n.parent_id, n.title, n.is_shared, n.is_folder,
     n.category, n.color, n.sort_order, n.visibility, n.created_at, n.updated_at,
     n.significance, n.narrative_weight, n.deleted_at, n.original_parent_id,
-    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.is_campaign, n.is_glossary, n.played_by,
+    n.recovered, n.is_dm_only, n.is_demo, n.is_world, n.is_campaign, n.is_glossary, n.hide_from_graph, n.played_by,
     n.source_note_id, n.display_icon, n.display_summary, n.is_completed, n.ddb_character_id,
     u.username AS author`;
 
@@ -824,7 +824,7 @@ router.put('/:id', authenticateToken, (req, res) => {
   const canManage    = admin || isOwner || (inWorldLayer ? worldCollaborator : isDM);
   const canAppend    = isDM && !canFullEdit;
 
-  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs, played_by } = req.body;
+  const { title, content, append_content, is_shared, category, color, parent_id, sort_order, tags, visibility, granted_users, cascade_children, significance, narrative_weight, client_updated_at, is_dm_only, hide_from_graph, display_icon, display_summary, is_completed, folder_dm_content, folder_dm_tabs, played_by } = req.body;
 
   // Conflict detection — only for content/title/DM-folder edits, not structural ops
   if (client_updated_at && (
@@ -930,6 +930,7 @@ router.put('/:id', authenticateToken, (req, res) => {
       significance      = COALESCE(?, significance),
       narrative_weight  = COALESCE(?, narrative_weight),
       is_dm_only        = CASE WHEN ? IS NOT NULL THEN ? ELSE is_dm_only END,
+      hide_from_graph   = CASE WHEN ? IS NOT NULL THEN ? ELSE hide_from_graph END,
       updated_at        = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -946,6 +947,8 @@ router.put('/:id', authenticateToken, (req, res) => {
     canFullEdit ? (significance ?? null) : null,
     canFullEdit ? (narrative_weight ?? null) : null,
     (canManage && is_dm_only !== undefined) ? 1 : null, is_dm_only ? 1 : 0,
+    (canFullEdit && hide_from_graph !== undefined && !note.is_folder && !note.is_glossary) ? 1 : null,
+    hide_from_graph ? 1 : 0,
     req.params.id
   );
 

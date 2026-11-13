@@ -276,7 +276,7 @@ export default function Dashboard({ user, onLogout }) {
     [notes, hideDemoFolders],
   );
   const graphNotes = useMemo(
-    () => notesForList.filter((n) => !n.is_folder && !n.is_glossary),
+    () => notesForList.filter((n) => !n.is_folder && !n.is_glossary && !n.hide_from_graph),
     [notesForList],
   );
   const [dmCampaignIds, setDmCampaignIds] = useState([]);
