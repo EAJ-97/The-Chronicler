@@ -12,6 +12,8 @@ All notable changes to The Chronicler (notesapp). Newest first.
 - Boot crash from follow-up migration that repeated the same illegal default
 
 ### Added
+- Main tabs keep-alive (Notes / Web / Journal / Timeline stay mounted); last tab restored from localStorage
+- Journal session tab bar (chips or hamburger when many / on mobile); one session at a time; compose only on the current session
 - Per-note `hide_from_graph` toolbar toggle (GRAPH / NO GRAPH): stays in tree and search, excluded from knowledge graph nodes and edges
 - Delete session recap (DELETE `/api/recaps/:id`) for campaign DM or admin; refunds one generation toward the author; Delete button in RecapViewer
 
