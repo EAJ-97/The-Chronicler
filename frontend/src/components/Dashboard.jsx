@@ -86,7 +86,7 @@ const S = {
     color: 'var(--ch-text-primary-65)', transition: 'all 0.2s',
   },
   body: { flex: 1, display: 'flex', overflow: 'hidden' },
-  main: { flex: 1, overflow: 'hidden', position: 'relative' },
+  main: { flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 },
   // Mobile styles
   mobileHamburger: {
     background: 'transparent', border: 'none', cursor: 'pointer',
@@ -283,7 +283,18 @@ export default function Dashboard({ user, onLogout }) {
   const [snapshotFolder, setSnapshotFolder] = useState(null);
   const [connections, setConnections] = useState([]);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
-  const [view, setView] = useState('notes');
+  const viewStorageKey = `chronicler_view_${user?.id || 'anon'}`;
+  const [view, setViewRaw] = useState(() => {
+    try {
+      const s = localStorage.getItem(`chronicler_view_${user?.id || 'anon'}`);
+      if (s === 'graph' || s === 'journal' || s === 'notes' || s === 'timeline') return s;
+    } catch { /* ignore */ }
+    return 'notes';
+  });
+  const setView = useCallback((next) => {
+    setViewRaw(next);
+    try { localStorage.setItem(viewStorageKey, next); } catch { /* ignore */ }
+  }, [viewStorageKey]);
   const [loading, setLoading] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
@@ -1470,9 +1481,19 @@ export default function Dashboard({ user, onLogout }) {
           paddingBottom: isMobile ? 'calc(44px + env(safe-area-inset-bottom))' : 0,
         }}
       >
-        {/* Desktop sidebar — hidden on mobile (mobile uses drawer overlay) */}
-        {!isMobile && view !== 'journal' && (
-          <div ref={sidebarRef} style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
+        {/* Desktop sidebar — keep mounted across tabs so tree expand/scroll survives */}
+        {!isMobile && (
+          <div
+            ref={sidebarRef}
+            style={{
+              height: '100%',
+              minHeight: 0,
+              display: view === 'journal' ? 'none' : 'flex',
+              flexDirection: 'column',
+              overflow: 'visible',
+            }}
+            aria-hidden={view === 'journal'}
+          >
             <NoteList
               {...noteListProps}
               collapsed={!sidebarOpen}
@@ -1532,17 +1553,20 @@ export default function Dashboard({ user, onLogout }) {
         )}
 
         <div ref={mainRef} style={S.main}>
-          {view === 'notes' && (
-            <div
-              style={{
-                display: 'flex',
-                width: '100%',
-                height: '100%',
-                overflow: 'hidden',
-                position: 'relative',
-                flexDirection: 'row',
-              }}
-            >
+          {/* Keep all main views mounted; hide inactive so scroll/drafts/tools survive tab switches */}
+          <div
+            style={{
+              display: view === 'notes' ? 'flex' : 'none',
+              flex: view === 'notes' ? '1 1 auto' : undefined,
+              width: '100%',
+              height: '100%',
+              minHeight: 0,
+              overflow: 'hidden',
+              position: 'relative',
+              flexDirection: 'row',
+            }}
+            aria-hidden={view !== 'notes'}
+          >
               <div
                 style={{
                   flex: '1 1 auto',
@@ -1625,10 +1649,18 @@ export default function Dashboard({ user, onLogout }) {
                 </div>
               )}
             </div>
-          )}
 
-          {view === 'graph' && (
-            <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
+          <div
+            style={{
+              display: view === 'graph' ? 'flex' : 'none',
+              flex: view === 'graph' ? '1 1 auto' : undefined,
+              width: '100%',
+              height: '100%',
+              minHeight: 0,
+              overflow: 'hidden',
+            }}
+            aria-hidden={view !== 'graph'}
+          >
               {/* Desktop: side panel. Mobile: bottom sheet handled below */}
               {!isMobile && (
                 <div style={{
@@ -1703,9 +1735,19 @@ export default function Dashboard({ user, onLogout }) {
                 </div>
               )}
             </div>
-          )}
 
-          {view === 'journal' && (
+          <div
+            style={{
+              display: view === 'journal' ? 'flex' : 'none',
+              flex: view === 'journal' ? '1 1 auto' : undefined,
+              flexDirection: 'column',
+              width: '100%',
+              height: '100%',
+              minHeight: 0,
+              overflow: 'hidden',
+            }}
+            aria-hidden={view !== 'journal'}
+          >
             <Journal
               notes={notesForList}
               selectedNoteId={selectedNoteId}
@@ -1726,24 +1768,37 @@ export default function Dashboard({ user, onLogout }) {
                 recapBtn: journalRecapBtnRef,
               }}
             />
-          )}
+          </div>
 
-          {SHOW_TIMELINE_TAB && view === 'timeline' && (
-            <TimelineView
-              notes={notesForList}
-              currentUser={user}
-              dmCampaignIds={effectiveDmCampaignIds}
-              tutorialCampaignId={tutorialCampaignId}
-              tutorialRefs={{
-                shell: timelineShellRef,
-                campaignPicker: timelineCampaignPickerRef,
-                canvas: timelineCanvasRef,
+          {SHOW_TIMELINE_TAB && (
+            <div
+              style={{
+                display: view === 'timeline' ? 'flex' : 'none',
+                flex: view === 'timeline' ? '1 1 auto' : undefined,
+                flexDirection: 'column',
+                width: '100%',
+                height: '100%',
+                minHeight: 0,
+                overflow: 'hidden',
               }}
-              onSelectNote={(id) => {
-                setSelectedNoteId(id);
-                setView('notes');
-              }}
-            />
+              aria-hidden={view !== 'timeline'}
+            >
+              <TimelineView
+                notes={notesForList}
+                currentUser={user}
+                dmCampaignIds={effectiveDmCampaignIds}
+                tutorialCampaignId={tutorialCampaignId}
+                tutorialRefs={{
+                  shell: timelineShellRef,
+                  campaignPicker: timelineCampaignPickerRef,
+                  canvas: timelineCanvasRef,
+                }}
+                onSelectNote={(id) => {
+                  setSelectedNoteId(id);
+                  setView('notes');
+                }}
+              />
+            </div>
           )}
         </div>
       </div>
