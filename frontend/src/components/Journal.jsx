@@ -377,13 +377,14 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
 
   const submitEntry = async (content, indent) => {
     if (journalLocked) return;
-    if (!content.trim() || !currentSessionId) return;
+    const targetSessionId = activeSessionId || currentSessionId;
+    if (!content.trim() || !targetSessionId) return;
     try {
       const res = await api.post('/journal', {
         content,
         indent_level: indent,
         folder_id: resolvedFolderId,
-        session_id: currentSessionId,
+        session_id: targetSessionId,
         after_id: insertAfterId,
       });
       if (insertAfterId) {
@@ -577,8 +578,8 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
     () => groups.find((g) => g.session.id === activeSessionId) || null,
     [groups, activeSessionId],
   );
-  const isViewingLatest = !!activeSessionId && activeSessionId === currentSessionId;
   const useSessionMenu = isMobile || sessions.length > SESSION_CHIP_CAP;
+  const canCompose = !!activeSessionId && !!resolvedFolderId;
   const insertAfterEntry = insertAfterId ? entries.find(e => e.id === insertAfterId) : null;
 
   const sessionChipStyle = (active) => ({
@@ -1350,35 +1351,9 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
         <div ref={bottomRef} />
       </div>
 
-      {/* Input — only when viewing the latest session */}
+      {/* Input — any selected session (past sessions stay editable) */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: isMobile ? '10px 16px' : '12px 24px', flexShrink: 0, background: 'rgba(0,0,0,0.2)' }}>
-        {activeGroup && !isViewingLatest && (
-          <div style={{ fontFamily: 'var(--ch-font-body)', fontSize: 14, color: 'var(--ch-text-primary-45)', lineHeight: 1.5 }}>
-            Viewing Session {activeGroup.sessionNum}. Switch to the current session to log new entries, or use Continue / Recap above.
-            {currentSessionId && (
-              <button
-                type="button"
-                onClick={() => selectSession(currentSessionId)}
-                style={{
-                  display: 'inline',
-                  marginLeft: 8,
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--ch-font-display)',
-                  fontSize: 9,
-                  letterSpacing: '0.1em',
-                  color: 'var(--ch-accent)',
-                  textDecoration: 'underline',
-                  padding: 0,
-                }}
-              >
-                Go to current
-              </button>
-            )}
-          </div>
-        )}
-        {isViewingLatest && insertAfterId && (
+        {canCompose && insertAfterId && (
           <div style={{ marginBottom: '6px', fontFamily: 'var(--ch-font-display)', fontSize: '9px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>↳ INSERTING AFTER: <em style={{ fontFamily: 'var(--ch-font-body)', fontSize: '12px', letterSpacing: 0, color: 'var(--ch-text-primary-50)' }}>{insertAfterEntry?.content?.slice(0, 50)}{insertAfterEntry?.content?.length > 50 ? '…' : ''}</em></span>
             <button onClick={() => setInsertAfterId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(224,112,112,0.5)', fontSize: '12px', padding: 0 }}>✕</button>
@@ -1407,7 +1382,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             </button>
           </div>
         )}
-        {isViewingLatest && isMobile && resolvedFolderId && currentSessionId && (
+        {canCompose && isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <button
               type="button"
@@ -1428,7 +1403,7 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
             >▶</button>
           </div>
         )}
-        {isViewingLatest && (
+        {canCompose && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {!isMobile && (
               <span style={{ fontFamily: 'var(--ch-font-display)', fontSize: '10px', letterSpacing: '0.1em', color: 'rgba(200,148,58,0.5)', flexShrink: 0, width: '42px', textAlign: 'right' }}>
@@ -1448,21 +1423,27 @@ export default function Journal({ notes, selectedNoteId, currentUser, dmCampaign
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={!resolvedFolderId ? 'Select a campaign above first...' : !currentSessionId ? 'Start a session first...' : insertAfterId ? 'Insert entry here...' : indentLevel === 0 ? 'Log an entry...' : 'Sub-note...'}
-              disabled={!resolvedFolderId || !currentSessionId || journalLocked}
+              placeholder={
+                insertAfterId
+                  ? 'Insert entry here...'
+                  : activeGroup && activeSessionId !== currentSessionId
+                    ? `Add to Session ${activeGroup.sessionNum}…`
+                    : indentLevel === 0 ? 'Log an entry...' : 'Sub-note...'
+              }
+              disabled={journalLocked}
               autoFocus
             />
             {isMobile && inputValue.trim() && (
               <button
                 type="button"
                 onClick={() => submitEntry(inputValue, indentLevel)}
-                disabled={journalLocked || !resolvedFolderId || !currentSessionId}
+                disabled={journalLocked}
                 style={{
                   background: 'rgba(200,148,58,0.15)',
                   border: '1px solid rgba(200,148,58,0.4)',
                   borderRadius: '4px',
-                  cursor: journalLocked || !currentSessionId ? 'not-allowed' : 'pointer',
-                  color: journalLocked || !currentSessionId ? 'rgba(200,148,58,0.25)' : '#c8943a',
+                  cursor: journalLocked ? 'not-allowed' : 'pointer',
+                  color: journalLocked ? 'rgba(200,148,58,0.25)' : '#c8943a',
                   fontSize: '18px',
                   minWidth: '44px',
                   minHeight: '44px',
