@@ -11,9 +11,12 @@ All notable changes to The Chronicler (notesapp). Newest first.
 - Recap edit 500: ensure `recaps.updated_at` exists (migration 050 used illegal `DEFAULT CURRENT_TIMESTAMP` on `ADD COLUMN`, failed silently, and was still marked done)
 - Boot crash from follow-up migration that repeated the same illegal default
 
+### Fixed
+- Journal: older sessions stay editable — compose/insert/edit work on any selected session, not only the latest
+
 ### Added
 - Main tabs keep-alive (Notes / Web / Journal / Timeline stay mounted); last tab restored from localStorage
-- Journal session tab bar (chips or hamburger when many / on mobile); one session at a time; compose only on the current session
+- Journal session tab bar (chips or hamburger when many / on mobile); one session at a time
 - Per-note `hide_from_graph` toolbar toggle (GRAPH / NO GRAPH): stays in tree and search, excluded from knowledge graph nodes and edges
 - Delete session recap (DELETE `/api/recaps/:id`) for campaign DM or admin; refunds one generation toward the author; Delete button in RecapViewer
 
