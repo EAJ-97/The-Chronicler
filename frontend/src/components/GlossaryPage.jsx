@@ -273,26 +273,46 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
           <div style={{ ...S.h1, fontSize: 11 }}>SUGGESTIONS</div>
           {suggestions.map((e) => (
             <div key={e.id} style={S.card}>
-              <strong style={{ color: 'rgba(226,213,187,0.9)' }}>{e.name}</strong>
-              <span style={{ marginLeft: 8, color: 'rgba(200,148,58,0.6)', fontSize: 12 }}>{e.type}</span>
-              <div style={{ fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.65)', marginTop: 4 }}>{e.description}</div>
-              {data.can_review_suggestions && (
-                <div style={{ ...S.row, marginTop: 8, marginBottom: 0 }}>
-                  <button type="button" style={S.btn} disabled={busy} onClick={async () => { setBusy(true); try { await api.post(`/glossary/entries/${e.id}/accept`); await load(); } finally { setBusy(false); } }}>Accept</button>
-                  <button type="button" style={S.btnGhost} disabled={busy} onClick={() => setEditId(e.id)}>Edit</button>
-                  <button type="button" style={S.btnGhost} disabled={busy} onClick={async () => { setBusy(true); try { await api.post(`/glossary/entries/${e.id}/dismiss`); await load(); } finally { setBusy(false); } }}>Dismiss</button>
-                </div>
-              )}
-              {editId === e.id && (
-                <div style={{ marginTop: 8 }}>
-                  <textarea style={{ ...S.input, width: '100%', minHeight: 60 }} value={e.description} onChange={(ev) => {
-                    setData((d) => ({
-                      ...d,
-                      entries: d.entries.map((x) => x.id === e.id ? { ...x, description: ev.target.value } : x),
-                    }));
+              {editId === e.id && data.can_edit ? (
+                <>
+                  <input style={{ ...S.input, width: '100%', marginBottom: 6 }} value={e.name} onChange={(ev) => {
+                    setData((d) => ({ ...d, entries: d.entries.map((x) => x.id === e.id ? { ...x, name: ev.target.value } : x) }));
                   }} />
-                  <button type="button" style={{ ...S.btn, marginTop: 6 }} disabled={busy} onClick={() => saveEdit({ ...e, status: 'approved' })}>Save & approve</button>
-                </div>
+                  <select style={{ ...S.input, marginBottom: 6 }} value={e.type} onChange={(ev) => {
+                    setData((d) => ({ ...d, entries: d.entries.map((x) => x.id === e.id ? { ...x, type: ev.target.value } : x) }));
+                  }}>
+                    {TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
+                  </select>
+                  <textarea style={{ ...S.input, width: '100%', minHeight: 50, marginBottom: 6 }} value={e.description} onChange={(ev) => {
+                    setData((d) => ({ ...d, entries: d.entries.map((x) => x.id === e.id ? { ...x, description: ev.target.value } : x) }));
+                  }} />
+                  <input style={{ ...S.input, width: '100%', marginBottom: 6 }} placeholder="Aliases comma-separated" value={(e.aliases || []).map((a) => a.alias || a).join(', ')} onChange={(ev) => {
+                    const aliases = ev.target.value.split(',').map((s) => s.trim()).filter(Boolean).map((alias) => ({ alias }));
+                    setData((d) => ({ ...d, entries: d.entries.map((x) => x.id === e.id ? { ...x, aliases } : x) }));
+                  }} />
+                  <button type="button" style={S.btn} disabled={busy} onClick={() => saveEdit({ ...e, status: 'approved' })}>Save & approve</button>
+                  <button type="button" style={{ ...S.btnGhost, marginLeft: 8 }} onClick={() => { setEditId(null); load(); }}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <strong style={{ color: 'rgba(226,213,187,0.9)' }}>{e.name}</strong>
+                  <span style={{ marginLeft: 8, color: 'rgba(200,148,58,0.6)', fontSize: 12 }}>{e.type}</span>
+                  {(e.aliases || []).length > 0 && (
+                    <span style={{ marginLeft: 8, fontSize: 12, color: 'rgba(139,196,226,0.55)' }}>
+                      also: {(e.aliases || []).map((a) => a.alias || a).join(', ')}
+                    </span>
+                  )}
+                  <div style={{ fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.65)', marginTop: 4 }}>{e.description}</div>
+                  {data.can_review_suggestions && (
+                    <div style={{ ...S.row, marginTop: 8, marginBottom: 0 }}>
+                      <button type="button" style={S.btn} disabled={busy} onClick={async () => { setBusy(true); try { await api.post(`/glossary/entries/${e.id}/accept`); await load(); } finally { setBusy(false); } }}>Accept</button>
+                      {data.can_edit && (
+                        <button type="button" style={S.btn} disabled={busy} onClick={() => setEditId(e.id)}>Edit</button>
+                      )}
+                      <button type="button" style={S.btnGhost} disabled={busy} onClick={async () => { setBusy(true); try { await api.post(`/glossary/entries/${e.id}/dismiss`); await load(); } finally { setBusy(false); } }}>Dismiss</button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -347,7 +367,7 @@ export default function GlossaryPage({ scopeNoteId, notes, currentUser, onRefres
                     <div style={{ fontFamily: 'Crimson Pro, serif', color: 'rgba(226,213,187,0.7)', marginTop: 4 }}>{e.description}</div>
                     {data.can_edit && (
                       <div style={{ ...S.row, marginTop: 8, marginBottom: 0 }}>
-                        <button type="button" style={S.btnGhost} onClick={() => setEditId(e.id)}>Edit</button>
+                        <button type="button" style={S.btn} onClick={() => setEditId(e.id)}>Edit</button>
                         <button type="button" style={S.btnGhost} disabled={busy} onClick={async () => {
                           if (!window.confirm(`Delete ${e.name}?`)) return;
                           setBusy(true);

@@ -5,6 +5,9 @@ All notable changes to The Chronicler (notesapp). Newest first.
 ## Unreleased
 
 ### Fixed
+- Native `<select>` open lists: dark `color-scheme` + option backgrounds so pale theme text stays readable
+- Recap reader on mobile: full-width text, version menu when multiple exist, Read/Edit toggle, top-right X to close
+- Glossary: Edit is prominent on approved entries; suggestion Edit (editors) includes name/type/description/aliases
 - Recap edit 500: ensure `recaps.updated_at` exists (migration 050 used illegal `DEFAULT CURRENT_TIMESTAMP` on `ADD COLUMN`, failed silently, and was still marked done)
 - Boot crash from follow-up migration that repeated the same illegal default
 
