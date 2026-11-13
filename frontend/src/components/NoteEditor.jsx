@@ -310,6 +310,7 @@ export default function NoteEditor({
   const [cascadeChildren, setCascadeChildren] = useState(false);
   // DM Only flag
   const [isDmOnly, setIsDmOnly] = useState(!!note?.is_dm_only);
+  const [hideFromGraph, setHideFromGraph] = useState(!!note?.hide_from_graph);
   /** Optional emoji + short blurb for sidebar tree (saved to display_icon / display_summary) */
   const [displayIcon, setDisplayIcon] = useState(note?.display_icon || '');
   const [displaySummary, setDisplaySummary] = useState(note?.display_summary || '');
@@ -863,6 +864,7 @@ export default function NoteEditor({
     setGrantedUsers(note?.granted_users || []);
     setTags(note?.tags || []);
     setIsDmOnly(!!note?.is_dm_only);
+    setHideFromGraph(!!note?.hide_from_graph);
     setDisplayIcon(note?.display_icon || '');
     setDisplaySummary(note?.display_summary || '');
     setSidebarIconUploadErr(null);
@@ -1500,6 +1502,19 @@ export default function NoteEditor({
       if (onSave) onSave();
     } catch (err) {
       setIsDmOnly(!next); // revert
+      console.error(err);
+    }
+  };
+
+  const handleHideFromGraphToggle = async () => {
+    if (!note?.id || note.is_folder || note.is_glossary || !canEdit) return;
+    const next = !hideFromGraph;
+    setHideFromGraph(next);
+    try {
+      await api.put(`/notes/${note.id}`, { hide_from_graph: next ? 1 : 0 });
+      if (onSave) onSave();
+    } catch (err) {
+      setHideFromGraph(!next);
       console.error(err);
     }
   };
@@ -2302,6 +2317,44 @@ export default function NoteEditor({
             <option value="node">● Node</option>
             <option value="detail">○ Detail</option>
           </select>}
+
+          {/* Hide from knowledge graph (stays in tree/search) */}
+          {!note?.is_folder && !note?.is_glossary && (
+            <button
+              type="button"
+              onClick={handleHideFromGraphToggle}
+              disabled={!canEdit}
+              title={hideFromGraph ? 'Show on graph' : 'Hide from graph'}
+              aria-pressed={hideFromGraph}
+              aria-label={hideFromGraph ? 'Show on graph' : 'Hide from graph'}
+              style={{
+                ...S.select,
+                maxWidth: 'none',
+                padding: '4px 8px',
+                cursor: canEdit ? 'pointer' : 'not-allowed',
+                opacity: canEdit ? 1 : 0.45,
+                borderColor: hideFromGraph ? 'rgba(224,112,112,0.45)' : 'rgba(226,213,187,0.15)',
+                color: hideFromGraph ? 'rgba(224,112,112,0.9)' : 'rgba(226,213,187,0.55)',
+                background: hideFromGraph ? 'rgba(224,112,112,0.08)' : 'transparent',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                lineHeight: 1,
+              }}
+            >
+              <span style={{ fontSize: 14, lineHeight: 1 }} aria-hidden="true">
+                {hideFromGraph ? '◌' : '◉'}
+              </span>
+              <span style={{
+                fontFamily: 'var(--ch-font-display)',
+                fontSize: 8,
+                letterSpacing: '0.1em',
+              }}
+              >
+                {hideFromGraph ? 'NO GRAPH' : 'GRAPH'}
+              </span>
+            </button>
+          )}
 
           {noteIconMenuOpen && !note?.is_folder && canEdit && createPortal(
                 <div

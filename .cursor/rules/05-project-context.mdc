@@ -46,7 +46,7 @@ alwaysApply: true
 ## Gotchas
 - Default first-boot login is `admin` / `admin` — change immediately.
 - Organizer subfolders: overview always editable; preview cards list descendant notes (excluding world/campaign roots).
-- Graph connections: PUT `/connections/:id` uses same visibility as POST; arrow direction is visual only for path highlight.
+- Graph connections: PUT `/connections/:id` uses same visibility as POST; arrow direction is visual only for path highlight. Notes with `hide_from_graph` stay in the tree/search but are dropped from graph nodes (and their edges).
 - AI session recaps: Summary is single-step (`RECAP_MODEL`). Chronicle is extract → write → verify (`RECAP_EXTRACT_MODEL` / `RECAP_WRITE_MODEL` / `RECAP_VERIFY_MODEL`); write may invent atmosphere but not plot; verify report stored on the row and returned only when `RECAP_DEBUG=1`. Payload blocks remain `<session>` / `<party>` / `<glossary>` / `<journal>`. Stored markdown: app H1 + optional session line + model `##` subtitle + body. Editable by author/DM/admin without quota; deletable by DM/admin (refunds one usage). After `.env` model changes: `docker compose up -d --force-recreate chronicler`.
 - Glossary exists only on World roots or standalone Campaigns (`is_glossary` stub note). Campaigns under a World use the World glossary. Search/mentions/AI corpus exclude glossary stubs.
 - Do not commit one-off `RELEASE_NOTES*.md` / `release-*-notes.txt`; put release text in chat or GitHub Releases UI.

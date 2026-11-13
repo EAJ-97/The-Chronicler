@@ -99,6 +99,7 @@ db.exec(`
     is_world           INTEGER  DEFAULT 0,
     is_campaign        INTEGER  DEFAULT 0,
     is_glossary        INTEGER  DEFAULT 0,
+    hide_from_graph    INTEGER  DEFAULT 0,
     played_by          INTEGER  DEFAULT NULL,
     source_note_id     INTEGER  DEFAULT NULL,
     display_icon       TEXT     DEFAULT NULL,
@@ -875,6 +876,15 @@ migrate('053_recaps_ensure_updated_at', () => {
     db.exec('ALTER TABLE recaps ADD COLUMN updated_at DATETIME');
   }
   db.exec(`UPDATE recaps SET updated_at = COALESCE(updated_at, created_at) WHERE updated_at IS NULL`);
+});
+
+// Per-note opt-out from knowledge graph (still in tree/search)
+migrate('054_notes_hide_from_graph', () => {
+  const cols = db.prepare('PRAGMA table_info(notes)').all().map((c) => c.name);
+  if (!cols.includes('hide_from_graph')) {
+    db.exec('ALTER TABLE notes ADD COLUMN hide_from_graph INTEGER DEFAULT 0');
+  }
+  db.exec('UPDATE notes SET hide_from_graph = 0 WHERE hide_from_graph IS NULL');
 });
 
 // ─── Default admin account (created once on first boot) ───────────────────────
