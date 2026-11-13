@@ -107,8 +107,12 @@ export function buildRecapReaderCss(theme) {
     font-size: 1.125rem;
     line-height: 1.7;
     max-width: 70ch;
+    width: 100%;
     margin: 0 auto;
-    padding: 8px 4px 48px;
+    padding: 8px 0 48px;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .md-recap-reader h1 {
     font-family: ${display};
@@ -118,6 +122,15 @@ export function buildRecapReaderCss(theme) {
     line-height: 1.25;
     margin: 0 0 0.75rem;
     font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 520px) {
+    .md-recap-reader {
+      font-size: 1.05rem;
+      line-height: 1.65;
+    }
+    .md-recap-reader h1 { font-size: 1.35rem; }
+    .md-recap-reader h2 { font-size: 1.1rem; }
   }
   .md-recap-reader h2 {
     font-family: ${display};

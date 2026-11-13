@@ -79,6 +79,7 @@
         --ch-panel-overlay: rgba(7,8,14,0.92);
       }
       html {
+        color-scheme: dark;
         overscroll-behavior: none;
       }
       body {
@@ -89,6 +90,11 @@
         text-rendering: optimizeLegibility;
         overflow: hidden;
         overscroll-behavior: none;
+      }
+      /* Native <select> open lists: dark backdrop so pale theme text stays readable */
+      select, option, optgroup {
+        background-color: var(--ch-card-bg, #0f1219);
+        color: var(--ch-text-primary, #e2d5bb);
       }
       ::-webkit-scrollbar { width: 6px; }
       ::-webkit-scrollbar-track { background: var(--ch-scroll-track, #0d0f18); }

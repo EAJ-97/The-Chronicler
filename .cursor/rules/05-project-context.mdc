@@ -29,8 +29,8 @@ alwaysApply: true
 - `backend/utils/recapPromptBuild.js`: session payload blocks; summary prompts; title assemble / `##` subtitle parse
 - `backend/utils/chroniclePipeline.js`: chronicle extract → write → verify (+ one revision)
 - `backend/prompts/style_example.md`: chronicle voice sample injected as `<style_example>`
-- `frontend/src/components/RecapViewer.jsx`: full-page markdown recap reader (generate / edit; verify report when `RECAP_DEBUG`)
-- `frontend/src/components/GlossaryPage.jsx` / `GlossaryMergeModal.jsx`: glossary UI + campaign→world merge review
+- `frontend/src/components/RecapViewer.jsx`: full-page recap reader (version menu if >1; Read/Edit + X; generate/delete; verify report when `RECAP_DEBUG`)
+- `frontend/src/components/GlossaryPage.jsx` / `GlossaryMergeModal.jsx`: glossary UI (DM/admin edit name/type/description/aliases) + campaign→world merge review
 - `backend/routes/admin.js` / `backup.js` / `snapshots.js`: admin, backup, vault
 - `backend/routes/images.js` / `aiTools.js` / `ddb.js` / `timeline.js` / `integrity.js`: media, AI, D&D Beyond, timeline
 - `backend/utils/access.js`: folder/note permissions helpers
